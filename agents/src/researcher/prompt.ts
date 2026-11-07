@@ -62,7 +62,7 @@ export function researchTask(input: TaskInput): string {
     `4. bash: node TOOL discover ${input.url}. Then node TOOL wait until "BR_JOB_DONE discover ok".`,
     '5. Choose at most 15 pages in total from the discover summary, as the skill says, and run them in one command: node TOOL capture <site address> <page addresses...>. Then node TOOL wait until "BR_JOB_DONE capture ok". The summary lists the text files, the brand measurements, the files to publish and the template.',
     '6. Read every text file the capture summary lists, with the read tool.',
-    `7. publish_file every file in the summary's publish list, with folder "boiler-room/${input.host}".`,
+    `7. publish_file every file in the summary's publish list, with folder "Boiler Room ${input.host}".`,
     `8. bash: cp ${out}/result.template.json ${out}/result.json. Then edit ${out}/result.json: put each fil_ id where its PUBLISH: placeholder is, write the claims, fill in the brief and needs_upload, and replace every TODO.`,
     `9. bash: node TOOL verify ${out}/result.json. Fix every problem it lists and run it again until it prints VERIFY OK.`,
     `10. Call submit_output with exactly the contents of ${out}/result.json.`,

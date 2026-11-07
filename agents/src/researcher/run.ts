@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { basename, extname, join } from 'node:path';
 import { sniff } from '../capture/logo.ts';
 import type { AgentDefinition } from '../define.ts';
@@ -27,6 +35,10 @@ export interface ResearchOptions {
   definition?: AgentDefinition;
 }
 
+/** Stop reasons after which the agent can simply be asked to carry on. */
+const RESUMABLE = new Set(['end_turn', 'max_iterations', 'awaiting_input']);
+const MAX_CONTINUES = 8;
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const time = () => new Date().toISOString().slice(11, 19);
 
@@ -44,6 +56,8 @@ const oneLine = (text: unknown, max: number) => {
 export class EventTracker {
   readonly published = new Map<string, string>();
   readonly digests = new Set<string>();
+  /** Accepted submit_output calls, so a new submission can be told from the session's last one. */
+  submissions = 0;
   private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
 
   handle(event: { type: string; data: Record<string, unknown> }): void {
@@ -55,6 +69,7 @@ export class EventTracker {
       });
     }
     if (event.type !== 'tool.completed' || data.is_error) return;
+    if (data.name === 'submit_output') this.submissions += 1;
     const output =
       typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
     for (const match of output.matchAll(/BR_CAPTURE_DONE sha256=([0-9a-f]{64})/g))
@@ -112,7 +127,7 @@ async function ensureToolFile(client: Naive, tool: ToolBundle): Promise<string> 
   form.append('file', new Blob([tool.code], { type: 'text/javascript' }), tool.name);
   form.append('title', title);
   form.append('tags', 'boiler-room,capture-tool');
-  form.append('folder', 'boiler-room/tools');
+  form.append('folder', 'Boiler Room tools');
   const uploaded = await client.files.upload(form);
   return uploaded.id;
 }
@@ -152,7 +167,7 @@ async function uploadMaterial(
         url: input,
         title: `${host} material ${prefix}`,
         tags: ['boiler-room', 'customer-material'],
-        folder: `boiler-room/${host}`,
+        folder: `Boiler Room ${host}`,
       });
       refs.push({
         file_id: file.id,
@@ -168,7 +183,7 @@ async function uploadMaterial(
       form.append('file', new Blob([readFileSync(input)], { type }), name);
       form.append('title', `${host} material ${prefix}`);
       form.append('tags', 'boiler-room,customer-material');
-      form.append('folder', `boiler-room/${host}`);
+      form.append('folder', `Boiler Room ${host}`);
       const file = await client.files.upload(form);
       refs.push({
         file_id: file.id,
@@ -191,7 +206,7 @@ async function uploadMaterial(
     'materials.json',
   );
   form.append('tags', 'boiler-room,customer-material');
-  form.append('folder', `boiler-room/${host}`);
+  form.append('folder', `Boiler Room ${host}`);
   const file = await client.files.upload(form);
   return { refs, manifestId: file.id };
 }
@@ -346,6 +361,12 @@ export async function research(options: ResearchOptions): Promise<number> {
   const host = siteHost(options.url);
   const outDir = join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
+  // Files an earlier run of this host left behind would read as this run's results.
+  for (const name of readdirSync(outDir)) {
+    if (/^(research|failures|report|pages)\.json$|^submission-\d+\.json$|^files$/.test(name)) {
+      rmSync(join(outDir, name), { recursive: true, force: true });
+    }
+  }
   const eventsPath = join(outDir, 'events.jsonl');
   writeFileSync(eventsPath, '');
   const startedAt = new Date().toISOString();
@@ -448,44 +469,70 @@ export async function research(options: ResearchOptions): Promise<number> {
     const deadline = Date.now() + definition.session.max_minutes * 60_000;
     let afterSeq = 0;
     let continues = 0;
+    let gated = 0;
     let round = 0;
     const rounds: unknown[] = [];
     let accepted: ResearchOutput | undefined;
     let verdict: GateVerdict | undefined;
 
-    for (;;) {
-      const timer = setTimeout(
-        () => {
-          say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
-          client.sessions.interrupt(session.id).catch(() => {});
-        },
-        Math.max(1000, deadline - Date.now()),
-      );
-      try {
-        for await (const event of client.stream(session.id, { afterSeq })) {
-          afterSeq = event.seq;
-          const record = event as unknown as { type: string; data: Record<string, unknown> };
-          tracker.handle(record);
-          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-            appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
-          const line = describe(record);
-          if (line) say(line);
+    // Streams until the session has stopped working. One stream ends at each idle, and a session
+    // can go straight on into another turn: a wrap-up after the iteration limit, or a message that
+    // was queued while it ran.
+    const settle = async () => {
+      for (;;) {
+        const timer = setTimeout(
+          () => {
+            say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
+            client.sessions.interrupt(session.id).catch(() => {});
+          },
+          Math.max(1000, deadline - Date.now()),
+        );
+        try {
+          for await (const event of client.stream(session.id, { afterSeq })) {
+            afterSeq = event.seq;
+            const record = event as unknown as { type: string; data: Record<string, unknown> };
+            tracker.handle(record);
+            if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+              appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
+            const line = describe(record);
+            if (line) say(line);
+          }
+        } finally {
+          clearTimeout(timer);
         }
-      } finally {
-        clearTimeout(timer);
+        const state = await client.sessions.get(session.id);
+        const working = state.status === 'running' || state.status === 'queued';
+        if (!working || Date.now() > deadline) return state;
+        await sleep(1000);
       }
-      const state = await client.sessions.get(session.id);
-      if (state.stop_reason === 'max_iterations' && continues < 3 && Date.now() < deadline) {
-        continues += 1;
-        const sent = await client.sessions.send(session.id, { message: CONTINUE_MESSAGE });
-        afterSeq = sent.accepted_seq;
-        continue;
-      }
-      if (!state.structured_output) {
-        say(`the session ended (${state.status}/${state.stop_reason}) without a result`);
+    };
+
+    for (;;) {
+      const state = await settle();
+      // A turn can end on the iteration limit right after submitting, and a session keeps its last
+      // result, so only a submit_output seen since the last gate counts as a new submission.
+      const fresh = tracker.submissions > gated && Boolean(state.structured_output);
+      if (!fresh) {
+        // A turn that hits the iteration limit gets a wrap-up and ends as end_turn, with the work
+        // unfinished. Nudge it on; stop only on a reason a nudge cannot fix.
+        const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
+        if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
+          continues += 1;
+          say(
+            `no result submitted yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`,
+          );
+          const sent = await client.sessions.send(session.id, {
+            message: CONTINUE_MESSAGE,
+            queue: true,
+          });
+          afterSeq = sent.accepted_seq;
+          continue;
+        }
+        say(`the session stopped (${state.status}/${state.stop_reason}) without a new result`);
         report.stop_reason = state.stop_reason;
         break;
       }
+      gated = tracker.submissions;
       round += 1;
       verdict = await gate(
         client,
@@ -513,6 +560,7 @@ export async function research(options: ResearchOptions): Promise<number> {
       if (round > options.maxRepairs || Date.now() > deadline) break;
       const sent = await client.sessions.send(session.id, {
         message: repairMessage(verdict.failures, host, round, options.maxRepairs),
+        queue: true,
       });
       afterSeq = sent.accepted_seq;
     }

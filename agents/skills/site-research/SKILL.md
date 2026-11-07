@@ -101,7 +101,7 @@ the site uses, the foreground must keep 4.5:1 contrast on the background and the
 
 ## Assets and evidence
 
-Publish every file the capture summary lists with `publish_file` (folder `boiler-room/<host>`)
+Publish every file the capture summary lists with `publish_file` (folder `Boiler Room <host>`)
 and replace each `PUBLISH:` placeholder with the `fil_` id it returns. Asset `src` values look like
 `naive://files/fil_abc123`. Keep the asset ids the template uses. Customer material already has a
 file id: an image from it is an asset with provenance `uploaded`, and claims from its text cite its
