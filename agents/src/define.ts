@@ -29,6 +29,12 @@ export function toolset(allowed: readonly string[], denied: readonly string[] = 
   return { default_config: { permission: 'deny' }, configs };
 }
 
+/** An external MCP server an agent connects to. Its credential lives in the Naive vault, never here. */
+export interface McpServer {
+  name: string;
+  url: string;
+}
+
 /** A skill kept in this repo as `agents/skills/<slug>/SKILL.md` and pushed by `agents:sync`. */
 export interface SkillDefinition {
   slug: string;
@@ -53,6 +59,15 @@ export interface AgentDefinition {
   output_schema: Record<string, unknown> | null;
   structured_output_required: boolean;
   handoffs: false;
+  /**
+   * Makes this agent a coordinator whose roster is these agents, by name. Sync creates the members
+   * first and pins each one at its current version, so a member's new version re-versions the
+   * coordinator too. A team is one level deep, so no member may have a roster of its own.
+   */
+  roster?: readonly string[];
+  /** Gives the coordinator a board that every rostered agent is seated on. */
+  board?: boolean;
+  mcp_servers?: readonly McpServer[];
   session: {
     /** Spend cap for one session, in micro-USD. */
     budget_micro_usd: number;

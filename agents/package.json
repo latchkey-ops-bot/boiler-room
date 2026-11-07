@@ -10,7 +10,10 @@
     "sync": "node src/cli/sync.ts",
     "research": "node src/cli/research.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "company:sync": "node src/cli/company-sync.ts",
+    "company:status": "node src/cli/company-status.ts",
+    "company:verify": "node src/cli/company-verify.ts"
   },
   "dependencies": {
     "@boiler-room/schema": "workspace:*",

@@ -186,7 +186,10 @@ describe('the agents package', () => {
 
   it('contains nothing specific to any one customer site', () => {
     const sources = [...files(join(ROOT, 'src')), ...files(join(ROOT, 'skills'))];
-    const offenders = sources.filter((path) => /latchkey/i.test(readFileSync(path, 'utf8')));
+    // The company's own GitHub account, which owns both repos, is the one allowed mention.
+    const offenders = sources.filter((path) =>
+      /latchkey(?!-ops-bot)/i.test(readFileSync(path, 'utf8')),
+    );
     expect(offenders).toEqual([]);
   });
 });

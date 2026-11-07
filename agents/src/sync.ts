@@ -25,16 +25,39 @@ export function canonicalJson(value: unknown): string {
 
 export const HASH_KEY = 'definition_sha256';
 
+/** An agent as Naive has it: its id and the version a roster pins. */
+export interface AgentRef {
+  id: string;
+  version: number;
+}
+
+/** The `multiagent` config for a coordinator, with each member pinned at its current version. */
+export function rosterConfig(
+  definition: AgentDefinition,
+  members: ReadonlyMap<string, AgentRef>,
+): AgentCreate['multiagent'] {
+  if (!definition.roster) return undefined;
+  const agents = definition.roster.map((name) => {
+    const member = members.get(name);
+    if (!member)
+      throw new Error(`${definition.name} names ${name} on its roster, but it is not synced.`);
+    return { type: 'agent' as const, id: member.id, version: member.version };
+  });
+  return { type: 'coordinator', agents, board: definition.board ?? false };
+}
+
 /** The agent config Naive stores for a definition, with its skills pinned to exact versions. */
 export function agentConfig(
   definition: AgentDefinition,
   skillVersions: ReadonlyMap<string, number>,
+  members: ReadonlyMap<string, AgentRef> = new Map(),
 ): AgentCreate {
   const skills = definition.skills.map((skill) => {
     const version = skillVersions.get(skill.slug);
     if (version === undefined) throw new Error(`Skill ${skill.slug} has not been pushed.`);
     return `${skill.slug}@${version}`;
   });
+  const multiagent = rosterConfig(definition, members);
   const config: AgentCreate = {
     name: definition.name,
     description: definition.description,
@@ -48,6 +71,8 @@ export function agentConfig(
     output_schema: definition.output_schema,
     structured_output_required: definition.structured_output_required,
     handoffs: definition.handoffs,
+    ...(multiagent ? { multiagent } : {}),
+    ...(definition.mcp_servers ? { mcp_servers: [...definition.mcp_servers] } : {}),
   };
   const hash = createHash('sha256').update(canonicalJson(config)).digest('hex');
   return { ...config, metadata: { [HASH_KEY]: hash, source: 'boiler-room/agents' } };
@@ -81,7 +106,8 @@ export async function syncSkills(
 /**
  * Makes Naive match the definitions, by name. A missing agent is created; one whose stored
  * definition hash differs gets a new version; one that matches is left alone. Two agents with one
- * name is an error to resolve by hand, never a guess.
+ * name is an error to resolve by hand, never a guess. Agents with a roster are synced after every
+ * other agent, so their members exist and are pinned at the version this run left them on.
  */
 export async function syncAgents(
   client: Naive,
@@ -89,19 +115,30 @@ export async function syncAgents(
 ): Promise<SyncResult[]> {
   const skillVersions = await syncSkills(client, definitions);
   const existing = await listAll((query) => client.agents.list(query));
+  const ordered = [
+    ...definitions.filter((definition) => !definition.roster),
+    ...definitions.filter((definition) => definition.roster),
+  ];
+  const members = new Map<string, AgentRef>();
+  for (const agent of existing)
+    members.set(agent.name, { id: agent.id, version: agent.current_version });
   const results: SyncResult[] = [];
-  for (const definition of definitions) {
-    const config = agentConfig(definition, skillVersions);
+  const record = (result: SyncResult) => {
+    results.push(result);
+    members.set(result.name, { id: result.id, version: result.version });
+  };
+  for (const definition of ordered) {
     const matches = existing.filter((agent) => agent.name === definition.name);
     if (matches.length > 1) {
       throw new Error(
         `${matches.length} agents are named "${definition.name}" (${matches.map((agent) => agent.id).join(', ')}). Delete the extras, then sync again.`,
       );
     }
+    const config = agentConfig(definition, skillVersions, members);
     const current = matches[0];
     if (!current) {
       const created = await client.agents.create(config);
-      results.push({
+      record({
         name: definition.name,
         id: created.id,
         version: created.current_version,
@@ -110,7 +147,7 @@ export async function syncAgents(
       continue;
     }
     if (current.metadata?.[HASH_KEY] === config.metadata?.[HASH_KEY]) {
-      results.push({
+      record({
         name: definition.name,
         id: current.id,
         version: current.current_version,
@@ -123,12 +160,17 @@ export async function syncAgents(
       ...patch,
       expected_version: current.current_version,
     });
-    results.push({
+    record({
       name: definition.name,
       id: updated.id,
       version: updated.current_version,
       action: 'updated',
     });
   }
-  return results;
+  // Results in the order the definitions were given, whatever order they were synced in.
+  return definitions.map((definition) => {
+    const result = results.find((item) => item.name === definition.name);
+    if (!result) throw new Error(`${definition.name} was not synced.`);
+    return result;
+  });
 }
