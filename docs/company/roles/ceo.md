@@ -52,6 +52,10 @@ No identity, no vault credentials, no external MCP servers.
    ```
 
    Then assign it to `br-product`.
+
+   The founder changes the priority list by editing it in the provisioning script and re-saving
+   `br-ceo`. For a one-off change, the founder creates a `FOUNDER: priority <text>` card, and the
+   CEO reads it on the next sweep.
 4. Close the standing card. Its note is the report: what moved, what is blocked, decisions taken,
    open `FOUNDER:` cards, and spend against the caps once the metrics tool exists.
 
