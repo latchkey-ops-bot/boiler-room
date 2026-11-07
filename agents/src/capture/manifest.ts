@@ -19,6 +19,8 @@ export interface Shot {
   kind: 'page' | 'ui';
   label: string;
   mock: boolean;
+  /** Product UI candidates this shot shows. */
+  ui: { label: string; mock: boolean }[];
   width: number;
   height: number;
   sourceUrl: string;
@@ -89,9 +91,9 @@ export const placeholderFor = (relativePath: string) => `${PLACEHOLDER}${relativ
 function productUiStatus(
   manifest: CaptureManifest,
 ): ResearchOutput['brief']['product_ui']['status'] {
-  const shots = manifest.pages.flatMap((page) => page.shots.filter((shot) => shot.kind === 'ui'));
-  if (shots.some((shot) => !shot.mock)) return 'public';
-  if (shots.length > 0) return 'mock-only';
+  const seen = manifest.pages.flatMap((page) => page.shots.flatMap((shot) => shot.ui));
+  if (seen.some((ui) => !ui.mock)) return 'public';
+  if (seen.length > 0) return 'mock-only';
   return manifest.login_links.length > 0 ? 'login-required' : 'none';
 }
 
@@ -282,7 +284,7 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
         status,
         notes: TODO,
         asset_ids: manifest.pages.flatMap((page) =>
-          page.shots.filter((shot) => shot.kind === 'ui').map((shot) => shot.assetId),
+          page.shots.filter((shot) => shot.ui.length > 0).map((shot) => shot.assetId),
         ),
       },
     },

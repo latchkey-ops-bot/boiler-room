@@ -48,7 +48,7 @@ import {
 } from './pages.ts';
 import { htmlTitle, htmlToText } from './text-extract.ts';
 import { deriveColors } from './tokens.ts';
-import type { RawPage } from './types.ts';
+import type { RawPage, RawUiCandidate } from './types.ts';
 
 const VIEWPORT = { width: 1920, height: 1080 };
 const NAV_GAP_MS = 1500;
@@ -182,6 +182,10 @@ async function withTimeout<T>(work: Promise<T>, ms: number, what: string): Promi
   }
 }
 
+function describeUi(ui: RawUiCandidate): string {
+  return `${ui.kind}${ui.mock ? ' mockup' : ''}${ui.label ? `: ${ui.label}` : ''}`;
+}
+
 function emptyText(): StoredPage['text'] {
   return { rendered: '', dom: '', meta: '', clean: '', illustrative: '' };
 }
@@ -297,33 +301,54 @@ async function capturePage(
         await page.waitForTimeout(500);
         const file = join('shots', `${slug}.png`);
         await page.screenshot({ path: join(paths.out, file), type: 'png', timeout: 30_000 });
-        record.shots.push({
+        const top: Shot = {
           file,
           assetId: `${slug}-screen`,
           kind: 'page',
           label: `Top of ${record.final_url}`,
           mock: false,
+          ui: [],
           width: 1920,
           height: 1080,
           sourceUrl: record.final_url,
-        });
+        };
+        record.shots.push(top);
 
-        for (const [index, ui] of collected.ui.slice(0, options.uiShots).entries()) {
-          const y = Math.max(0, ui.top - Math.max(0, (VIEWPORT.height - ui.height) / 2));
-          await page.evaluate((top) => window.scrollTo(0, top), y);
+        // One 1920x1080 shot per product UI candidate, unless an earlier shot of this page already
+        // shows it; then that shot is marked as showing product UI instead of taking a duplicate.
+        const taken: { y: number; shot: Shot }[] = [{ y: 0, shot: top }];
+        let uiCount = 0;
+        for (const ui of collected.ui) {
+          if (uiCount >= options.uiShots) break;
+          const seen = { label: describeUi(ui), mock: ui.mock };
+          const covering = taken.find(
+            (item) =>
+              ui.top >= item.y && ui.top + Math.min(ui.height, 600) <= item.y + VIEWPORT.height,
+          );
+          if (covering) {
+            covering.shot.ui.push(seen);
+            continue;
+          }
+          const wanted = Math.max(0, ui.top - Math.max(0, (VIEWPORT.height - ui.height) / 2));
+          await page.evaluate((target) => window.scrollTo(0, target), wanted);
           await page.waitForTimeout(700);
-          const uiFile = join('shots', `${slug}-ui-${index + 1}.png`);
+          const y = await page.evaluate(() => window.scrollY);
+          uiCount += 1;
+          const uiFile = join('shots', `${slug}-ui-${uiCount}.png`);
           await page.screenshot({ path: join(paths.out, uiFile), type: 'png', timeout: 30_000 });
-          record.shots.push({
+          const shot: Shot = {
             file: uiFile,
-            assetId: `${slug}-ui-${index + 1}`,
+            assetId: `${slug}-ui-${uiCount}`,
             kind: 'ui',
-            label: `${ui.kind}${ui.mock ? ' mockup' : ''}${ui.label ? `: ${ui.label}` : ''}`,
+            label: seen.label,
             mock: ui.mock,
+            ui: [seen],
             width: 1920,
             height: 1080,
             sourceUrl: record.final_url,
-          });
+          };
+          record.shots.push(shot);
+          taken.push({ y, shot });
         }
       })(),
       PAGE_TIMEOUT_MS,
@@ -1009,12 +1034,12 @@ function captureSummary(manifest: CaptureManifest, paths: Paths, script: string)
     '',
     'Product UI:',
     ...manifest.pages.flatMap((page) =>
-      page.shots
-        .filter((shot) => shot.kind === 'ui')
-        .map(
-          (shot) =>
-            `  ${shot.assetId}: ${shot.label}${shot.mock ? ' (HTML mockup: figures are samples)' : ''} on ${page.final_url}`,
+      page.shots.flatMap((shot) =>
+        shot.ui.map(
+          (ui) =>
+            `  ${shot.assetId} shows ${ui.label}${ui.mock ? ' (HTML mockup: figures are samples)' : ''} on ${page.final_url}`,
         ),
+      ),
     ),
     `  probes: ${manifest.probes.map((probe) => `${probe.path} ${probe.found ? 'FOUND' : 'no'}`).join(', ')}`,
     `  login or app links: ${manifest.login_links.map((link) => link.url).join(', ') || 'none'}`,

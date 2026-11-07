@@ -61,10 +61,9 @@ const TEXT_RULES: [LinkKind, RegExp][] = [
   ['pricing', /^(pricing|plans|plans (&|and) pricing)$/i],
   ['docs', /^(docs|documentation|developers|api|guides)$/i],
   ['about', /^(about|about us|company|our story|team)$/i],
-  [
-    'demo',
-    /^(demo|tour|product tour|playground|sandbox|how it works|see it in action|watch demo)$/i,
-  ],
+  // A demo behind a sales form is a contact page; a demo anyone can open is public product UI.
+  ['contact', /\b(book|request|schedule|get|talk to|contact)\b.*\b(demo|call|meeting|sales)\b/i],
+  ['demo', /\b(demo|tour|playground|sandbox|how it works|see it in action)\b/i],
   ['product', /^(product|products|features|platform|solutions?)$/i],
   ['customers', /^(customers|case studies|stories)$/i],
   ['blog', /^(blog|news|changelog)$/i],
@@ -275,6 +274,8 @@ export function suggestPages(
         kind: classifyLink(probe.final_url ?? probe.url) === 'product' ? 'product' : 'demo',
       });
   }
+  // Links that open a public demo, such as "View live demo", show the product itself.
+  for (const link of usable.filter((item) => item.kind === 'demo').slice(0, 2)) take(link);
   for (const kind of KIND_ORDER) {
     const perKind = kind === 'product' || kind === 'demo' ? 4 : kind === 'other' ? 3 : 1;
     for (const link of usable
