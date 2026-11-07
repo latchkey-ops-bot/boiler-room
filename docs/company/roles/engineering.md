@@ -40,7 +40,8 @@ at a time per agent.
 | `bash`, `read`, `write`, `edit`, `ls`, `find` | allow | allow | Git, pnpm and tests run on the agent's own computer |
 | `board_read`, `board_write`, `submit_output`, `session_spend` | allow | allow | |
 | `publish_file` | allow | allow | For logs and screenshots too big for a card |
-| `apps`, with `config.allowed_apps: [<staging app id>]` | allow | off | Deploy, `db_migrate` and `db_query`, on staging only |
+| `apps`, with `config.allowed_apps: [<staging app id>]` | allow | off, with the same explicit `allowed_apps` | Deploy, `db_migrate` and `db_query`, on staging only |
+| Every app tool (`br-app.*`), including `send_email`, `leads_upsert` and `request_sample` | off, each one named | off, each one named | Base policy. Without it, every app's tools are offered. |
 | `browser`, `web_fetch`, `web_search` | off | off | Engineers read only the repos and their cards |
 | `generate_image`, `data_run`, social, email, connections | off | off | |
 | GitHub or Clerk MCP servers, the GitHub connection | none | none | Any external MCP call stops `bash` for the rest of the chat (verified) |
@@ -69,7 +70,9 @@ runs as the service role and bypasses row-level security, and deleting the app d
 5. Run `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck` and `pnpm test`. The `bash`
    tool times out at 30 s, so run anything long as `nohup bash step.sh > step.log 2>&1 &` and poll
    the log. Always put the long step in a script file. In the probe, a loop backgrounded inline
-   hung the tool call, while the script form returned at once.
+   hung the tool call, while the script form returned at once. Before each long step, read
+   `session_spend`. At $1.00 of the $1.50 ceiling, comment progress and move the card to `blocked`
+   with the note `budget`. A session that hits the ceiling leaves its card stuck in `doing`.
 6. Commit. End the message with `Board-Card: <crd_ id>` and `Naive-Session: <ses_ id>`.
 7. Push the branch over HTTPS. Open a PR into `dev` with `curl --netrc` against
    `POST /repos/latchkey-ops-bot/boiler-room/pulls`. The PR body links the card.

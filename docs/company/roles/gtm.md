@@ -8,7 +8,7 @@ has a $0 budget, gets no cards, and has no cron.
 
 | Agent | Purpose | Model | Started by, once active |
 | --- | --- | --- | --- |
-| `br-gtm-lead` | Plans each launch push, writes outreach, picks which leads get a sample film, and sends email through the app | `anthropic/claude-sonnet-5.5` | Board cards from the CEO: `GTM: <slug>` |
+| `br-gtm-lead` | Plans each launch push, writes outreach, picks which leads get a sample film, and sends email through the app | `anthropic/claude-sonnet-5.5` | Board cards from the CEO: `GTM: <slug>`, and the deployment `br-gtm-inbox`: cron `0 * * * *`, `budget_micro_usd: 1_000_000`, to act on new inbox summaries |
 | `br-scout` | Finds and qualifies leads with Naive Data | `anthropic/claude-haiku-5.5` | Board cards from the GTM lead: `LEADS: <slug>` |
 | `br-social` | Posts and schedules on social networks, and reads post metrics | `anthropic/claude-haiku-5.5` | Board cards from the GTM lead: `POST: <slug>` |
 | `br-inbox-reader` | Reads one inbound email and returns fixed fields. It is not on the roster or the board. | `anthropic/claude-haiku-5.5` | A session started by the app when AgentMail reports a new message |
@@ -43,7 +43,8 @@ has a link.
 | `social.accounts`, `social.post`, `social.status`, `social.post_metrics`, `social.cancel` | off | off | allow, each one named | off |
 | AgentMail MCP: `get_message` | off | off | off | allow |
 | AgentMail MCP: the other 53 tools, including every send, reply, forward, draft, delete, create, connect and authorize tool | off | off | off | off, each one named |
-| `apps` | off, with `config.allowed_apps: [<app id>]` | same | same | off |
+| Every other app tool, such as `br-app.company_metrics` and `br-app.feedback_summaries` | off, each one named | off, each one named | off, each one named | off, each one named |
+| `apps` | off, with `config.allowed_apps: [<app id>]` | same | same | same |
 | `bash`, `read`, `write`, `edit`, `fetch_file`, `browser`, `web_fetch` | off | off | off | off |
 | Identity | GTM persona | none | GTM persona | none |
 | Vault | none | none | none | AgentMail key, `static_bearer` for `https://mcp.agentmail.to/mcp`, bound to this agent |
@@ -55,15 +56,19 @@ tools on offer while removing deploy, secrets and database access (verified).
 
 1. Someone emails `boilerroom@agentmail.to`. AgentMail calls a public route on the Boiler Room app
    with a `message.received` webhook. The app checks the webhook's Svix signature.
-2. The app starts a `br-inbox-reader` session, using a scoped Naive key held as an app secret, and
-   passes it the message id. The reader makes one call, `get_message`, then calls `submit_output`
-   with fixed fields: sender, an intent
-   from a fixed list (`lead_reply`, `customer_request`, `revision`, `unsubscribe`, `other`), and a
-   summary of up to 280 characters.
-3. The app stores the fields, never the raw body. It creates a card for the GTM lead, or for the
-   film pipeline when the email is about a customer's film.
+2. The app starts a `br-inbox-reader` session and passes it the message id. It uses a scoped Naive
+   key, held as an app secret, with `sessions:write` and `sessions:read` only. The reader makes one
+   call, `get_message`, then calls `submit_output` with fixed fields: sender, an intent from a fixed
+   list (`lead_reply`, `customer_request`, `revision`, `unsubscribe`, `other`), and a summary of up
+   to 280 characters.
+3. The app stores the fields, never the raw body. Mail about a customer's film goes to the film
+   pipeline. The app creates no cards: that needs `agents:write`, which would also let the app
+   rewrite agents and delete itself (docs). The GTM lead's hourly fire reads new summaries with
+   `br-app.inbox_summaries` and creates the cards.
 4. The GTM lead replies with `br-app.send_email`. The app sends only to an allowlisted address, up
-   to a daily quota, with no attachments, and only after AgentMail's flagged check passes.
+   to a daily quota, with no attachments, and only after AgentMail's flagged check passes. The
+   summary is model-written from an untrusted email, so it can carry an attacker's words. The
+   allowlist and quota are the real control.
 
 The reader makes exactly one external call per chat, because after one, Naive stops the chat from
 running `bash` and makes every later call wait for a human (verified). Naive email is not used.
@@ -92,7 +97,7 @@ The founder decides when the product is nailed down. Then:
 
 1. Open the Naive Social portal link and connect each network (README section 5, D).
 2. Point the AgentMail webhook at the app's route. Ship the app's `send_email` allowlist and quota,
-   and the reader's start-up code.
+   and the reader's start-up code. Create the `br-gtm-inbox` deployment.
 3. Raise the four budgets to the "when active" column.
 4. Add the GTM agents to `br-ceo`'s system prompt as agents it may assign.
 5. Update the system map in `boiler-room-design`. It lists the Account Manager as the owner of
@@ -103,7 +108,8 @@ The founder decides when the product is nailed down. Then:
 
 - Posting, scheduling and metrics on Naive Social. No network was connected. Activation and the
   portal link were verified.
-- The webhook route, the app starting a reader session, and the scoped key that allows it.
+- The webhook route, the app starting a reader session, the scoped key that allows it, and the
+  GTM lead's hourly fire. The key's scopes come from the docs.
 - Whether an app tool that returns email text sets Naive's read flag. Only a tool returning `pong`
   was tested.
 - A $0 agent parking a card that was assigned to it (docs).

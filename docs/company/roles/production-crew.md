@@ -53,7 +53,9 @@ were not benchmarked on real briefs.
   It sees only the inbox reader's fixed fields, never raw email.
 
 Every crew agent uses the [base policy](../README.md#3-roles) except the board tools, which it does
-not have. Budgets are set per film by the pipeline, through each session's `budget_micro_usd`.
+not have. That includes an explicit `allowed_apps`, and every `br-app.*` tool named off, except
+`br-app.send_email` for the Account Manager. Budgets are set per film by the pipeline, through each
+session's `budget_micro_usd`.
 
 ## Rules that come from the product
 

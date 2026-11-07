@@ -90,7 +90,7 @@ still sees everything.
 | A lead, not the coordinator, can create and assign cards | **Verified.** The lead created a card, assigned it to the engineer, and created a second card with an assignee and `blocked_by` in one call. Nothing was refused. | Lead session `ses_sr1rnrdrgnj1m0egcezm5jtj8s`; cards `crd_7hxaxrgyhdksyw4vg7cx6q4svr`, `crd_2hbyzf59xrqe7k7nk8z3h3j920` |
 | Assigning a card starts the assignee | **Verified.** A top-level session of the assignee starts 3.6 s after the write (4.2 s for the CEO's card), with `metadata.board` naming the card. | Engineer session `ses_kc5a3r4pjsxqnqas0d1tjv9813` |
 | `blocked_by` holds work back until the blocker is done | **Verified.** A blocked card stayed unwoken for 80 s. When its blocker was done, it went back to `todo` and its assignee started in under 1 s. | Cards `crd_svstxa1sn7vbqgjck3y0ha7y4f`, `crd_9j3ez2qj08av83zxmffrmd8f5a`; session `ses_q7fzdgt6h9zfm7ezd3w1x79bqv` |
-| Every team reports to the CEO, with no polling | **Verified.** When cards reach `done` or `blocked`, the board starts a digest session of its owner, the CEO, 42 to 65 s later. Members' comments carry their session ids. | CEO digests `ses_wzvb5a2ej6tz6pcr66rhm9s2bg`, `ses_dm03t1xfj0f0vsn27mqsj3tkwg`, `ses_daqsfq4evv594ykfs2zwpc8md3` |
+| Every team reports to the CEO, with no polling | **Verified for `done` cards.** When cards reach `done`, the board starts a digest session of its owner, the CEO, 42 to 65 s later. Members' comments carry their session ids. **Docs only** for a card a member moves to `blocked`, and for a card the board parks. A card that sat `blocked` on an open blocker for 82 s, longer than one board tick, was never digested. | CEO digests `ses_wzvb5a2ej6tz6pcr66rhm9s2bg`, `ses_dm03t1xfj0f0vsn27mqsj3tkwg`, `ses_daqsfq4evv594ykfs2zwpc8md3`, each listing only `done` cards. Undigested: `crd_9j3ez2qj08av83zxmffrmd8f5a` |
 | The CEO can read every card and comment | **Verified.** A typed read returned all 5 cards with comment counts matching the REST API. | `ses_e3yppp6551tc8t64k31253bd61` |
 | The CEO can run on a clock | **Verified** for a CEO that is not a coordinator: a cron deployment fired on time as `system/cron` and read both boards. **Not run** for a coordinator CEO. | Fire `ses_71049cm5gbhbwj9bjajrac7wc6` |
 
@@ -116,6 +116,10 @@ server.** It also works: the CEO read and created cards on both department board
   engineering runs in parallel only as many cards as it has engineer agents.
 - Three wakes per card. A card whose session ends without moving it is parked as `blocked`, and
   that reaches the CEO as a digest. It is never retried in a loop.
+- A session that hits its budget is not ended, so its card is neither parked nor digested. It
+  pauses (`budget_paused`) and its card stays in `doing`, which also holds back that agent's next
+  card. Raising the agent's ceiling resumes it, but only within 7 days. Only the CEO's sweep
+  (section 4) catches this.
 - A card-started session runs on the agent's `max_task_micro_usd`. Its budget cannot be set per
   card (verified: woken sessions showed the agent's ceiling).
 - Card ids derive from the board, the writing session and the title, so a retried write with the
@@ -143,6 +147,7 @@ Every company agent starts from the same base policy, and each role adds only wh
 | `send_to_agent`, `wait_for_agents`, `list_agents` | off | Members cannot wait on teammates, and the CEO must not park on one |
 | `ask_operator`, `request_tools`, `propose_plan` | off | An unattended agent must not stop on a question. It moves its card to `blocked` instead. |
 | `vetta.tools_search`, `vetta.tools_execute` | off | They are offered even under `deny` unless named off (verified) |
+| `apps`, and every app's own tools (`br-app.*`) | `apps` off unless the role turns it on. Every agent gets an explicit `allowed_apps`. Every app tool in the org is named on every agent: allow where the role lists it, off everywhere else. | Without `allowed_apps`, an agent is offered the tools of every app in the org (docs), even with `apps` off |
 | `handoffs` | `false` | Reports travel by card digest, not by handoff |
 | Identity, vault credentials, MCP servers | none | Added per role, only where stated |
 
@@ -156,7 +161,7 @@ a fixed prefix and the slug, so the board reads as a log and a retried write can
 | Step | Who is started, and by what | What they read | What they produce | What hands it on |
 | --- | --- | --- | --- | --- |
 | 1. Set direction | `br-ceo`, by its cron fire. The fire opens the standing card `Recurring: Company sweep`. | The board, the founder's priorities in its system prompt, and the app's metrics once that tool exists | Card **`DIR: <slug>`** assigned to `br-product`. Body: goal, why now, done-when, budget, deadline, constraints. | The assignment starts `br-product` |
-| 2. Spec | `br-product`, by the `DIR` card | The `DIR` card, both repos, and feedback summaries | File **`specs/<slug>.md`** in `boiler-room-design`, on branch `spec/<slug>`, with a pull request into `dev`. If there is UI work, card **`DESIGN: <slug>`** assigned to `br-design`. Card **`BUILD: <slug>`** assigned to `br-eng-lead`, `blocked_by` the `DESIGN` card. | `DIR` moves to `done` with the PR link. The CEO gets a digest. |
+| 2. Spec | `br-product`, by the `DIR` card | The `DIR` card, both repos, and feedback summaries | File **`specs/<slug>.md`** in `boiler-room-design`, on branch `spec/<slug>`, with a pull request into `dev`. If there is UI work, card **`DESIGN: <slug>`** assigned to `br-design`, then card **`BUILD: <slug>`** assigned to `br-eng-lead`, `blocked_by` the `DESIGN` card. With no UI, product merges the spec PR first, then creates `BUILD` citing the merge commit, because assigning `BUILD` starts the lead at once. | `DIR` moves to `done` with the PR link. The CEO gets a digest. |
 | 3. Design | `br-design`, by the `DESIGN` card | The spec, and screenshots of the staging app | Files **`design/<slug>/`** (screens, states, copy, tokens) pushed to the same `spec/<slug>` branch. Then it merges the spec PR into `dev`. | `DESIGN` moves to `done`. That clears `BUILD` and starts the lead. |
 | 4. Plan the build | `br-eng-lead`, by the `BUILD` card | `specs/<slug>.md` and `design/<slug>/` on `boiler-room-design` `dev`, at a named commit | Cards **`ENG: <slug> <n>/<total> <task>`** assigned to engineers, ordered with `blocked_by`. Card **`SHIP: <slug>`** assigned to itself, `blocked_by` every `ENG` card. | `BUILD` moves to `done` with the plan. The assignments start the engineers. |
 | 5. Build | `br-engineer-1`, by an `ENG` card | The card, the spec, and the code | Branch **`feat/<slug>-<n>`** and a **pull request into `dev`**. Commits carry `Board-Card:` and `Naive-Session:` trailers. `pnpm test`, `pnpm typecheck` and `pnpm lint` must pass. | `ENG` moves to `done` with the PR URL and the test summary. When the last one is done, `SHIP` starts the lead. |
@@ -165,10 +170,19 @@ a fixed prefix and the slug, so the board reads as a log and a retried write can
 | 8. Promote | The founder | The CEO's report and the `SHIP` notes | A PR from `dev` into `main`, and the production deploy | Section 7 says why this stays human |
 
 **When a step fails.** A failing member moves its card to `blocked` with the reason. A run that
-stops without moving its card is parked as `blocked` by the board. Either way the CEO gets a digest.
-The CEO then reassigns the card, comments an answer, or escalates. A lead that rejects a PR creates
-a new `ENG: <slug> fix <n>` card and a new `SHIP: <slug> r2` card blocked by it, because a card's
-`blocked_by` is fixed once the card is created.
+stops without moving its card is parked as `blocked` by the board. The docs say either way the CEO
+gets a digest, but only `done` digests have been seen (section 2). Until phase 1's probe shows a
+`blocked` digest, the CEO's 2-hourly sweep, which opens every `blocked` card, is the backstop. The
+CEO then reassigns the card, comments an answer, or escalates.
+
+A run that hits its budget is not parked at all: its card stays in `doing`. The sweep lists every
+`doing` card that has not moved for 2 hours, with its `woken_session_id`, on a `FOUNDER:` card,
+because only the founder can see that session's status or raise the budget. Members check
+`session_spend` before each long step and block the card at two thirds of their ceiling. That
+reading lags the running turn (verified), so it is approximate.
+
+A lead that rejects a PR creates a new `ENG: <slug> fix <n>` card and a new `SHIP: <slug> r2` card
+blocked by it, because a card's `blocked_by` is fixed once the card is created.
 
 **Escalating to the founder.** The CEO creates `FOUNDER: <question>`, leaves it `blocked` with no
 blocker, and lists it at the top of its sweep report. The founder answers with a comment or closes
@@ -191,7 +205,7 @@ rule, and it keeps the CEO from inventing work.
 | Branch rules on `main` and `dev` | Everyone | GitHub repository settings | **Needed** | Add them (C) |
 | AgentMail (`boilerroom@agentmail.to`) | The app's server code, and `br-inbox-reader` | App secret, plus one vault credential bound to the reader | **Have it** (`AGENTMAIL_API_KEY`) | Later: change the sender name to Boiler Room |
 | Naive Social | `br-social` | The GTM persona's social workspace | **Needed** at GTM activation | Connect the networks (D) |
-| Scoped Naive key for the app | The app's server code, to turn an inbound email into a card | App secret | **Self-served**: minted by the provisioning script with the admin key | None |
+| Scoped Naive key for the app | The app's server code, to start a `br-inbox-reader` session for each inbound email and read its output | App secret. Scopes `sessions:write` and `sessions:read` only. Not `agents:write`: that scope also manages agents, app secrets and app deployments, and deletes apps (docs). So the app creates no cards; the GTM lead does (see [roles/gtm.md](roles/gtm.md)). | **Self-served**: minted by the provisioning script with the admin key. Not yet minted or tested. | None |
 
 **A. Clerk production instance (later).** In the Clerk dashboard, create the production instance,
 and add the custom domain that the Naive app will use (a `*.vercel.app` address is not accepted).
@@ -265,8 +279,10 @@ prompt. A cap of $0 means the agent cannot spend anything (docs), which keeps GT
   session that selects that identity (verified).
 - GTM agents have no `bash`, no file writes, no repo token, and the `apps` tool off. They still get
   the app's own tools (verified).
-- No agent can change agents, budgets, credentials or deployments. Only the provisioning script,
-  run by the founder, can.
+- No agent holds a key that can change agents, agent budgets, vault credentials or cron
+  deployments. Only the provisioning script, run by the founder, can. The app's own key is limited
+  to sessions, but `sessions:write` can start any agent's session and raise any session's budget
+  (docs), within each agent's daily cap. We accept that.
 - Merges into `main` and production deploys need the founder (section 5, C).
 
 **Prompt injection.** Customer email, social content, lead data and customer websites are all
@@ -283,15 +299,23 @@ for a harmless read). The design works with that guard rather than against it:
    `send_email` tool sends only to addresses on an allowlist (approved leads, or people who wrote to
    us first), up to a daily quota, with no attachments, and only after AgentMail's flagged check
    passes. That logic is app code (planned).
-3. **Untrusted text never reaches an agent that can act on it.** App tools do not set Naive's read
-   flag (verified with a test tool). So the app must never return a raw email body to an agent
-   that holds `send_email`. It returns the reader's fixed fields only.
-4. **Every MCP tool is named.** Under a deny default, unnamed MCP tools are still offered, at
-   "ask" (verified). Every AgentMail tool is named, and all send, delete, create and connect tools
-   are off for the reader.
-5. **Builders never read untrusted content.** The CEO, engineering, product and design never read
-   the inbox or social content. Both repos are public, so agents never act on issues, PR comments
-   or PRs from outside accounts. The lead merges only branches named in an `ENG` card's note.
+3. **Raw email never reaches an agent that can act on it.** App tools do not set Naive's read flag
+   (verified with a test tool). So the app never returns a raw email body, only the reader's fixed
+   fields. The 280-character summary is still written by a model from an untrusted email, so it
+   can carry an attacker's words to the GTM lead, which holds `send_email`. The real control is the
+   app: its allowlist and daily quota on `send_email`.
+4. **Every MCP tool and every app tool is named.** Under a deny default, unnamed MCP tools are
+   still offered, at "ask" (verified), and an ask parks an unattended session. Every AgentMail tool
+   is named, and all send, delete, create and connect tools are off for the reader. Every `br-app.*`
+   tool is named on every agent (section 3), so adding a tool to the app's `/mcp` means re-running
+   the provisioning script. How an unnamed app tool behaves under a deny default is untested.
+5. **Builders never read raw untrusted content.** The CEO, engineering, product and design never
+   read the inbox, social content or web search results. `web_search` is off for all of them: it
+   returns untrusted pages, and the read flag, which covers contacts, mail, messages and connected
+   apps, does not cover it (docs). Product and design do read the reader's summaries, which are
+   derived from untrusted email (see Secrets). Both repos are public, so agents never act on
+   issues, PR comments or PRs from outside accounts. The lead merges only branches named in an
+   `ENG` card's note.
 
 **Secrets.** Both repos are public. A secret goes in one of two places: the Naive vault (MCP
 credentials, bound to one agent, never readable back) or Naive app secrets (server-side keys). It
@@ -300,7 +324,9 @@ The vault can only inject credentials for MCP connections (environment variable 
 501), so git cannot use it. Those tokens therefore live in a file on the agent's computer. The model
 can read that file, and the shell can reach the internet. We accept that risk. It is bounded by one
 repo per token, a 30-day expiry, and the branch rules. The lead also runs a secret-pattern check on
-every diff before it merges.
+every diff before it merges. Product and design hold a token and open egress, and they read the
+reader's summaries, so a crafted email could put up to 280 characters of instructions in front of
+them. We accept that too, with the same bounds.
 
 **Audit.** Every card keeps its brief, its holder's note, comments signed with session ids, the
 session that was started on it, and how many times it was started. Commits carry `Board-Card:` and
@@ -312,8 +338,8 @@ blocked, and every `FOUNDER:` card.
 
 | Phase | What gets built | Done when |
 | --- | --- | --- |
-| 1. CEO, board, production crew | A provisioning script under `ops/company/`, which creates agents from code, writes tokens and sets app secrets. `br-ceo` as coordinator with `board: true`, and its cron deployment. The production crew, Researcher first, from `agents/`. | A cron fire closes its standing card with a report. The Researcher returns a valid result for a real URL. |
-| 2. One engineer, one real task | The `br-engineering` token, the branch rules, and `br-engineer-1` on the roster. The CEO assigns `ENG: check-script 1/1`: add a root `check` script that runs `pnpm lint`, `pnpm typecheck` and `pnpm test`, list it under Commands in `README.md`, and open a PR into `dev`. Then add `br-eng-lead` and the staging app. | `br-engineer-1` opens that PR with nobody touching the run, and the checks pass. The next task goes through `SHIP` and lands on staging. |
+| 1. CEO, board, production crew | A provisioning script under `ops/company/`, which creates agents from code, writes tokens and sets app secrets. `br-ceo` as coordinator with `board: true` and `br-engineer-1` on its roster, because a roster needs 1 to 20 entries and an empty coordinator is not a team (docs). Its cron deployment. The production crew, Researcher first, from `agents/`. | A cron fire closes its standing card with a report. `br-engineer-1`, given a card before its token exists, moves it to `blocked` with `credential missing`, and the CEO receives a digest naming it. The Researcher returns a valid result for a real URL. |
+| 2. One engineer, one real task | The `br-engineering` token and the branch rules. The CEO assigns `ENG: check-script 1/1`: add a root `check` script that runs `pnpm lint`, `pnpm typecheck` and `pnpm test`, list it under Commands in `README.md`, and open a PR into `dev`. Then add `br-eng-lead` and the staging app. | `br-engineer-1` opens that PR with nobody touching the run, and the checks pass. The next task goes through `SHIP` and lands on staging. |
 | 3. Product and design | The `br-design` token, `br-product` and `br-design` | One `DIR` card goes through steps 1 to 7 with no human step. |
 | 4. GTM, provisioned but inactive | `br-gtm-lead`, `br-scout`, `br-social` and `br-inbox-reader` at a $0 budget, plus the GTM persona. No cards, no cron. | The agents exist and cannot spend. The founder decides when the product is nailed down. Activation is in [roles/gtm.md](roles/gtm.md). |
 
@@ -327,8 +353,8 @@ CEO or the lead promote too is a founder decision, and it is a one-line change t
 
 - Teams are one level deep, and members cannot wait on teammates.
 - A member creates and assigns cards. Assignment starts the assignee within about 4 s.
-  `blocked_by` holds work and releases it in under 1 s. Done and blocked cards reach the board
-  owner as digests.
+  `blocked_by` holds work and releases it in under 1 s. Done cards reach the board owner as
+  digests.
 - A cron deployment fires on schedule and runs with no person present, for a CEO that is not a
   coordinator.
 - An engineer agent on Sonnet cloned the repo, installed it, ran 522 passing tests, branched and
@@ -347,6 +373,9 @@ CEO or the lead promote too is a founder decision, and it is a one-line change t
 **Not verified:**
 
 - A **coordinator** CEO on a cron, and its `Recurring:` standing card.
+- A digest of a card that a member moves to `blocked`, or that the board parks. Phase 1 probes the
+  first. A card blocked on an open blocker was not digested.
+- A card whose session hit its budget staying in `doing` (docs).
 - Product or design creating cards for the lead. It is the same path as lead to engineer, but it
   was not run.
 - The board flow on Sonnet agents (the probes used Haiku), and the pre-flight floor for each role.
@@ -356,7 +385,10 @@ CEO or the lead promote too is a founder decision, and it is a one-line change t
   checks for it and blocks the card if it is missing.
 - The agent-side `apps` deploy action. Only the REST route was run.
 - Whether an app tool that returns email text sets the read flag.
-- The AgentMail webhook to the app, and the app turning it into a card.
+- The AgentMail webhook to the app, the app starting a reader session with its scoped key, and the
+  GTM lead creating cards from the summaries. The key's scopes come from the docs.
+- How an unnamed app tool behaves under a deny default, and whether `allowed_apps: []` is accepted
+  and hides app tools.
 - Posting, scheduling and analytics on Naive Social, because no network was connected.
 - Whether a card-started session selects the agent's persona. Social tools appear only in a session
   that selects it. If a card-started session does not, `br-social` must run from a deployment
@@ -364,6 +396,5 @@ CEO or the lead promote too is a founder decision, and it is a one-line change t
 - Clerk sign-in in a browser, and a Clerk production instance.
 - A $0 agent parking a card that was assigned to it.
 - Whether the limit of 4 concurrent teammates applies to card-started sessions.
-- Whether a coordinator can be saved with an empty roster (phase 1).
 - Whether Sonnet sets better direction than Haiku, or Opus better than Sonnet. Typed delegation
   did not work, so it is not used anywhere.

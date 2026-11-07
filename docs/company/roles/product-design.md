@@ -37,11 +37,12 @@ against them, and look after the brand's visual system.
 | `bash`, `read`, `write`, `edit`, `ls`, `find` | allow | allow | To commit to the design repo, and for Playwright screenshots |
 | `board_read`, `board_write`, `submit_output`, `session_spend` | allow | allow | |
 | `publish_file` | allow | allow | |
-| `web_search` | allow | off | Market research, from result snippets only |
+| `web_search` | off | off | It returns untrusted pages to an agent with a token and open egress, and it does not set the read flag (docs) |
 | `browser` | off | allow, limited to the staging app's domain | Requests to any other domain are refused (verified) |
 | `generate_image` | off | allow | It asks by default, so it must be named |
 | `find_stock_photo`, `view_image` | off | allow | `view_image` is for critiquing its own screenshots |
-| `br-app.feedback_summaries` (the app's own MCP tool, read only) | allow | allow | Planned. Fixed-field summaries from the inbox reader, never raw email. |
+| `br-app.feedback_summaries` (the app's own MCP tool, read only) | allow | allow | Planned. Fixed-field summaries from the inbox reader, never raw email. The summary is still model-written from untrusted email ([README section 6](../README.md#6-guard-rails)). |
+| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named | off, each one named | `allowed_apps` names only the app that serves `feedback_summaries` |
 | `company.set_brand`, `company.set_logo` | off | off | They always need owner approval |
 | `web_fetch`, `apps`, `data_run`, social, email, connections | off | off | |
 | Base policy tools | as in [README section 3](../README.md#3-roles) | | |
@@ -74,10 +75,12 @@ Open questions: each one is also a comment on the DIR card.
 ## Procedure
 
 1. **Product, on a `DIR` card.** Read the card and both repos. Write the spec. Push `spec/<slug>`
-   and open a PR into `dev`. If the spec needs UI, create `DESIGN: <slug>` assigned to `br-design`.
-   Create `BUILD: <slug>` assigned to `br-eng-lead`, `blocked_by` the `DESIGN` card if there is
-   one. Its body links the spec PR and repeats the acceptance criteria. If there is no UI, merge
-   the spec PR now. Move `DIR` to `done` with the PR link.
+   and open a PR into `dev`. If the spec needs UI, create `DESIGN: <slug>` assigned to `br-design`,
+   then `BUILD: <slug>` assigned to `br-eng-lead` and `blocked_by` the `DESIGN` card. If there is
+   no UI, merge the spec PR first, then create `BUILD` and cite the merge commit in its body:
+   assigning it starts the lead within seconds, and the lead reads the spec from `dev`. Either way,
+   the `BUILD` body links the spec PR and repeats the acceptance criteria. Move `DIR` to `done` with
+   the PR link.
 2. **Design, on a `DESIGN` card.** Check out `spec/<slug>`. To see the current app, take a
    screenshot of staging with Playwright: turn on the 2 GiB swap first, then launch Chromium with
    `--no-sandbox --disable-dev-shm-usage --disable-gpu`. Add `design/<slug>/` and push it to the
