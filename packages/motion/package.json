@@ -1,0 +1,40 @@
+{
+  "name": "@boiler-room/motion",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p .",
+    "studio": "remotion studio src/root.tsx --public-dir ../schema/examples",
+    "stills": "node scripts/stills.ts",
+    "render": "node scripts/render.ts",
+    "determinism": "node scripts/determinism.ts"
+  },
+  "dependencies": {
+    "@boiler-room/schema": "workspace:*",
+    "@remotion/fonts": "4.0.541",
+    "@remotion/layout-utils": "4.0.541",
+    "@remotion/noise": "4.0.541",
+    "@remotion/paths": "4.0.541",
+    "lucide-react": "1.70.0",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.541",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "4.0.541",
+    "@remotion/cli": "4.0.541",
+    "@remotion/renderer": "4.0.541",
+    "@types/node": "24.19.2",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.6",
+    "vitest": "5.1.0"
+  }
+}
