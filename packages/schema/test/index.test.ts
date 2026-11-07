@@ -15,9 +15,11 @@ describe('@boiler-room/schema', () => {
         'TEXT_ROLES',
         'campaignJsonSchema',
         'campaignSchema',
+        'researchPartsSchema',
         'sceneFrames',
         'toFrame',
         'validateCampaign',
+        'validateResearchParts',
       ].sort(),
     );
   });

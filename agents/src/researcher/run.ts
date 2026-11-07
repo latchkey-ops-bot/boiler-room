@@ -1,0 +1,586 @@
+import { createHash } from 'node:crypto';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { basename, extname, join } from 'node:path';
+import { sniff } from '../capture/logo.ts';
+import type { AgentDefinition } from '../define.ts';
+import { researcher } from '../definitions/researcher.ts';
+import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
+import { syncAgents } from '../sync.ts';
+import { bundleTool, type ToolBundle } from './bundle.ts';
+import { checkProvenance, checkResearch, type GateFailure, withoutClaims } from './gate.ts';
+import { fileIdOf, type ResearchOutput } from './output.ts';
+import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
+import { siteHost } from './text.ts';
+import { type PagesBundle, pagesBundleSchema } from './verify.ts';
+
+export interface ResearchOptions {
+  url: string;
+  /** Local paths or http(s) URLs the customer supplied. */
+  material: string[];
+  description?: string;
+  budgetUsd?: number;
+  maxRepairs: number;
+  keepAgent: boolean;
+  /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
+  drillRepair: boolean;
+  outRoot: string;
+  definition?: AgentDefinition;
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const time = () => new Date().toISOString().slice(11, 19);
+
+function say(message: string) {
+  console.log(scrub(`${time()} ${message}`));
+}
+
+const oneLine = (text: unknown, max: number) => {
+  const value = typeof text === 'string' ? text : JSON.stringify(text ?? '');
+  const flat = value.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max)}...` : flat;
+};
+
+/** Files published in the session and capture digests printed in it, read from the event stream. */
+export class EventTracker {
+  readonly published = new Map<string, string>();
+  readonly digests = new Set<string>();
+  private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
+
+  handle(event: { type: string; data: Record<string, unknown> }): void {
+    const data = event.data ?? {};
+    if (event.type === 'tool.started') {
+      this.started.set(String(data.tool_call_id), {
+        name: String(data.name),
+        args: (data.args as Record<string, unknown>) ?? {},
+      });
+    }
+    if (event.type !== 'tool.completed' || data.is_error) return;
+    const output =
+      typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
+    for (const match of output.matchAll(/BR_CAPTURE_DONE sha256=([0-9a-f]{64})/g))
+      if (match[1]) this.digests.add(match[1]);
+    if (data.name === 'publish_file') {
+      const id = /published as (fil_[a-z0-9]+)/.exec(output)?.[1];
+      const path = this.started.get(String(data.tool_call_id))?.args.path;
+      if (id && typeof path === 'string') this.published.set(id, path);
+    }
+  }
+}
+
+function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
+  const data = event.data ?? {};
+  switch (event.type) {
+    case 'tool.started': {
+      const args = (data.args as Record<string, unknown>) ?? {};
+      const name = String(data.name);
+      if (name === 'bash') return `-> bash: ${oneLine(args.command, 160)}`;
+      if (name === 'submit_output')
+        return `-> submit_output (${Array.isArray(args.claims) ? args.claims.length : '?'} claims)`;
+      if (typeof args.path === 'string') return `-> ${name} ${args.path}`;
+      return `-> ${name} ${oneLine(args, 120)}`;
+    }
+    case 'tool.completed': {
+      const output =
+        typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
+      const lines = output.trim().split('\n');
+      const tail = lines.slice(-2).join(' | ');
+      return `${data.is_error ? '!! ' : '   '}${data.name}: ${oneLine(tail, 200)}`;
+    }
+    case 'message.completed':
+      return data.role === 'user' ? undefined : `agent: ${oneLine(data.content, 400)}`;
+    case 'session.usage':
+      return `usage: ${usd(Number(data.consumed_micro_usd ?? 0))} so far, ${data.tool_calls ?? '?'} tool calls`;
+    case 'session.idle':
+      return `idle: ${data.stop_reason}${data.error ? ` (${oneLine(data.error, 200)})` : ''}`;
+    case 'budget.exceeded':
+    case 'session.retrying':
+    case 'session.degraded':
+    case 'session.computer_replaced':
+      return `${event.type}: ${oneLine(data, 200)}`;
+    default:
+      return undefined;
+  }
+}
+
+/** Uploads the capture tool once per version; a later run reuses the file with the same digest. */
+async function ensureToolFile(client: Naive, tool: ToolBundle): Promise<string> {
+  const title = `br-research ${tool.sha256.slice(0, 16)}`;
+  const found = await client.files.list({ search: title, limit: 10 });
+  const existing = found.data.find((file) => file.title === title && file.sha256 === tool.sha256);
+  if (existing) return existing.id;
+  const form = new FormData();
+  form.append('file', new Blob([tool.code], { type: 'text/javascript' }), tool.name);
+  form.append('title', title);
+  form.append('tags', 'boiler-room,capture-tool');
+  form.append('folder', 'boiler-room/tools');
+  const uploaded = await client.files.upload(form);
+  return uploaded.id;
+}
+
+const CONTENT_TYPES: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.svg': 'image/svg+xml',
+  '.pdf': 'application/pdf',
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.html': 'text/html',
+  '.htm': 'text/html',
+  '.json': 'application/json',
+  '.csv': 'text/csv',
+  '.mp4': 'video/mp4',
+  '.mov': 'video/quicktime',
+};
+
+/**
+ * Stores customer material in Naive files, tagged as uploaded, and a manifest the capture tool
+ * reads. A local file is cited by its Naive file address; a URL is imported and cited as itself.
+ */
+async function uploadMaterial(
+  client: Naive,
+  inputs: readonly string[],
+  host: string,
+): Promise<{ refs: MaterialRef[]; manifestId: string | null }> {
+  const refs: MaterialRef[] = [];
+  for (const [index, input] of inputs.entries()) {
+    const prefix = `m${String(index + 1).padStart(2, '0')}`;
+    if (/^https?:\/\//i.test(input)) {
+      const file = await client.files.import({
+        url: input,
+        title: `${host} material ${prefix}`,
+        tags: ['boiler-room', 'customer-material'],
+        folder: `boiler-room/${host}`,
+      });
+      refs.push({
+        file_id: file.id,
+        name: file.name,
+        source_url: input,
+        content_type: file.content_type ?? 'application/octet-stream',
+      });
+    } else {
+      if (!existsSync(input)) throw new Error(`Material not found: ${input}`);
+      const name = `${prefix}-${basename(input)}`;
+      const type = CONTENT_TYPES[extname(input).toLowerCase()] ?? 'application/octet-stream';
+      const form = new FormData();
+      form.append('file', new Blob([readFileSync(input)], { type }), name);
+      form.append('title', `${host} material ${prefix}`);
+      form.append('tags', 'boiler-room,customer-material');
+      form.append('folder', `boiler-room/${host}`);
+      const file = await client.files.upload(form);
+      refs.push({
+        file_id: file.id,
+        name,
+        source_url: `${NAIVE_BASE_URL}/v1/files/${file.id}`,
+        content_type: type,
+      });
+    }
+    say(`material ${input} -> ${refs.at(-1)?.file_id}`);
+  }
+  if (refs.length === 0) return { refs, manifestId: null };
+  const manifest = refs.map((ref) => ({
+    ...ref,
+    origin: ref.source_url.startsWith(NAIVE_BASE_URL) ? 'file' : 'url',
+  }));
+  const form = new FormData();
+  form.append(
+    'file',
+    new Blob([JSON.stringify(manifest, null, 1)], { type: 'application/json' }),
+    'materials.json',
+  );
+  form.append('tags', 'boiler-room,customer-material');
+  form.append('folder', `boiler-room/${host}`);
+  const file = await client.files.upload(form);
+  return { refs, manifestId: file.id };
+}
+
+interface GateVerdict {
+  output: ResearchOutput | undefined;
+  failures: GateFailure[];
+  bundle: PagesBundle | undefined;
+  bundleText: string | undefined;
+}
+
+/**
+ * The gate. It downloads the stored page text itself, binds it to the capture's printed digest,
+ * and runs every check: schema, the campaign validator on brand, assets and claims, Naive file
+ * existence, the verbatim verifier, and provenance. Only a result with no failures passes.
+ */
+async function gate(
+  client: Naive,
+  raw: unknown,
+  tracker: EventTracker,
+  material: ReadonlySet<string>,
+  drill: boolean,
+): Promise<GateVerdict> {
+  const pagesId = (raw as { evidence?: { pages_file_id?: unknown } } | null)?.evidence
+    ?.pages_file_id;
+  if (typeof pagesId !== 'string' || !/^fil_[a-z0-9]+$/.test(pagesId)) {
+    const failure: GateFailure = {
+      code: 'EVIDENCE_MISSING',
+      path: 'evidence.pages_file_id',
+      message:
+        'evidence.pages_file_id does not name a published file, so the claims cannot be checked.',
+      fix: 'Publish the capture tool’s pages.json and set evidence.pages_file_id to its fil_ id.',
+    };
+    return { output: undefined, failures: [failure], bundle: undefined, bundleText: undefined };
+  }
+  let bundle: PagesBundle | undefined;
+  let bundleText: string | undefined;
+  let sha = '';
+  try {
+    const bytes = Buffer.from(await client.files.downloadBytes(pagesId));
+    sha = createHash('sha256').update(bytes).digest('hex');
+    bundleText = bytes.toString('utf8');
+    bundle = pagesBundleSchema.parse(JSON.parse(bundleText));
+  } catch (cause) {
+    const failure: GateFailure = {
+      code: 'EVIDENCE_UNREADABLE',
+      path: 'evidence.pages_file_id',
+      message: `${pagesId} could not be read as the capture tool's pages.json: ${cause instanceof Error ? cause.message.slice(0, 200) : cause}`,
+      fix: 'Publish the pages.json the capture tool wrote, unchanged, and set evidence.pages_file_id to its id.',
+    };
+    return { output: undefined, failures: [failure], bundle: undefined, bundleText: undefined };
+  }
+  const exists = new Map<string, Promise<boolean>>();
+  const fileExists = (id: string) => {
+    let known = exists.get(id);
+    if (!known) {
+      known = client.files.get(id).then(
+        () => true,
+        () => false,
+      );
+      exists.set(id, known);
+    }
+    return known;
+  };
+  const { output, failures } = await checkResearch(raw, bundle, { fileExists });
+  if (output) {
+    failures.push(
+      ...checkProvenance(output, {
+        bundleSha256: sha,
+        captureDigests: tracker.digests,
+        published: tracker.published,
+        material,
+      }),
+    );
+  }
+  if (drill) {
+    failures.push({
+      code: 'REPAIR_DRILL',
+      path: '$',
+      message:
+        'This is a drill of the repair loop: the gate refuses the first submission on purpose.',
+      fix: 'Change nothing. Run verify on result.json, then call submit_output again with the same whole result.',
+    });
+  }
+  return { output, failures, bundle, bundleText };
+}
+
+/** Deleting the agent is the only way to remove its computer, which can stay listed for minutes. */
+async function teardown(
+  client: Naive,
+  agentId: string,
+): Promise<{ spend: unknown; leftover: string[] }> {
+  const spend = await client.agents
+    .spend(agentId, { by: 'component' })
+    .catch((cause) => ({ error: String(cause) }));
+  const computer = await client.agents.computer(agentId).catch(() => null);
+  for (let attempt = 0; attempt < 6; attempt++) {
+    try {
+      await client.agents.delete(agentId);
+      say(`deleted agent ${agentId} to release its computer${computer ? ` ${computer.id}` : ''}`);
+      break;
+    } catch (cause) {
+      say(`agent delete retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
+      await sleep(5000);
+    }
+  }
+  let leftover: string[] = [];
+  for (let check = 0; check < 30; check++) {
+    const computers = await listAll((query) => client.computers.list(query));
+    leftover = computers
+      .filter((item) => item.status !== 'destroyed' && item.status !== 'failed')
+      .map((item) => `${item.id} ${item.name} ${item.status}`);
+    const mine = computer ? leftover.filter((line) => line.startsWith(computer.id)) : [];
+    if (mine.length === 0) break;
+    if (check % 3 === 0)
+      say(`waiting for computer ${computer?.id} to go (${leftover.length} live in the org)`);
+    await sleep(10_000);
+  }
+  return { spend, leftover };
+}
+
+async function downloadAssets(
+  client: Naive,
+  output: ResearchOutput,
+  dir: string,
+): Promise<Record<string, string>> {
+  mkdirSync(dir, { recursive: true });
+  const saved: Record<string, string> = {};
+  for (const [id, asset] of Object.entries(output.assets)) {
+    const fileId = fileIdOf(asset.src);
+    if (!fileId) continue;
+    const bytes = Buffer.from(await client.files.downloadBytes(fileId));
+    const kind = sniff(bytes);
+    const extension =
+      kind === 'jpeg' ? 'jpg' : kind === 'unknown' || kind === 'html' ? 'bin' : kind;
+    const path = join(dir, `${id}.${extension}`);
+    writeFileSync(path, bytes);
+    saved[id] = path;
+  }
+  return saved;
+}
+
+/**
+ * One research run: uploads the capture tool and any customer material, syncs the agent, starts a
+ * session, streams it, gates the result and sends failures back for repair, then saves the result
+ * under `out/research/<host>/` and prints the cost. The agent is deleted at the end, which is the
+ * only way to remove its computer; the next run recreates it from its definition.
+ */
+export async function research(options: ResearchOptions): Promise<number> {
+  const definition = options.definition ?? researcher;
+  const client = naiveClient();
+  const host = siteHost(options.url);
+  const outDir = join(options.outRoot, 'research', host);
+  mkdirSync(outDir, { recursive: true });
+  const eventsPath = join(outDir, 'events.jsonl');
+  writeFileSync(eventsPath, '');
+  const startedAt = new Date().toISOString();
+  const balanceBefore = (await client.credits.show()).balance_micro_usd;
+  const budgetMicro = Math.round(
+    (options.budgetUsd ?? definition.session.budget_micro_usd / 1e6) * 1e6,
+  );
+  const report: Record<string, unknown> = {
+    url: options.url,
+    host,
+    started_at: startedAt,
+    model: definition.model,
+    budget_micro_usd: budgetMicro,
+  };
+  const tracker = new EventTracker();
+  let agentId: string | undefined;
+  let sessionId: string | undefined;
+  let exitCode = 1;
+  let cleaned = false;
+
+  const cleanup = async () => {
+    if (cleaned) return;
+    cleaned = true;
+    if (sessionId) {
+      const session = await client.sessions.get(sessionId).catch(() => null);
+      if (session && (session.status === 'running' || session.status === 'queued'))
+        await client.sessions.interrupt(sessionId).catch(() => {});
+      if (session) report.session_micro_usd = session.consumed_micro_usd;
+    }
+    if (agentId && !options.keepAgent) {
+      const { spend, leftover } = await teardown(client, agentId);
+      report.agent_spend = spend;
+      report.computers_live_after = leftover;
+      say(
+        leftover.length
+          ? `computers still live in the org: ${leftover.join('; ')}`
+          : 'no computers left in the org',
+      );
+    } else if (agentId) {
+      report.agent_spend = await client.agents
+        .spend(agentId, { by: 'component' })
+        .catch(() => null);
+      say(`kept agent ${agentId}; its computer stays until the agent is deleted`);
+    }
+    const balanceAfter = (await client.credits.show().catch(() => null))?.balance_micro_usd;
+    if (balanceAfter !== undefined) report.balance_delta_micro_usd = balanceBefore - balanceAfter;
+    report.finished_at = new Date().toISOString();
+    writeFileSync(join(outDir, 'report.json'), scrub(`${JSON.stringify(report, null, 1)}\n`));
+    const session = Number(report.session_micro_usd ?? 0);
+    const agentSpend = (report.agent_spend as { spent_micro_usd?: number } | null)?.spent_micro_usd;
+    say(
+      `cost: session ${usd(session)}${agentSpend !== undefined ? `, agent total incl. computer ${usd(agentSpend)}` : ''}${report.balance_delta_micro_usd !== undefined ? `, balance change ${usd(Number(report.balance_delta_micro_usd))}` : ''}. Computer time can book a few minutes late.`,
+    );
+  };
+  const onSignal = () => {
+    say('interrupted; cleaning up');
+    cleanup().finally(() => process.exit(130));
+  };
+  process.once('SIGINT', onSignal);
+  process.once('SIGTERM', onSignal);
+
+  try {
+    const tool = await bundleTool();
+    const toolFileId = await ensureToolFile(client, tool);
+    say(`capture tool ${tool.name} ${tool.sha256.slice(0, 12)} -> ${toolFileId}`);
+    const { refs, manifestId } = await uploadMaterial(client, options.material, host);
+    const materialIds = new Set(refs.map((ref) => ref.file_id));
+
+    const [synced] = await syncAgents(client, [definition]);
+    if (!synced) throw new Error('Agent sync returned nothing.');
+    agentId = synced.id;
+    say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action})`);
+    Object.assign(report, {
+      agent_id: synced.id,
+      agent_version: synced.version,
+      tool_file_id: toolFileId,
+      material: refs,
+    });
+
+    const session = await client.sessions.create({
+      agent_id: synced.id,
+      message: researchTask({
+        url: options.url,
+        host,
+        toolFileId,
+        materialManifestId: manifestId,
+        material: refs,
+        budgetUsd: budgetMicro / 1e6,
+        description: options.description,
+      }),
+      budget_micro_usd: budgetMicro,
+      ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
+      structured_output_required: definition.structured_output_required,
+      metadata: { run: 'research', host },
+    });
+    sessionId = session.id;
+    report.session_id = session.id;
+    say(`session ${session.id} started, budget ${usd(budgetMicro)}`);
+
+    const deadline = Date.now() + definition.session.max_minutes * 60_000;
+    let afterSeq = 0;
+    let continues = 0;
+    let round = 0;
+    const rounds: unknown[] = [];
+    let accepted: ResearchOutput | undefined;
+    let verdict: GateVerdict | undefined;
+
+    for (;;) {
+      const timer = setTimeout(
+        () => {
+          say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
+          client.sessions.interrupt(session.id).catch(() => {});
+        },
+        Math.max(1000, deadline - Date.now()),
+      );
+      try {
+        for await (const event of client.stream(session.id, { afterSeq })) {
+          afterSeq = event.seq;
+          const record = event as unknown as { type: string; data: Record<string, unknown> };
+          tracker.handle(record);
+          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+            appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
+          const line = describe(record);
+          if (line) say(line);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      const state = await client.sessions.get(session.id);
+      if (state.stop_reason === 'max_iterations' && continues < 3 && Date.now() < deadline) {
+        continues += 1;
+        const sent = await client.sessions.send(session.id, { message: CONTINUE_MESSAGE });
+        afterSeq = sent.accepted_seq;
+        continue;
+      }
+      if (!state.structured_output) {
+        say(`the session ended (${state.status}/${state.stop_reason}) without a result`);
+        report.stop_reason = state.stop_reason;
+        break;
+      }
+      round += 1;
+      verdict = await gate(
+        client,
+        state.structured_output,
+        tracker,
+        materialIds,
+        options.drillRepair && round === 1,
+      );
+      rounds.push({ round, failures: verdict.failures });
+      writeFileSync(
+        join(outDir, `submission-${round}.json`),
+        `${JSON.stringify(state.structured_output, null, 1)}\n`,
+      );
+      if (verdict.failures.length === 0) {
+        accepted = verdict.output;
+        say(`gate passed on submission ${round}`);
+        break;
+      }
+      say(
+        `gate found ${verdict.failures.length} problem(s) in submission ${round}: ${verdict.failures
+          .slice(0, 6)
+          .map((failure) => failure.code)
+          .join(', ')}`,
+      );
+      if (round > options.maxRepairs || Date.now() > deadline) break;
+      const sent = await client.sessions.send(session.id, {
+        message: repairMessage(verdict.failures, host, round, options.maxRepairs),
+      });
+      afterSeq = sent.accepted_seq;
+    }
+    report.rounds = rounds;
+    report.capture_digests = [...tracker.digests];
+    report.published_files = Object.fromEntries(tracker.published);
+
+    if (!accepted && verdict?.output && verdict.bundle) {
+      // Out of repair rounds: drop the claims that still fail, and accept the rest only if nothing
+      // else fails. An unverified claim never reaches the output.
+      const rejected = new Set(
+        verdict.failures.flatMap((failure) => (failure.claimId ? [failure.claimId] : [])),
+      );
+      if (rejected.size > 0) {
+        const trimmed = withoutClaims(verdict.output, rejected);
+        const again = await checkResearch(trimmed, verdict.bundle, {});
+        const sha = createHash('sha256')
+          .update(verdict.bundleText ?? '')
+          .digest('hex');
+        const left = again.output
+          ? [
+              ...again.failures,
+              ...checkProvenance(again.output, {
+                bundleSha256: sha,
+                captureDigests: tracker.digests,
+                published: tracker.published,
+                material: materialIds,
+              }),
+            ]
+          : again.failures;
+        report.rejected_claims = verdict.output.claims.filter((claim) => rejected.has(claim.id));
+        if (left.length === 0 && again.output) {
+          accepted = again.output;
+          say(`accepted after dropping ${rejected.size} claim(s) that could not be verified`);
+        } else verdict = { ...verdict, failures: left };
+      }
+    }
+
+    if (verdict?.bundleText) writeFileSync(join(outDir, 'pages.json'), verdict.bundleText);
+    if (accepted) {
+      writeFileSync(join(outDir, 'research.json'), `${JSON.stringify(accepted, null, 1)}\n`);
+      report.assets = await downloadAssets(client, accepted, join(outDir, 'files'));
+      report.result = {
+        claims: accepted.claims.length,
+        assets: Object.keys(accepted.assets).length,
+        needs_upload: accepted.needs_upload.length,
+      };
+      say(
+        `saved ${join(outDir, 'research.json')}: ${accepted.claims.length} claims, ${Object.keys(accepted.assets).length} assets, ${accepted.needs_upload.length} upload requests`,
+      );
+      exitCode = 0;
+    } else {
+      if (verdict) {
+        writeFileSync(
+          join(outDir, 'failures.json'),
+          `${JSON.stringify(verdict.failures, null, 1)}\n`,
+        );
+        say(`no result passed the gate; failures are in ${join(outDir, 'failures.json')}`);
+      }
+      report.failed = true;
+    }
+  } catch (cause) {
+    report.error = cause instanceof Error ? cause.message : String(cause);
+    say(`error: ${report.error}`);
+  } finally {
+    await cleanup();
+    process.removeListener('SIGINT', onSignal);
+    process.removeListener('SIGTERM', onSignal);
+  }
+  return exitCode;
+}

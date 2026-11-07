@@ -11,7 +11,9 @@
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "agents:sync": "pnpm --filter @boiler-room/agents sync",
+    "research": "pnpm --filter @boiler-room/agents research"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

@@ -10,6 +10,8 @@ export {
 export type { CampaignFrames, SceneFrames } from './frames.ts';
 export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';
+export type { ResearchParts, ResearchPartsResult } from './research.ts';
+export { researchPartsSchema, validateResearchParts } from './research.ts';
 export type {
   Issue,
   IssueCode,

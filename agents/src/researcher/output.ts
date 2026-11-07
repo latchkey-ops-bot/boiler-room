@@ -1,0 +1,196 @@
+import { researchPartsSchema } from '@boiler-room/schema';
+import { z } from 'zod';
+
+/**
+ * What the Researcher hands on: the brand, assets and claims parts of the campaign contract,
+ * unchanged, plus a brief, what it could not get, and the evidence the gate checks it against.
+ * Keep it free of `.transform()`, `.default()` and `.pipe()`, so the JSON Schema the agent submits
+ * against and the type here are one shape.
+ */
+
+/** Assets live in Naive files. An asset's `src` names its file this way. */
+export const NAIVE_FILE_PREFIX = 'naive://files/';
+
+const FILE_ID = /^fil_[a-z0-9]+$/;
+
+export function naiveFileSrc(fileId: string): string {
+  return `${NAIVE_FILE_PREFIX}${fileId}`;
+}
+
+/** The `fil_` id an asset `src` names, or undefined when it does not name one. */
+export function fileIdOf(src: string): string | undefined {
+  if (!src.startsWith(NAIVE_FILE_PREFIX)) return undefined;
+  const id = src.slice(NAIVE_FILE_PREFIX.length);
+  return FILE_ID.test(id) ? id : undefined;
+}
+
+export const PAGE_KINDS = [
+  'home',
+  'pricing',
+  'product',
+  'docs',
+  'about',
+  'demo',
+  'customers',
+  'blog',
+  'material',
+  'other',
+] as const;
+
+export const NEED_KINDS = [
+  'product-ui',
+  'logo',
+  'font',
+  'video',
+  'screenshot',
+  'brand-guide',
+  'proof',
+  'pricing',
+  'other',
+] as const;
+
+export const LOGO_SOURCES = [
+  'svg',
+  'inline-svg',
+  'png',
+  'favicon',
+  'uploaded',
+  'generated',
+] as const;
+
+export const FONT_METHODS = [
+  'google-fonts',
+  'adobe-fonts',
+  'self-hosted',
+  'other-host',
+  'system',
+  'substitute',
+] as const;
+
+const httpUrl = z.httpUrl();
+const slug = z
+  .string()
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be a lowercase slug such as "pricing-page"');
+const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be an opaque #RRGGBB colour');
+const claim_ids = z.array(slug).describe('Ids of claims in `claims` that back this item.');
+const fileId = z.string().regex(FILE_ID, 'must be a Naive file id such as "fil_abc123"');
+
+const brief = z.strictObject({
+  product_name: z.string().min(1),
+  one_liner: z.string().min(1).describe('What the product is, in one plain sentence.'),
+  what_it_is: z.string().min(1).describe('A short paragraph in plain words, from the live site.'),
+  audiences: z.array(z.strictObject({ who: z.string().min(1), claim_ids })),
+  features: z.array(
+    z.strictObject({ name: z.string().min(1), what_it_does: z.string().min(1), claim_ids }),
+  ),
+  pricing: z
+    .strictObject({
+      summary: z.string().min(1),
+      free_trial: z.string().min(1).nullable(),
+      plans: z.array(
+        z.strictObject({
+          name: z.string().min(1),
+          price: z
+            .string()
+            .min(1)
+            .describe('As written on the site, such as "$19/mo" or "Custom".'),
+          claim_ids,
+        }),
+      ),
+      claim_ids,
+    })
+    .nullable()
+    .describe('Null when the site publishes no pricing.'),
+  ctas: z
+    .array(
+      z.strictObject({
+        label: z.string().min(1).describe('The exact button or link text, as on the page.'),
+        href: httpUrl,
+        source_url: httpUrl.describe('The captured page the label is on.'),
+        placement: z.enum(['nav', 'hero', 'body', 'pricing', 'footer', 'other']),
+      }),
+    )
+    .describe('Calls to action, verbatim.'),
+  headline_claim_id: slug.nullable().describe('The claim that quotes the home page headline.'),
+  positioning_note: z
+    .string()
+    .min(1)
+    .nullable()
+    .describe('How the live site differs from any description you were given, or null.'),
+  non_claims: z
+    .array(
+      z.strictObject({ text: z.string().min(1), source_url: httpUrl, reason: z.string().min(1) }),
+    )
+    .describe('Sample, illustrative or mock figures that must never be shown as facts.'),
+  conflicts: z.array(z.strictObject({ description: z.string().min(1), claim_ids })),
+  pages: z.array(
+    z.strictObject({
+      url: httpUrl,
+      kind: z.enum(PAGE_KINDS),
+      title: z.string(),
+      screenshot_asset_id: slug.nullable(),
+    }),
+  ),
+  product_ui: z.strictObject({
+    status: z.enum(['public', 'mock-only', 'login-required', 'none']),
+    notes: z.string().min(1),
+    asset_ids: z.array(slug),
+  }),
+});
+
+const needUpload = z.strictObject({
+  id: slug,
+  kind: z.enum(NEED_KINDS),
+  what: z.string().min(1).describe('What could not be captured.'),
+  why: z.string().min(1).describe('What the film loses without it.'),
+  request: z.string().min(1).describe('A plain-language request to the customer.'),
+  blocking: z.boolean().describe('True when the film cannot be made well without it.'),
+  evidence_url: httpUrl.nullable().describe('Where the gap was seen, such as a sign-in page.'),
+});
+
+const brandDetails = z.strictObject({
+  mode: z.enum(['light', 'dark']),
+  accents: z.array(hexColor),
+  fonts: z.array(
+    z.strictObject({
+      role: z.enum(['display', 'body', 'mono', 'other']),
+      family: z.string().min(1),
+      method: z.enum(FONT_METHODS),
+      url: httpUrl.nullable(),
+    }),
+  ),
+  radius_px: z.number().min(0).nullable(),
+  css_variables: z.boolean().describe('Whether the site defines colour custom properties.'),
+  notes: z.array(z.string()),
+});
+
+const evidence = z.strictObject({
+  pages_file_id: fileId.describe('The published pages.json the capture tool wrote.'),
+  capture_file_id: fileId.describe('The published capture.json the capture tool wrote.'),
+  logo: z.strictObject({
+    asset_id: slug,
+    source: z.enum(LOGO_SOURCES),
+    url: httpUrl.nullable().describe('Where the logo came from, or null when generated.'),
+  }),
+  material: z.array(
+    z.strictObject({ file_id: fileId, name: z.string().min(1), used_for: z.string().min(1) }),
+  ),
+});
+
+export const researchOutputSchema = z.strictObject({
+  ...researchPartsSchema.shape,
+  brand_details: brandDetails,
+  brief,
+  needs_upload: z.array(needUpload),
+  evidence,
+});
+
+export type ResearchOutput = z.infer<typeof researchOutputSchema>;
+export type Brief = ResearchOutput['brief'];
+export type NeedUpload = ResearchOutput['needs_upload'][number];
+
+/** The output contract as JSON Schema, for the agent's `output_schema`. */
+export const researchOutputJsonSchema = z.toJSONSchema(researchOutputSchema, {
+  target: 'draft-2020-12',
+  io: 'input',
+}) as Record<string, unknown>;
