@@ -346,7 +346,7 @@ describe('isBacked', () => {
     ['an inflected multiple', '2x faster', 'we doubled output'],
     ['half the', '50% cheaper', 'half the cost of Jenkins'],
     ['a verb before the', '2x output', 'double the output'],
-    ['a scale with floating point error', '$1.1M saved', 'saved $1,100,000 last year'],
+    ['a scale with floating point error', '$8.2M saved', 'saved $8,200,000 last year'],
     ['a year-shaped number with a unit', '2,000 minutes', 'in 2000 minutes'],
   ])('accepts %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(true);

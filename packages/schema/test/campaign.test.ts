@@ -100,8 +100,12 @@ describe('campaignSchema', () => {
     ],
     ['a negative durationSeconds', (c: Campaign) => Object.assign(c, { durationSeconds: -20 })],
     [
-      'a claim id that is not a slug',
-      (c: Campaign) => Object.assign(c.claims[0] as object, { id: 'Build Times' }),
+      'a claim id with upper case letters',
+      (c: Campaign) => Object.assign(c.claims[0] as object, { id: 'Build-Times' }),
+    ],
+    [
+      'a claim id that ends in a hyphen',
+      (c: Campaign) => Object.assign(c.claims[0] as object, { id: 'build-times-' }),
     ],
     [
       'a claim sourceUrl that is not a URL',
