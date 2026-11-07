@@ -203,7 +203,8 @@ const CARDINAL = [...CARDINALS.keys()].join('|');
 const MAGNITUDE = [...MAGNITUDES.keys()].join('|');
 const NOT_WORD_BEFORE = '(?<![\\p{L}\\p{N}_])';
 const NOT_WORD_AFTER = '(?![\\p{L}\\p{N}])';
-const CURRENCY_WORDS = [...CURRENCIES.keys()].filter((word) => /^[a-z]+$/.test(word));
+// "won" is left out, because "the one won" is a verb.
+const CURRENCY_WORDS = [...CURRENCIES.keys()].filter((word) => /^(?!won$)[a-z]+$/.test(word));
 const UNIT_WORDS = [...UNITS.keys()].filter((word) => word.length > 1);
 
 const NUMBER_WORDS = new RegExp(
