@@ -7,6 +7,7 @@ export {
   FORMATS,
   TEXT_ROLES,
 } from './campaign.ts';
+export { campaignJsonSchema } from './json-schema.ts';
 export type {
   Issue,
   IssueCode,
