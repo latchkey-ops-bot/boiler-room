@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 import { type Campaign, campaignSchema, type Scene, type TextRole } from './campaign.ts';
 import { contrastRatio, readableOn } from './contrast.ts';
+import { toFrame } from './frames.ts';
 import { extractNumericTokens, isBacked, isWholeNumber, type NumericToken } from './numbers.ts';
 
 export const ISSUE_CODES = [
@@ -241,12 +242,14 @@ function checkUniqueIds(campaign: Campaign): Issue[] {
 
 function checkSceneTiming({ scenes, durationSeconds, fps, audio, variants }: Campaign): Issue[] {
   const issues: Issue[] = [];
-  const toFrame = (time: number) => Math.round(time * fps);
+  const frameOf = (time: number) => toFrame(time, fps);
+  // Two times within the tolerance can still round apart, which leaves a one frame seam.
+  const sameFrame = (a: number, b: number) => sameTime(a, b) && frameOf(a) === frameOf(b);
   let expectedStart = 0;
 
   for (const [index, scene] of scenes.entries()) {
     const path = `scenes[${index}]`;
-    if (!sameTime(scene.start, expectedStart)) {
+    if (!sameFrame(scene.start, expectedStart)) {
       const problem =
         index === 0
           ? 'the first scene must start at 0'
@@ -262,7 +265,7 @@ function checkSceneTiming({ scenes, durationSeconds, fps, audio, variants }: Cam
         ),
       );
     }
-    if (toFrame(scene.end) <= toFrame(scene.start)) {
+    if (frameOf(scene.end) <= frameOf(scene.start)) {
       issues.push(
         error(
           'SCENE_TIMING',
@@ -275,7 +278,7 @@ function checkSceneTiming({ scenes, durationSeconds, fps, audio, variants }: Cam
     expectedStart = scene.end;
   }
 
-  if (!sameTime(expectedStart, durationSeconds)) {
+  if (!sameFrame(expectedStart, durationSeconds)) {
     const path = `scenes[${scenes.length - 1}].end`;
     issues.push(
       error(
@@ -290,7 +293,7 @@ function checkSceneTiming({ scenes, durationSeconds, fps, audio, variants }: Cam
   const opening = scenes[0];
   for (const [index, hook] of variants.hooks.entries()) {
     for (const edge of ['start', 'end'] as const) {
-      if (opening && !sameTime(hook[edge], opening[edge])) {
+      if (opening && !sameFrame(hook[edge], opening[edge])) {
         const path = `variants.hooks[${index}].${edge}`;
         issues.push(
           error(

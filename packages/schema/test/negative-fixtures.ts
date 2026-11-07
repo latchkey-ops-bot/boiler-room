@@ -171,6 +171,47 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a boundary whose two sides round to different frames',
+    code: 'SCENE_TIMING',
+    path: 'scenes[1].start',
+    build: (c) => {
+      c.fps = 25;
+      at(c.scenes, 0).end = 0.7 - 0.4;
+      at(c.variants.hooks, 0).end = 0.7 - 0.4;
+      at(c.scenes, 1).start = 0.3;
+    },
+  },
+  {
+    name: 'a boundary that splits across a frame at 15 fps',
+    code: 'SCENE_TIMING',
+    path: 'scenes[1].start',
+    build: (c) => {
+      c.fps = 15;
+      at(c.scenes, 0).end = 0.7 - 0.4;
+      at(c.variants.hooks, 0).end = 0.7 - 0.4;
+      at(c.scenes, 1).start = 0.3;
+    },
+  },
+  {
+    name: 'a hook that ends on a different frame from the scene it replaces',
+    code: 'SCENE_TIMING',
+    path: 'variants.hooks[0].end',
+    build: (c) => {
+      at(c.scenes, 0).end = 2.35;
+      at(c.scenes, 1).start = 2.35;
+      at(c.variants.hooks, 0).end = 2.3 + 0.05;
+    },
+  },
+  {
+    name: 'a last scene that ends a frame away from durationSeconds',
+    code: 'SCENE_TIMING',
+    path: 'scenes[3].end',
+    build: (c) => {
+      c.durationSeconds = 20.35;
+      at(c.scenes, 3).end = 20.349999999;
+    },
+  },
+  {
     name: 'a sound effect after the end of the video',
     code: 'SCENE_TIMING',
     path: 'audio.sfx[0].at',

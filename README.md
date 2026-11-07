@@ -7,12 +7,12 @@ scenes render it, and the dashboard edits it. `campaign.json` is the contract be
 
 ## Layout
 
-| Path              | Contents                                                                                                   |
-| ----------------- | ---------------------------------------------------------------------------------------------------------- |
-| `packages/schema` | `@boiler-room/schema`: the campaign contract, `validateCampaign`, and the JSON Schema agents write against |
-| `apps/*`          | Deployable apps                                                                                            |
-| `packages/*`      | Shared libraries                                                                                           |
-| `services/*`      | Long-running services                                                                                      |
+| Path              | Contents                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `packages/schema` | `@boiler-room/schema`: the campaign contract, `validateCampaign`, `sceneFrames`, and the JSON Schema agents write against |
+| `apps/*`          | Deployable apps                                                                                                           |
+| `packages/*`      | Shared libraries                                                                                                          |
+| `services/*`      | Long-running services                                                                                                     |
 
 Workspace packages export TypeScript source directly. Nothing is built ahead of time, because
 Remotion and Next both transpile it.

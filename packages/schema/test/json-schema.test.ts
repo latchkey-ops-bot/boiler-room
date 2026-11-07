@@ -56,6 +56,10 @@ describe('campaignJsonSchema', () => {
     expect(JSON.stringify(campaignJsonSchema)).toContain('Every number in the text must appear');
   });
 
+  it('tells agents that a transition takes no time from the scenes', () => {
+    expect(JSON.stringify(campaignJsonSchema)).toContain('take no timeline time');
+  });
+
   it('agrees with the Zod schema on the structural fixtures', () => {
     const validate = ajv.compile(campaignJsonSchema);
     const structural = negativeFixtures.filter(

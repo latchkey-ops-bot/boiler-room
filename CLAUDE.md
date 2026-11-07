@@ -10,6 +10,12 @@
   not a gate: it drives Studio, and `remotion render` does not check it.
 - Content lives in `campaign.json`, motion lives in templates. Visible copy goes in `scene.text`,
   never in `scene.props`, and templates render numbers only from `scene.text`.
+- Take every frame number from `sceneFrames`, or `toFrame` for a single time such as a sound
+  effect. Never write `seconds * fps` in a template or the render step: it is rarely a whole
+  number, Remotion refuses a fractional `durationInFrames`, and scenes drift off their boundaries.
+- Transitions take no timeline time. `scene.start` and `scene.end` stay true, so a transition is
+  overlaid on the boundary. Remotion's `TransitionSeries` shortens the video by each transition's
+  length, so do not map scenes onto it directly.
 
 ## Versions
 

@@ -89,7 +89,13 @@ const scene = z.strictObject({
   text: z.array(textItem),
   voiceover: voiceover.optional(),
   assetIds: z.array(slug),
-  transitionOut: z.string().min(1).optional(),
+  transitionOut: z
+    .string()
+    .min(1)
+    .optional()
+    .describe(
+      'The template that plays as this scene ends. Transitions take no timeline time: start and end stay true, so a transition is overlaid on the boundary and never shortens the video.',
+    ),
 });
 
 const audio = z.strictObject({
