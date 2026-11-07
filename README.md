@@ -11,6 +11,7 @@ scenes render it, and the dashboard edits it. `campaign.json` is the contract be
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
 | `packages/schema` | `@boiler-room/schema`: the campaign contract, `validateCampaign`, `sceneFrames`, and the JSON Schema agents write against                  |
 | `packages/motion` | `@boiler-room/motion`: the Remotion templates, `<CampaignFilm>`, and the scene registry that `validateCampaign` checks scene types against |
+| `services/render` | `@boiler-room/render`: `pnpm render` and `renderCampaign()`, which render a campaign in chunks on Naive computers and stitch it            |
 | `apps/*`          | Deployable apps                                                                                                                            |
 | `packages/*`      | Shared libraries                                                                                                                           |
 | `services/*`      | Long-running services                                                                                                                      |
@@ -27,4 +28,5 @@ pnpm install
 pnpm test
 pnpm typecheck
 pnpm lint
+pnpm render packages/schema/examples/nova.campaign.json --format 9:16
 ```

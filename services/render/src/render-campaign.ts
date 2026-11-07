@@ -103,7 +103,9 @@ async function ledgerUsd(client: Naive, ids: string[], since: string): Promise<n
     const wanted = new Set(ids);
     let total = 0;
     let after: string | undefined;
-    for (let page = 0; page < 20; page += 1) {
+    // The org's other work books entries too, so this reads every entry since the run began. A
+    // ledger too long to read in full gives no figure rather than a short one.
+    for (let page = 0; page < 200; page += 1) {
       const result = await withRetry(() =>
         client.credits.ledger({ from: since, limit: 100, ...(after ? { after } : {}) }),
       );
@@ -113,10 +115,10 @@ async function ledgerUsd(client: Naive, ids: string[], since: string): Promise<n
           if (item.tier === 'computer') total += -item.amount_micro_usd;
         }
       }
-      if (!result.has_more || !result.next_cursor) break;
+      if (!result.has_more || !result.next_cursor) return total / 1e6;
       after = result.next_cursor;
     }
-    return total / 1e6;
+    return null;
   } catch {
     return null;
   }
@@ -184,7 +186,14 @@ export async function renderCampaign(
   if (runner === 'naive') {
     client = naiveClient();
     if (snapshotMode === 'auto') {
-      base = await findBase(client, signal);
+      try {
+        base = await findBase(client, signal);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        warnings.push(
+          `Could not look up the base snapshot (${scrub(String(error))}); setting up from clean.`,
+        );
+      }
       if (base && !fitsBase(workerSize, base)) {
         warnings.push(
           `The base snapshot was taken on a larger computer than ${workerSize.vcpu} vCPU; setting up from clean.`,
@@ -241,7 +250,12 @@ export async function renderCampaign(
         `packed to ${(packed.tarballBytes / 2 ** 20).toFixed(2)} MiB`,
     );
     step = performance.now();
-    await ensureBrowser();
+    await ensureBrowser({
+      onBrowserDownload: () => {
+        log('downloading the headless browser this machine needs to select the film');
+        return { version: null, onProgress: () => undefined };
+      },
+    });
     const inputProps: Record<string, unknown> = { campaign: input, format, ...selection };
     const composition = await selectComposition({
       serveUrl: packed.serveUrl,

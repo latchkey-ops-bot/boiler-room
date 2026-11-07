@@ -47,6 +47,7 @@ export class ComputerPool {
   readonly records: ComputerRecord[] = [];
   private readonly live = new Set<string>();
   private readonly pendingCreates = new Set<Promise<unknown>>();
+  private readonly destroying = new Map<string, Promise<void>>();
   private closed = false;
   private watchdog: NodeJS.Timeout | undefined;
   private readonly now: () => number;
@@ -164,9 +165,18 @@ export class ComputerPool {
     }
   }
 
-  async destroy(id: string): Promise<void> {
+  /** Destroys one computer. Two calls for the same computer share one delete. */
+  destroy(id: string): Promise<void> {
+    if (!this.live.has(id)) return Promise.resolve();
+    const pending = this.destroying.get(id);
+    if (pending) return pending;
+    const request = this.deleteNow(id).finally(() => this.destroying.delete(id));
+    this.destroying.set(id, request);
+    return request;
+  }
+
+  private async deleteNow(id: string): Promise<void> {
     const record = this.records.find((item) => item.id === id);
-    if (!this.live.has(id)) return;
     try {
       await withRetry(() => this.client.computers.delete(id), { attempts: 5 });
     } catch (error) {

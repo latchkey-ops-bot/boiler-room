@@ -94,7 +94,14 @@ const failChunk = whole('simulate-chunk-failure', values['simulate-chunk-failure
 
 const controller = new AbortController();
 let interrupts = 0;
+let lastInterrupt = 0;
 const interrupt = (signalName: string) => {
+  // One Ctrl-C reaches this process more than once under pnpm and tsx: from the terminal to the
+  // whole process group, and again as each parent passes it on. Copies that close together are
+  // one press, so a single Ctrl-C never skips the cleanup.
+  const now = Date.now();
+  if (now - lastInterrupt < 1500) return;
+  lastInterrupt = now;
   interrupts += 1;
   if (interrupts === 1) {
     console.error(
