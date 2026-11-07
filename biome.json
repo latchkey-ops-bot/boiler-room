@@ -14,5 +14,10 @@
     "formatter": {
       "quoteStyle": "single"
     }
+  },
+  "markdown": {
+    "parser": {
+      "frontmatter": true
+    }
   }
 }
