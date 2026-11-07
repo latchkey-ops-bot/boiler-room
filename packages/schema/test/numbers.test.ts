@@ -55,6 +55,7 @@ describe('extractNumericTokens', () => {
     ['big scale', 'two million users', { kind: 'number', value: 2000000 }],
     ['article scale', 'a million users', { kind: 'number', value: 1000000 }],
     ['one with scale', 'one hundred teams', { kind: 'number', value: 100 }],
+    ['joined with and', 'two hundred and fifty teams', { kind: 'number', value: 250 }],
     ['zero', 'zero downtime', { kind: 'number', value: 0 }],
     ['dozen', 'a dozen teams', { kind: 'number', value: 12 }],
     ['spelled multiplier', 'ten times faster', { kind: 'multiplier', value: 10 }],
@@ -87,6 +88,7 @@ describe('extractNumericTokens', () => {
     ['thrice', 'thrice as fast', { kind: 'multiplier', value: 3 }],
     ['treble', 'treble your output', { kind: 'multiplier', value: 3 }],
     ['trebled', 'trebled output', { kind: 'multiplier', value: 3 }],
+    ['quadrupled', 'quadrupled output', { kind: 'multiplier', value: 4 }],
     ['quintupled', 'quintupled output', { kind: 'multiplier', value: 5 }],
     ['sextupled', 'sextupled output', { kind: 'multiplier', value: 6 }],
     ['an order of magnitude', 'an order of magnitude faster', { kind: 'multiplier', value: 10 }],
@@ -296,6 +298,10 @@ describe('nouns and units', () => {
     expect(extractNumericTokens('1,200+ teams')[0]?.noun).toBe('teams');
   });
 
+  it('gives the lower bound of a range the noun of the upper bound', () => {
+    expect(extractNumericTokens('5-10 teams')[0]?.noun).toBe('teams');
+  });
+
   it('records no noun when the number stands alone or has a unit', () => {
     expect(extractNumericTokens('10')[0]?.noun).toBeUndefined();
     expect(extractNumericTokens('10 minutes')[0]?.noun).toBeUndefined();
@@ -340,6 +346,8 @@ describe('isBacked', () => {
     ['an inflected multiple', '2x faster', 'we doubled output'],
     ['half the', '50% cheaper', 'half the cost of Jenkins'],
     ['a verb before the', '2x output', 'double the output'],
+    ['a scale with floating point error', '$1.1M saved', 'saved $1,100,000 last year'],
+    ['a year-shaped number with a unit', '2,000 minutes', 'in 2000 minutes'],
   ])('accepts %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(true);
   });
@@ -363,6 +371,7 @@ describe('isBacked', () => {
     ['a rank against a count', '#1', 'used by 1 team'],
     ['a vague magnitude against a specific number', 'thousands of teams', 'used by 1,000 teams'],
     ['a specific number against a vague quote', '1,000 teams', 'used by thousands of teams'],
+    ['a bare number against a vague quote', '1,000', 'used by thousands of teams'],
     ['a specific hundred against a vague quote', '100 teams', 'used by hundreds of teams'],
     ['a specific dozen against a vague quote', '12 integrations', 'dozens of integrations'],
     ['a plus sign against a vague quote', '1M+ users', 'trusted by millions of users'],

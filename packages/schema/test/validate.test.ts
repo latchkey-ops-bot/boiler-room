@@ -515,6 +515,7 @@ describe('validateCampaign', () => {
       campaign.brand.colors.primary = '#000000';
       campaign.brand.colors.foreground = '#777777';
       expect(await codes(campaign)).toEqual(['CONTRAST_LOW']);
+      expect((await validateCampaign(campaign)).issues[0]?.message).toContain('4.47:1');
       campaign.brand.colors.foreground = '#767676';
       expect(await codes(campaign)).toEqual([]);
     });

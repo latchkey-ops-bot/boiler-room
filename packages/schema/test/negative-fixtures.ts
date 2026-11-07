@@ -847,6 +847,14 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a superlative in full width characters',
+    code: 'CLAIM_SUPERLATIVE',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'The ｆａｓｔｅｓｔ CI';
+    },
+  },
+  {
     name: 'a #1 claim, which is both a superlative and an unbacked number',
     code: 'CLAIM_SUPERLATIVE',
     also: ['CLAIM_UNBACKED'],
@@ -955,6 +963,14 @@ export const negativeFixtures: NegativeFixture[] = [
     path: 'variants.ctas[0].label',
     build: (c) => {
       at(c.variants.ctas, 0).label = '   ';
+    },
+  },
+  {
+    name: 'a CTA with an href that is not a URL, which is a schema problem',
+    code: 'SCHEMA_INVALID',
+    path: 'variants.ctas[0].href',
+    build: (c) => {
+      at(c.variants.ctas, 0).href = 'nova';
     },
   },
   {
