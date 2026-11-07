@@ -374,6 +374,16 @@ describe('validateCampaign', () => {
       ['a JSON number', { columns: 3 }],
       ['a URL', { poster: 'https://nova.example.com/2x/poster.png' }],
       ['a path', { poster: 'assets/2x/poster.png' }],
+      ['a relative path', { poster: './assets/2x/poster.png' }],
+      ['a rooted path', { poster: '/assets/2x/poster.png' }],
+      ['a file name', { poster: 'logo@2x.png' }],
+      ['a storage URL', { poster: 's3://nova/2x/poster.png' }],
+      ['a hex colour of digits', { tint: '#123456' }],
+      ['a ratio', { aspect: '16:9' }],
+      ['a duration', { delay: '500ms' }],
+      ['a dimension word', { mode: '3d' }],
+      ['an identifier in a key', { 'split-2': true }],
+      ['ordinary keys', { easing: 'spring', stiffness: 100 }],
     ])('leaves motion props alone: %s', async (_name, props) => {
       const campaign = novaCopy();
       at(campaign.scenes, 0).props = props;

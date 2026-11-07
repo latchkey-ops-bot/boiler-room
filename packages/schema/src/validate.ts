@@ -64,8 +64,14 @@ const TIME_TOLERANCE_SECONDS = 1e-6;
 const SUPERLATIVE =
   /(?<![\p{L}\p{N}])(?:fastest|quickest|best|leading|top-rated|#1|no\.\s?1|number[\s-]one|cheapest|largest|biggest|greatest|highest|lowest|smartest|strongest|safest|easiest|unmatched|unrivall?ed|unbeatable)(?![\p{L}\p{N}])/iu;
 
-/** A URL or file path, which can hold digits such as `2x` without being copy. */
-const LOCATOR = /^(?:[a-z][a-z0-9+.-]*:|\.{0,2}\/|[\w.-]+\/)\S*$/i;
+/**
+ * A URL or a path to a file, which can hold digits such as `2x` without being copy. The extension
+ * starts with a letter, so that `1.5x` is not a file name.
+ */
+const LOCATOR =
+  /^(?:(?:https?|s3|gs|file):\/\/\S+|(?:\.{0,2}\/)?(?:[\w.@-]+\/)*[\w.@-]+\.[a-z][a-z0-9]{1,4})$/i;
+
+const HEX_COLOUR = /^#[0-9a-f]{6}$/i;
 
 const STATEMENT_KINDS: ReadonlySet<NumericToken['kind']> = new Set([
   'percent',
@@ -546,35 +552,41 @@ function stringsIn(value: unknown, path: string): [path: string, value: string][
     return value.flatMap((entry, index) => stringsIn(entry, `${path}[${index}]`));
   }
   if (typeof value === 'object' && value !== null) {
-    return Object.entries(value).flatMap(([key, entry]) => stringsIn(entry, `${path}.${key}`));
+    return Object.entries(value).flatMap(([key, entry]) => [
+      [`${path}.${key}`, key] as [string, string],
+      ...stringsIn(entry, `${path}.${key}`),
+    ]);
   }
   return [];
 }
 
+/** The number a props string states as copy, if any. `split-2` and `16:9` state none. */
+function statementIn(value: string): NumericToken | undefined {
+  if (LOCATOR.test(value) || HEX_COLOUR.test(value)) return undefined;
+  const readsAsCopy =
+    /\s/.test(value.trim()) || value.split(/[-_]/).length >= 3 || isWholeNumber(value);
+  const tokens = extractNumericTokens(value.replaceAll('_', ' '));
+  return readsAsCopy ? tokens[0] : tokens.find((token) => STATEMENT_KINDS.has(token.kind));
+}
+
 /**
  * Props have no claimIds, so a statistic written there would never reach the check above. This
- * catches strings that read as copy. It cannot catch a JSON number that a template displays, which
- * is why templates must render numbers only from `scene.text`.
+ * catches strings and keys that read as copy. It cannot catch a JSON number that a template
+ * displays, which is why templates must render numbers only from `scene.text`.
  */
 function checkPropsForCopy(campaign: Campaign): Issue[] {
   return allScenes(campaign).flatMap(({ scene, path }) =>
     stringsIn(scene.props, `${path}.props`).flatMap(([propPath, value]) => {
-      if (LOCATOR.test(value)) return [];
-      const tokens = extractNumericTokens(value);
-      const readsAsCopy = /\s/.test(value.trim());
-      const statements = readsAsCopy
-        ? tokens
-        : tokens.filter((token) => STATEMENT_KINDS.has(token.kind));
-      return statements
-        .slice(0, 1)
-        .map(({ raw }) =>
-          error(
-            'CLAIM_UNBACKED',
-            propPath,
-            `"${value}" states "${raw}" in scene props, where it cannot cite a claim.`,
-            `Move this copy to ${path}.text and cite a claim. Keep props for template parameters, and write numeric parameters as JSON numbers.`,
-          ),
-        );
+      const statement = statementIn(value);
+      if (!statement) return [];
+      return [
+        error(
+          'CLAIM_UNBACKED',
+          propPath,
+          `"${value}" states "${statement.raw}" in scene props, where it cannot cite a claim.`,
+          `Move this copy to ${path}.text and cite a claim. Keep props for template parameters, and write numeric parameters as JSON numbers.`,
+        ),
+      ];
     }),
   );
 }

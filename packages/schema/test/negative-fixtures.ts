@@ -616,6 +616,48 @@ export const negativeFixtures: NegativeFixture[] = [
       at(c.scenes, 0).props = { cards: [{ caption: 'Used by 500 teams' }] };
     },
   },
+  ...Object.entries({
+    'a grouped number': { value: '1,200' },
+    'a suffixed number': { value: '10K' },
+    'a lower case suffix': { value: '12k' },
+    'a decimal': { value: '99.9' },
+    'a number with a plus sign': { value: '1,200+' },
+    'a number split from its suffix': { value: '40', suffix: '%' },
+    'a rank': { value: '#1' },
+    'a trailing currency': { value: '29€' },
+    'a hyphenated sentence': { value: 'Trusted-by-1,200-teams' },
+    'an underscored sentence': { value: 'Trusted_by_1200_teams' },
+    'a word before a colon': { value: 'speed:40%' },
+    'a capitalised word before a colon': { value: 'Save:10x' },
+    'a leading slash': { value: '/$29' },
+    'a word after a slash': { value: '10x/week' },
+    'a multiplier that looks like a file name': { value: '1.5x' },
+  }).map(
+    ([kind, props]): NegativeFixture => ({
+      name: `a statistic in scene props: ${kind}`,
+      code: 'CLAIM_UNBACKED',
+      path: 'scenes[0].props.value',
+      build: (c) => {
+        at(c.scenes, 0).props = props;
+      },
+    }),
+  ),
+  {
+    name: 'a statistic in a scene props key',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].props.40% faster builds',
+    build: (c) => {
+      at(c.scenes, 0).props = { '40% faster builds': true };
+    },
+  },
+  {
+    name: 'a statistic in a nested scene props key',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].props.cards[0].10x',
+    build: (c) => {
+      at(c.scenes, 0).props = { cards: [{ '10x': 'faster' }] };
+    },
+  },
 
   {
     name: 'a superlative with no cited claim',
