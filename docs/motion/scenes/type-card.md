@@ -22,7 +22,7 @@ Duration range 43 to 79 frames [M ref A, 1.43 to 2.63 s].
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------- |
 | `kind`    | `type`                                                                                                                                       | [D]                             |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                                                                    | [N]                             |
-| `limits`  | `headline: 40`, `subhead: 40`                                                                                                                | [D] headline; [N] subhead       |
+| `text`    | `{ headline: 40, subhead: 40 }`                                                                                                              | [D] headline; [N] subhead       |
 | `anchors` | `headline`: the text block box. Entry and exit velocity `{axis: 'x', sign: 1, v: 46}`. The name variant exits `{axis: 'y', sign: -1, v: 36}` | [M] 46 px/f ref A; [N] the rest |
 | `props`   | `variant?: 'name' \| 'pivot'`, `accent?`                                                                                                     | [N]                             |
 

@@ -8,7 +8,9 @@ Breadth on a fixed clock. A fixed headline slot plus one causal micro-demo, in w
 visibly produces the next [D rule 6]. Cards run in groups of 2 to 5, each 72 frames, joined by a
 2-frame blink.
 
-72 frames in every template [M ref E, card spacing 71, 72, 72 and 77].
+72 frames in every template row written for it [M ref E, card spacing 71, 72, 72 and 77]. As a
+substitute it takes the row's frames: 96 for a proof row, 66 for Standard's `tile-wall` row and 72
+for Long's [N]. Every exit below is written against `dur`, so the build is the same at any length.
 
 ## Registry entry
 
@@ -16,7 +18,7 @@ visibly produces the next [D rule 6]. Cards run in groups of 2 to 5, each 72 fra
 | --------- | ------------------------------------------------------------------------------------------------ | ----------------------- |
 | `kind`    | `product`                                                                                        | [D]                     |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                        | [N]                     |
-| `limits`  | `headline: 40`, `label: 16`                                                                      | [D] headline; [N] label |
+| `text`    | `{ headline: 40, label: 16 }`                                                                    | [D] headline; [N] label |
 | `anchors` | `headline`: the fixed slot box. Entry and exit `{axis: 'x', sign: 1, v: 46}`                     | [N]                     |
 | `props`   | `demo?: 'chips' \| 'crop'` (default: `'crop'` when an asset is given, else `'chips'`), `accent?` | [N]                     |
 
@@ -47,28 +49,29 @@ cards must be visible to the customer at script approval [D rule 6, section 6].
 
 ## Motion
 
-| Element                   | Frames                                    | Motion                                                                                                                                                                                                                     | Tag                                 |
-| ------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| T5 entry (inside a group) | `f` 0 to 6                                | Ground only on 0 and 1. Headline at full ink from 2, blur 6, 3, 1.2, 0 px, y 13, 7, 4, 1, 0 px                                                                                                                             | [M] y and blanks; [E] blur          |
-| T1 entry (first card)     | `f` 0 to 13                               | Headline and panel enter together with `seamIn` on x                                                                                                                                                                       | [M]                                 |
-| T3 entry                  | `f` 0 to 5                                | The rack above with no blank frames: headline at full ink, blurred, from `f = 0`                                                                                                                                           | [N]                                 |
-| Panel                     | `f` 6 to 13                               | `y = 40 * (1 - arriveN(f - 6, 0.5, 8))`, opacity 1 from 6                                                                                                                                                                  | [M] `arrive.snap`; [N] travel       |
-| Cause lights              | `f` 14 to 25                              | `light.sweep` across the cause node, 12 frames                                                                                                                                                                             | [E] 10 to 20 frames                 |
-| Connector draws           | `f` 20 to 26                              | Stroke length `arriveN(f - 20, 0.5, 8)`                                                                                                                                                                                    | [N]                                 |
-| Effect appears            | `f = 26`                                  | Neutral Cut: `spring.pop` on the effect node (non-type only): `spring({frame: f - 26 + 2, fps: 30, config: {mass: 1, damping: 26, stiffness: 550}, from: 0.46, to: 1})`. Kinetic Plate: scale `1 + 0.26 * 0.3 ** (f - 26)` | [F] `spring.pop`; [M] `arrive.slam` |
-| Labels                    | cause from `f = 14`, effect from `f = 30` | `wordRise(f - start, j, 1, 26, 0.5)`                                                                                                                                                                                       | [M] short rise; [N] start           |
-| Drift                     | every frame                               | Headline `scale(1 + 0.0013 * f)`. Demo nodes carry a slow `translateX(0.3 * f px)`                                                                                                                                         | [M]; [N] node drift                 |
-| Exit into the next card   |                                           | Content leaves in one frame at the seam (the next card draws the blink)                                                                                                                                                    | [M]                                 |
-| T1 exit (last card)       | `f` 61 to 71                              | `seamOut` on x on headline and panel together                                                                                                                                                                              | [M]                                 |
+| Element                                 | Frames                                                   | Motion                                                                                                                                                                                                                     | Tag                                 |
+| --------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| T5 entry (inside a group)               | `f` 0 to 6                                               | Ground only on 0 and 1. Headline at full ink from 2, blur 6, 3, 1.2, 0 px, y 13, 7, 4, 1, 0 px                                                                                                                             | [M] y and blanks; [E] blur          |
+| T1 entry (first card)                   | `f` 0 to 13                                              | Headline and panel enter together with `seamIn` on x                                                                                                                                                                       | [M]                                 |
+| T3 entry                                | `f` 0 to 5                                               | The rack above with no blank frames: headline at full ink, blurred, from `f = 0`                                                                                                                                           | [N]                                 |
+| Panel                                   | `f` 6 to 13                                              | `y = 40 * (1 - arriveN(f - 6, 0.5, 8))`, opacity 1 from 6                                                                                                                                                                  | [M] `arrive.snap`; [N] travel       |
+| Cause lights                            | `f` 14 to 25                                             | `light.sweep` across the cause node, 12 frames                                                                                                                                                                             | [E] 10 to 20 frames                 |
+| Connector draws                         | `f` 20 to 26                                             | Stroke length `arriveN(f - 20, 0.5, 8)`                                                                                                                                                                                    | [N]                                 |
+| Effect appears                          | `f = 26`                                                 | Neutral Cut: `spring.pop` on the effect node (non-type only): `spring({frame: f - 26 + 2, fps: 30, config: {mass: 1, damping: 26, stiffness: 550}, from: 0.46, to: 1})`. Kinetic Plate: scale `1 + 0.26 * 0.3 ** (f - 26)` | [F] `spring.pop`; [M] `arrive.slam` |
+| Labels                                  | cause from `f = 14`, effect from `f = 30`                | `wordRise(f - start, j, 1, 26, 0.5)`                                                                                                                                                                                       | [M] short rise; [N] start           |
+| Drift                                   | every frame                                              | Headline `scale(1 + 0.0013 * f)`. Demo nodes carry a slow `translateX(0.3 * f px)`                                                                                                                                         | [M]; [N] node drift                 |
+| Hold                                    | `f = 40` to `dur - 12` (to `dur - 1` on a T5 or T3 exit) | The build is done by `f = 40`. Hold the final state with the drift above                                                                                                                                                   | [N]                                 |
+| Exit into the next card, or the chapter |                                                          | Content leaves in one frame at the seam (the next card, or the pivot, draws the blink)                                                                                                                                     | [M]                                 |
+| T1 exit (last card)                     | `f` `dur - 11` to `dur - 1`                              | `seamOut` on x on headline and panel together                                                                                                                                                                              | [M]                                 |
 
 `spring.pop` never touches type. Overshoot is allowed on the effect node only, because it is not
 type [D].
 
 ## Transitions
 
-| In                                                  | Out                                                                                             |
-| --------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| T5 from another `feature-card` (exempt), T1 (x), T3 | T5 into another `feature-card`, T1 (x), T3, T6 when the effect node is a CSS fill in the accent |
+| In                                                  | Out                                                                                                                                           |
+| --------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| T5 from another `feature-card` (exempt), T1 (x), T3 | T5 into another `feature-card`, T5 chapter into a pivot `type-card` (pinned), T1 (x), T3, T6 when the effect node is a CSS fill in the accent |
 
 ## Acceptance stills
 
@@ -79,5 +82,5 @@ type [D].
 | `f = 6`                     | Headline sharp and at rest, at the same pixel position as every other card in the group |
 | `f = 20`                    | The cause node lit, nothing else lit                                                    |
 | `f = 32`                    | Effect node and its label present. The demo reads as cause, then effect                 |
-| `f = 71`                    | Content present, drifting                                                               |
+| `f = dur - 1`               | Content present: drifting, or on T1 displaced along x and moving                        |
 | any                         | Tier 4 panels show no numerals. Every numeral on screen comes from `scene.text`         |

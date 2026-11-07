@@ -95,24 +95,31 @@ Every frame number comes from `sceneFrames` or `toFrame`. Never `seconds * fps`.
 - **Copy and numbers.** Every visible word comes from `scene.text` by text id. Numbers render only
   from `scene.text`. Props hold parameters, never copy.
 - **Accent.** `scene.props.accent = {textId, from, to}` marks one phrase of one text item, word
-  indices with an exclusive end, in the accent colour [D]. At most one per text item.
+  indices with an exclusive end, in the accent colour [D]. It is one object, so a scene holds at
+  most one accent phrase, which keeps the reference spec's limit of one per text item.
 - **Reveal.** Type enters by `pop` (full opacity on its first frame) or `develop` (a left-to-right
   opacity ramp per word, leading edge 2 to 4 words wide [E]). Never a uniform whole-line crossfade.
 - **No overshoot on type.** No spring, bounce or overshoot on any type layer [M].
 
 ## Registry entry
 
-Each scene file gives the values for its entry in `sceneRegistry`. The fields are [D] from the
-reference spec except where marked.
+Each scene file gives the values for its entry in the motion registry. The fields are [D] from
+the reference spec except where marked.
 
-| Field           | Meaning                                                                                                                                |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`          | `type`, `proof`, `product`, `mark` or `setpiece`, for the rhythm rule                                                                  |
-| `ground`        | Per skin: `'base' \| 'plate' \| 'event' \| 'black'`. The `Stage` derives the ground timeline from it                                   |
-| `limits`        | `SceneLimits.text`, the character limit per role that `validateCampaign` enforces                                                      |
-| `anchors`       | The `Anchor` objects the scene exposes: id, `box(f)` from props, text and font measurements only, and optional entry and exit velocity |
-| `markLegibleAt` | `logo-reveal` only: the local frame where the logo is at full scale, unmasked and unblurred                                            |
-| `props`         | The keys the scene reads from `scene.props`, with their types [N]                                                                      |
+| Field           | Meaning                                                                                                                                              |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`          | `type`, `proof`, `product`, `mark` or `setpiece`, for the rhythm rule                                                                                |
+| `ground`        | Per skin: `'base' \| 'plate' \| 'event' \| 'black'`. The `Stage` derives the ground timeline from it                                                 |
+| `text`          | The exact `SceneLimits.text` object that `validateCampaign` reads, for example `{ headline: 40 }`. `sceneRegistry` in `packages/schema` holds all 15 |
+| `anchors`       | The `Anchor` objects the scene exposes: id, `box(f)` from props, text and font measurements only, and optional entry and exit velocity               |
+| `markLegibleAt` | `logo-reveal` only: the local frame where the logo is at full scale, unmasked and unblurred                                                          |
+| `props`         | The keys the scene reads from `scene.props`, with their types [N]                                                                                    |
+
+The motion registry has its own type. `validateCampaign` reads only `text`: the other fields are
+not in `SceneLimits`, and the validator ignores them without a warning. So a limits field under
+any other name is never checked. The motion registry's validator view is
+`Object.fromEntries(Object.entries(motionRegistry).map(([id, e]) => [id, { text: e.text }]))`,
+and it must equal `sceneRegistry`.
 
 ## Acceptance stills
 

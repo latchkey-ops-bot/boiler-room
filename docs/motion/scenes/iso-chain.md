@@ -16,7 +16,7 @@ there are no shape keys [F ref G].
 | --------- | --------------------------------------------------------------------------------------------------------------------------------------- | --- |
 | `kind`    | `setpiece`                                                                                                                              | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                                                               | [N] |
-| `limits`  | `headline: 32`, `label: 16`                                                                                                             | [N] |
+| `text`    | `{ headline: 32, label: 16 }`                                                                                                           | [N] |
 | `anchors` | `chain`: the chain's box                                                                                                                | [N] |
 | `props`   | `count?: 3 \| 4 \| 5` (default 3), `hero?: number` (default the middle object), `hues?: number[]`, one categorical hue index per object | [N] |
 

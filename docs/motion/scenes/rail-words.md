@@ -15,7 +15,7 @@ through the centre. Display words may bleed off the frame while moving [D].
 | --------- | -------------------------------------------------------------------- | --- |
 | `kind`    | `product`                                                            | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                            | [N] |
-| `limits`  | `headline: 14`, `subhead: 14`                                        | [N] |
+| `text`    | `{ headline: 14, subhead: 14 }`                                      | [N] |
 | `anchors` | `rails`: the top rail. Entry and exit `{axis: 'x', sign: -1, v: 46}` | [N] |
 | `props`   | `accent?`                                                            | [D] |
 

@@ -17,7 +17,7 @@ Always scene 1, frames 0 to 89, in every template [D].
 | --------- | ------------------------------------------------ | --- |
 | `kind`    | `type`                                           | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`        | [N] |
-| `limits`  | `headline: 40`                                   | [D] |
+| `text`    | `{ headline: 40 }`                               | [D] |
 | `anchors` | `headline`: the sentence block. No exit velocity | [N] |
 | `props`   | `accent?`                                        | [D] |
 
@@ -30,8 +30,11 @@ Exempt from `card.min`: slams read at display size [D].
 | `headline`   | yes      | 2 to 8, target 6 or fewer | 40         | The hook sentence. Its first word is the slam word. Sentence case. Cite a claim for any number or superlative |
 
 - **Slam word.** The first word, 12 characters at most [N]. At display size it must reach
-  `0.13 W` font size or more. If it cannot, the layout check fails and the Director chooses a
-  shorter word or opens with a `type-card` [D].
+  `0.13 W` font size or more. If the slam word renders under 0.13 W, `calculateMetadata` throws a
+  layout error naming the hook's text id. The Director replaces the slam word with a shorter one
+  (at most 8 characters is a safe default). The opening scene is always a `word-slam` [D 0.13 W;
+  N the rest]. The reference spec also allows opening with a `type-card` instead. That is dropped,
+  because every template opens on a `word-slam` and a hook variant replaces it as a unit.
 - **Hook variants.** Every hook variant is also a `word-slam` with the same 0 to 3 s timing. All
   variants share the slam word when the callback card echoes it [N].
 - No assets.
@@ -49,17 +52,17 @@ size, centred on the frame. Later words then extend the line and it re-centres.
 
 ## Motion
 
-| Phase                  | Frames                               | Motion                                                                                                                                           | Tag                                                                    |
-| ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- |
-| Slam                   | `f` 0 to 9                           | Scale about the word centre, laid out at display size: `excess = f === 0 ? 4.4 : 1.5 * 0.7 ** (f - 1)`, `s = 1 + excess`. Opacity 1 from `f = 0` | [M] ref F-BL                                                           |
-| Kinetic Plate recede   | `f` 9, the frame before the collapse | `s *= 0.98 ** (f - 8)`, floored at `sentenceCap / displayCap`. Neutral Cut skips it                                                              | [M] ref F-BL                                                           |
-| Settle before collapse | `f` 3 to 9                           | The slam curve keeps decaying, sharp. At `f = 9` the word is 8.6% over rest (`s = 1.086`), and the collapse starts from there                    | [M] `hold.display` 2 to 10 frames; ref B sharp on frames 2 to 9        |
-| Collapse               | `f` 10 to 22                         | From `s(9)` to `sentenceSize / displaySize` (about 0.37) over 13 frames, `Easing.bezier(0.94, 0.12, 0.34, 0.82)`                                 | [F] `collapse`; [M] ref B blurred again on 10 to 13 while scaling down |
-| Append                 | from `f = 23`                        | Word `j` (j = 1 for the second word) pops in at full opacity on `f = 23 + 3 * (j - 1)`                                                           | [M] 1-frame pops, stagger in the [M] range 2 to 8; [N] 3               |
-| Re-centre              | each append                          | Each line's x offset moves to its new centre with `arriveN(f - tAppend, 0.72, 14)`, summed over appends                                          | [M] ref B                                                              |
-| Second line            | when its first word appears          | Line 1 pushes up by `travel * arrive(f - line2Start + 1, 0.4)`                                                                                   | [D]                                                                    |
-| Sentence hold          | to the end                           | Drift `scale(1 + 0.0013 * (f - 23))` about frame centre, both skins                                                                              | [M] Neutral Cut; [N] Kinetic Plate                                     |
-| T13 exit (pinned)      | `f` 70 to 89                         | Sentence at rest by 69. Iris close 70 to 79, dot hold 80 to 89                                                                                   | [M]                                                                    |
+| Phase                  | Frames                               | Motion                                                                                                                                           | Tag                                                                            |
+| ---------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| Slam                   | `f` 0 to 9                           | Scale about the word centre, laid out at display size: `excess = f === 0 ? 4.4 : 1.5 * 0.7 ** (f - 1)`, `s = 1 + excess`. Opacity 1 from `f = 0` | [M] ref F-BL                                                                   |
+| Kinetic Plate recede   | `f` 9, the frame before the collapse | `s *= 0.98 ** (f - 8)`, floored at `sentenceCap / displayCap`. Neutral Cut skips it                                                              | [M] ref F-BL                                                                   |
+| Settle before collapse | `f` 3 to 9                           | The slam curve keeps decaying, sharp. At `f = 9` the word is 8.6% over rest (`s = 1.086`), and the collapse starts from there                    | [M] `hold.display` 2 to 10 frames; [E, viewed] ref B sharp on frames 2 to 9    |
+| Collapse               | `f` 10 to 22                         | From `s(9)` to `sentenceSize / displaySize` (about 0.37) over 13 frames, `Easing.bezier(0.94, 0.12, 0.34, 0.82)`                                 | [F] `collapse`; [E, viewed] ref B blurred again on 10 to 13 while scaling down |
+| Append                 | from `f = 23`                        | Word `j` (j = 1 for the second word) pops in at full opacity on `f = 23 + 3 * (j - 1)`                                                           | [M] 1-frame pops, stagger in the [M] range 2 to 8; [N] 3                       |
+| Re-centre              | each append                          | Each line's x offset moves to its new centre with `arriveN(f - tAppend, 0.72, 14)`, summed over appends                                          | [M] ref B                                                                      |
+| Second line            | when its first word appears          | Line 1 pushes up by `travel * arrive(f - line2Start + 1, 0.4)`                                                                                   | [D]                                                                            |
+| Sentence hold          | to the end                           | Drift `scale(1 + 0.0013 * (f - 23))` about frame centre, both skins                                                                              | [M] Neutral Cut; [N] Kinetic Plate                                             |
+| T13 exit (pinned)      | `f` 70 to 89                         | Sentence at rest by 69. Iris close 70 to 79, dot hold 80 to 89                                                                                   | [M]                                                                            |
 
 The display portion runs 23 frames, inside ref B's measured 23 to 31 [M]. An 8-word sentence has
 its last word on screen at `f = 41` and is at rest by `f = 55`.

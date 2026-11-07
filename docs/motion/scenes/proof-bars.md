@@ -15,7 +15,7 @@ data-true bars fill, and a verdict stamps. Repeated with one template for the fi
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
 | `kind`    | `proof`                                                                                                                                                       | [D]                      |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                                                                                     | [N]                      |
-| `limits`  | `headline: 40`, `label: 24`, `subhead: 24`                                                                                                                    | [D] headline; [N] others |
+| `text`    | `{ headline: 40, label: 24, subhead: 24 }`                                                                                                                    | [D] headline; [N] others |
 | `anchors` | `headline`: the hero box, then the slot box. Entry and exit `{axis: 'x', sign: 1, v: 46}`. `bar-0`, `bar-1`, `bar-2`: each bar's fill box, `colour: 'accent'` | [N]                      |
 | `props`   | `accent?`                                                                                                                                                     | [D]                      |
 
@@ -27,8 +27,11 @@ data-true bars fill, and a verdict stamps. Repeated with one template for the fi
 | `label`      | yes, 1 to 3 | One per bar, 24 characters: a name and one number, such as `With review: 35%` | Each cites the claim that states its number       |
 | `subhead`    | no          | The verdict, 4 words, 24 characters                                           | Cite a claim for any number or superlative        |
 
-**Data-true bars [N].** Each bar's value is the one numeric token in its `label`, read with the
-schema's own `extractNumericTokens`, so the template renders numbers only from `scene.text`.
+**Data-true bars [N].** Each bar's value is the one numeric token in its `label`, read with
+`extractNumericTokens` from `@boiler-room/schema`, the validator's own reader, so the template
+renders numbers only from `scene.text`. The number is the label's single token (`token.raw`). The
+name is the label with `token.raw` removed, trimmed of whitespace and a trailing `:`. A label with
+zero tokens, or more than one, fails the layout check.
 
 - All bars in a card share one kind and unit. A mix fails the layout check.
 - Percent bars run on a 100% track: `length = value / 100 * track`. A single bar is allowed only

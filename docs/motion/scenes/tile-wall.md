@@ -4,8 +4,8 @@
 
 ## Purpose
 
-Scale, from captured pages. Three rows of real tiles slide in opposed directions, decay to a slow
-cruise, then ramp into a cut at peak speed.
+Scale, from captured pages. Three rows of real tiles slide in opposed directions and decay to a
+slow cruise. On a T9 exit they then ramp into a cut at peak speed.
 
 | Template        | Frames | Job                                |
 | --------------- | ------ | ---------------------------------- |
@@ -18,7 +18,7 @@ cruise, then ramp into a cut at peak speed.
 | --------- | ---------------------------------------------------------------------------------- | --- |
 | `kind`    | `product`                                                                          | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                          | [N] |
-| `limits`  | none: the scene takes no text                                                      | [N] |
+| `text`    | `{}`: the scene takes no text                                                      | [N] |
 | `anchors` | `wall`: the full frame. No velocity: the rows move in opposed directions, so no T1 | [N] |
 | `props`   | `motionBlur?: boolean`, default `false`                                            | [N] |
 
@@ -44,15 +44,18 @@ companies that are not on it [D].
 
 ## Motion
 
-Row `r` moves with sign `[-1, 1, -1, 1][r]` along x. `R = dur - 26` is the ramp start.
+Row `r` moves with sign `[-1, 1, -1, 1][r]` along x. `R = dur - 26` is the ramp start. The ramp
+is the T9 build, drawn by this scene, and runs only when `outT` is T9. No first-build template
+pins T9: Standard's row 14 exits by T3 into `colour-event`, and Long's row 5 by the chapter T5
+into the pivot, so in both the rows cruise to the last frame [N].
 
-| Phase                | Frames               | Speed `v(f)`, px/f                                                                                                            | Tag                                                           |
-| -------------------- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
-| Entry and long decay | `f` 0 to `R - 1`     | `11 + 49 * 0.88 ** f`: 60 at `f = 0`, about 11.6 at `f = 35`                                                                  | [M] `arrive.long` k 0.88; [N] 60 px/f start                   |
-| Ramp into the cut    | `f` `R` to `dur - 1` | `v(R) * 1.11 ** (f - R)`: from about 11 px/f to about 153 on the last frame (`1.11 ** 25`), and 15 times the start at the cut | [M] `depart.drag`, ref F-TL wall ramp, 11 to 165 px/f at 1920 |
+| Phase                           | Frames                                         | Speed `v(f)`, px/f                                                                                                            | Tag                                                                        |
+| ------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Entry and long decay            | `f` 0 to `dur - 1`, or to `R - 1` on a T9 exit | `11 + 49 * 0.88 ** f`: 60 at `f = 0`, about 11.6 at `f = 35`, then a cruise of about 11                                       | [M] `arrive.long` k 0.88; [N] 60 px/f start                                |
+| Ramp into the cut, T9 exit only | `f` `R` to `dur - 1`                           | `v(R) * 1.11 ** (f - R)`: from about 11 px/f to about 153 on the last frame (`1.11 ** 25`), and 15 times the start at the cut | [M] `depart.drag`, ref F-TL wall ramp, 11 to 165 px/f at 1920; [N] T9 only |
 
 Distance is the closed-form sum, so every frame is pure:
-`D(f) = 11 * f + 49 * (1 - 0.88 ** f) / 0.12` for `f <= R`, then
+`D(f) = 11 * f + 49 * (1 - 0.88 ** f) / 0.12`, and on a T9 exit, for `f > R`,
 `D(R) + v(R) * (1.11 ** (f - R) - 1) / 0.11`. Row `r` is at `x = sign_r * D(f) + phase_r`, with
 `phase_r = -r * 0.37 * tileWidth` [N].
 
@@ -61,17 +64,17 @@ scene's render cost by the sample count, so it stays off by default [D gap 9].
 
 ## Transitions
 
-| In  | Out                                                                                                                                                   |
-| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| T3  | T9 (pinned in Standard): a hard cut at peak speed into `colour-event`. T5 chapter (pinned in Long) into the pivot `type-card`. T7 into `colour-event` |
+| In  | Out                                                                                                                                                                                                                                         |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| T3  | T3 into `colour-event` (Standard, from the cruise). T5 chapter (pinned in Long) into the pivot `type-card`. T7 into `colour-event`. T9, a hard cut at peak speed after the ramp, only where a pin asks for it: no first-build template does |
 
 ## Acceptance stills
 
-| Frame         | Must show                                                                 |
-| ------------- | ------------------------------------------------------------------------- |
-| `f = 0`       | All rows full of tiles and moving, adjacent rows in opposite directions   |
-| `f = 35`      | Rows at about 11.6 px/f                                                   |
-| `f = R`       | Rows at about 11 px/f                                                     |
-| `f = dur - 1` | Rows at about 153 px/f                                                    |
-| every frame   | MAD at least 0.02 against the previous frame. No empty strip end in frame |
-| any           | Every tile is a real capture of the customer's own site                   |
+| Frame         | Must show                                                                            |
+| ------------- | ------------------------------------------------------------------------------------ |
+| `f = 0`       | All rows full of tiles and moving, adjacent rows in opposite directions              |
+| `f = 35`      | Rows at about 11.6 px/f                                                              |
+| `f = R`       | Rows at about 11 px/f                                                                |
+| `f = dur - 1` | On a T9 exit, rows at about 153 px/f. Otherwise rows still cruising at about 11 px/f |
+| every frame   | MAD at least 0.02 against the previous frame. No empty strip end in frame            |
+| any           | Every tile is a real capture of the customer's own site                              |

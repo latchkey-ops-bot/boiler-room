@@ -15,7 +15,7 @@ page 2 decays onto its call to action.
 | --------- | ----------------------------------------------------------------------------------------------------------------- | --- |
 | `kind`    | `product`                                                                                                         | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                                         | [N] |
-| `limits`  | `label: 32`                                                                                                       | [N] |
+| `text`    | `{ label: 32 }`                                                                                                   | [N] |
 | `anchors` | `browser`: the same frame box as `site-hero`. Exit `{axis: 'x', sign: 1, v: 46}`                                  | [N] |
 | `props`   | `pages: {targetY?: number, ctaBox?: {x, y, w, h}}[]`, one entry per page asset, in source pixels from the capture | [N] |
 
@@ -24,7 +24,7 @@ page 2 decays onto its call to action.
 | Input        | Required                             | Limit                                                                                                                                                                                                                                    |
 | ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Page assets  | yes, `assetIds[0]` and `assetIds[1]` | Full-page captures, `kind: 'image'`, `provenance: 'captured'` or `'uploaded'`, device scale 2 or more. Tier 2 (docs, changelog, pricing, integrations) or tier 3 (the marketing site). Page 2 must hold a real CTA or heading to land on |
-| `label` text | no, up to 2                          | The URL for each page, shown in the address pill, 32 characters                                                                                                                                                                          |
+| `label` text | no, up to 2                          | The URL for each page, shown in the address pill, no scheme, 32 characters                                                                                                                                                               |
 
 Page 1 needs at least `H + 545` output pixels of height below its start. Page 2's landing point
 `targetY` comes from the CTA's DOM box: `ctaBox.y` minus 0.35 H, in output pixels [N].

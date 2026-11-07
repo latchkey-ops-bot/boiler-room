@@ -15,7 +15,7 @@ claim has one number with nothing to compare it to.
 | --------- | ---------------------------------------------------------------------- | --- |
 | `kind`    | `proof`                                                                | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                              | [N] |
-| `limits`  | `headline: 10`, `label: 40`                                            | [N] |
+| `text`    | `{ headline: 10, label: 40 }`                                          | [N] |
 | `anchors` | `number`: the number box. Entry and exit `{axis: 'x', sign: 1, v: 46}` | [N] |
 | `props`   | `countUp?: boolean`, default `false`                                   | [N] |
 
@@ -26,10 +26,10 @@ unless the founder has approved it.
 
 ## Text and assets
 
-| Text id role | Required | Limit                                                                                                                 | Claims                                                                      |
-| ------------ | -------- | --------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `headline`   | yes      | The number with its unit, such as `40%`, `3x`, `$29` or `90 seconds`. About 10 characters, so it reaches display size | Must cite a claim whose quote states it                                     |
-| `label`      | yes      | 6 words, 40 characters: what the number counts. Keep the quote's qualifier, such as "more than" or "up to"            | Cite the same claim. The two are also checked read together as one sentence |
+| Text id role | Required | Limit                                                                                                                                                                                     | Claims                                                                      |
+| ------------ | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `headline`   | yes      | The number with its unit, such as `40%`, `3x`, `$29` or `90 seconds`. About 10 characters, so it reaches display size                                                                     | Must cite a claim whose quote states it                                     |
+| `label`      | yes      | 6 words, 40 characters: what the number counts. Keep the quote's qualifier, such as "more than" or "up to", here when the headline cannot hold it (`Under 90 s` and `3,000+` hold theirs) | Cite the same claim. The two are also checked read together as one sentence |
 
 No assets.
 

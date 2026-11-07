@@ -19,7 +19,7 @@ The first product surface: a real captured page in a browser frame or on a tilte
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | `kind`    | `product`                                                                                                                                       | [D]                                 |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`                                                                                                       | [N]                                 |
-| `limits`  | `label: 32`                                                                                                                                     | [N]                                 |
+| `text`    | `{ label: 32 }`                                                                                                                                 | [N]                                 |
 | `anchors` | `browser`: the frame box. Entry `{axis: 'y', sign: -1, v: 36}`. Exit `{axis: 'scale', sign: 1, v: 0.03}`                                        | [N] v; [M] scale range 0.02 to 0.03 |
 | `props`   | `frame?: 'browser' \| 'plane'` (default `'browser'`), `layers?: {assetId, box: {x, y, w, h}}[]`, `focus?: {x, y, w, h}`, `activeLayer?: number` | [N]                                 |
 

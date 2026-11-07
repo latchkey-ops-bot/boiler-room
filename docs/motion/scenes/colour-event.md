@@ -21,7 +21,7 @@ Neutral Cut: one full-bleed shot of at most 2.3 s (69 frames), past 60% of runti
 | --------- | -------------------------------------------------------- | ------------------------------------ |
 | `kind`    | `type`                                                   | [D]                                  |
 | `ground`  | `event` in both skins: full-bleed `brand.colors.primary` | [D] `event` token; [N] Kinetic Plate |
-| `limits`  | `headline: 20`                                           | [N]                                  |
+| `text`    | `{ headline: 20 }`                                       | [N]                                  |
 | `anchors` | `card`: the card box                                     | [N]                                  |
 | `props`   | `card?: 'simple' \| 'frosted'`, default `'simple'`       | [N]                                  |
 
@@ -58,11 +58,13 @@ budget].
 
 ## Transitions
 
-Both boundaries change ground, so only the ground-change set applies, plus a pinned T9 cut.
+Both boundaries change ground, so only the ground-change set applies: T6, T7, T16 or T3 [D
+rule 16]. The templates use T3 on both sides. T16 is built but never used here in the templates,
+because with it the callback card after this scene falls under `card.min` [N].
 
-| In                                                                                               | Out                                   |
-| ------------------------------------------------------------------------------------------------ | ------------------------------------- |
-| T6 from `proof-bars` (a bar in the accent fill), T7 or a pinned T9 cut from `tile-wall`, T16, T3 | T3 into the callback `type-card`, T16 |
+| In                                                                                                                                      | Out                                                                    |
+| --------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| T3 (the templates' default), T6 from `proof-bars` (a bar in the accent fill), T7 from `tile-wall`, T16 (built, unused in the templates) | T3 into the callback `type-card`, T16 (built, unused in the templates) |
 
 Lock this scene's first frame to a cue on the track: it is one of the film's 3 to 6 hero moments
 [D].

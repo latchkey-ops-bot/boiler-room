@@ -21,7 +21,7 @@ so every mode must resolve in 15 frames or fewer.
 | --------------- | ---------------------------------------------------------------- | ---------------------------------- |
 | `kind`          | `mark`                                                           | [D]                                |
 | `ground`        | Neutral Cut `base`, Kinetic Plate `plate`                        | [N]                                |
-| `limits`        | `subhead: 32`                                                    | [N]                                |
+| `text`          | `{ subhead: 32 }`                                                | [N]                                |
 | `anchors`       | `logo`: exit velocity `{axis: 'y', sign: -1, v: 36}`             | [N], inside the [M] range 30 to 46 |
 | `markLegibleAt` | by mode: `mask` 13, `blur` 8, `tiles` 7, `iris` 10               | [N], from the tokens below         |
 | `props`         | `mode?: 'mask' \| 'blur' \| 'tiles' \| 'iris'`, default `'mask'` | [N]                                |

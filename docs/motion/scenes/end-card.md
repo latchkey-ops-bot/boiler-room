@@ -19,7 +19,7 @@ The last scene: lockup, call to action and URL, then a quiet static hold while t
 | --------- | ----------------------------------------------------- | --- |
 | `kind`    | `mark`                                                | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate`             | [N] |
-| `limits`  | `cta: 24`, `label: 38`                                | [N] |
+| `text`    | `{ cta: 24, label: 38 }`                              | [N] |
 | `anchors` | `logo`: entry velocity `{axis: 'y', sign: -1, v: 36}` | [N] |
 | `props`   | `urlReveal?: 'decode' \| 'type'`, default `'decode'`  | [N] |
 
@@ -44,8 +44,10 @@ It is always the last scene, so it has no `transitionOut`.
 | CTA       | `capS` 78 px, display family, centred, baseline at 0.66 H                                         | baseline 0.58 H                  | baseline 0.64 H                  | [N] |
 | URL label | 39 px cap (0.5 x `capS`), body family, `muted` if it clears 4.5:1, else `ink`, baseline at 0.76 H | 0.65 H                           | 0.75 H                           | [N] |
 
-The URL label is the only text in the library allowed under `capS`. It never carries the story:
-the CTA does [D Never list].
+Under `capS` only: the end-card URL, the `site-hero`/`site-scroll` address pill, `feature-card`
+node labels, `proof-bars` bar names, `iso-chain` labels and `status-relay` chip labels. None of
+these carries the story, and each repeats words already shown at `capS`. Here the CTA carries it
+[D Never list].
 
 ## Motion
 

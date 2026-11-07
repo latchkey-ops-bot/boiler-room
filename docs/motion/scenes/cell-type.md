@@ -17,7 +17,7 @@ lattice-to-window].
 | --------- | ----------------------------------------- | --- |
 | `kind`    | `setpiece`                                | [D] |
 | `ground`  | Neutral Cut `base`, Kinetic Plate `plate` | [N] |
-| `limits`  | `headline: 16`                            | [N] |
+| `text`    | `{ headline: 16 }`                        | [N] |
 | `anchors` | `panel`: the panel box                    | [N] |
 | `props`   | `accent?`                                 | [D] |
 

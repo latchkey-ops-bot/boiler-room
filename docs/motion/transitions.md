@@ -33,54 +33,69 @@ this file. It is not in the reference spec, it is not measured, and it can chang
 
 ### Which transitions a boundary may use
 
-The resolver in `packages/motion` picks the id for each boundary, in this order [D]:
+The resolver in `packages/motion` picks the id for each boundary in this order [N]. It replaces
+the reference spec's order, which gave no step for the agent-set id, needed a template name that
+`campaign.json` does not carry, and put a T2 anchor carry ahead of T1 and T5 on most template
+seams.
 
-1. A template-pinned id wins.
-2. If the ground differs, pick from the ground-change set: T6, T7, T16 or T3.
-3. If both scenes declare an anchor with the same id, carry it with T2: the incoming scene draws
-   the anchor for `f` in `[0, 11)` at
-   `lerp(outgoing.box(outDur - 1), incoming.box(11), Easing.bezier(0.68, -0.06, 0.34, 1.06))`, and
-   the outgoing scene stops drawing it at its last frame.
-4. If both anchors declare a velocity on the same axis and sign, with `vOut / vIn` in
-   `[1/1.5, 1.5]`, use T1 with `Seam {n: 11, r: 1.4, k: 0.72, D: 14, vPeak: Math.sqrt(vOut * vIn)}`.
-   On axis `x`, use `k: 0.70` [N, from the [M] lateral fit of 0.66 to 0.70 in ref A].
-5. Otherwise use T3.
+1. **A pin wins.** Pins are derived from scene types, not template names: any boundary into a
+   `type-card` with `props.variant: 'pivot'` is T5, as the chapter blink. The first build has no
+   other pin, so the ids the catalog marks template-pinned (T9, T11 to T15, T17) stay off every
+   boundary until a pin for them is added here.
+2. **Otherwise the agent-set `transitionOut`, if it is in the boundary's legal set.**
+   - Ground change: T6, T7, T16 or T3 [D rule 16].
+   - Same ground: T1, T3, T4 or T5 [D rule 16].
+   - T1 only when both anchors declare a velocity on one axis and sign, with `vOut / vIn` in
+     `[1/1.5, 1.5]` [D].
+   - T5 only between two scenes of one type, or into a pivot.
+3. **Otherwise fall back.** Same ground: T1 if the velocities match as above, else T3. Ground
+   change: T3.
 
-With the same ground on both sides, the legal set is T1, T3, T4 or T5 [D]. An agent-set
-`transitionOut` is honoured only when the resolver lists it as legal for that boundary.
+When the resolver overrides an agent-set id, or fills a missing one, it logs the boundary: both
+scene ids, the id written and the id used.
+
+T1 runs with `Seam {n: 11, r: 1.4, k: 0.72, D: 14, vPeak: Math.sqrt(vOut * vIn)}`. On axis `x`, use
+`k: 0.70` [N, from the [M] lateral fit of 0.66 to 0.70 in ref A].
+
+T2 is never a boundary transition. Shared-anchor carry runs inside T1 and T5 only. In T1, when
+both scenes declare an anchor with the same id, the incoming scene draws that anchor for `f` in
+`[0, 11)` at
+`lerp(outgoing.box(outDur - 1), incoming.box(11), Easing.bezier(0.68, -0.06, 0.34, 1.06))`, and
+the outgoing scene stops drawing it at its last frame [D]. In T5 the anchor holds one fixed
+coordinate across the blink [M], so nothing moves.
 
 ### Per-film limits [D]
 
-| Rule            | Limit                                                                                                                            |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| Exempt          | T1 and T3 everywhere. T5 between consecutive scenes of one card group (same scene type, shared headline slot)                    |
-| Every other use | At most 3 per film for each transition, and never next to a seam with the same transition. A template-pinned seam wins over this |
-| Showpieces      | T6, T7, T12, T13, T14, T15: at most 3 in a Standard film                                                                         |
-| Dead stops      | `count(T3)` in `[floor(s / 3), ceil(s / 3)]`, where `s` is the seam count                                                        |
-| T16             | Only at a ground change. It is the one permitted fade between scenes                                                             |
-| T17             | At most once per film                                                                                                            |
+| Rule            | Limit                                                                                                                                   |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Exempt          | T1 and T3 everywhere. T5 between consecutive scenes of one card group (same scene type, shared headline slot)                           |
+| Every other use | At most 3 per film for each transition, and never next to a seam with the same transition. A template-pinned seam wins over this        |
+| Showpieces      | T6, T7, T12, T13, T14, T15: at most Short 2, Standard 3, Long 4 [D Standard; N Short and Long]                                          |
+| Dead stops      | `count(T3)` in `[floor(s / 3), ceil(s / 3)]`, where `s` is the seam count                                                               |
+| T16             | Only at a ground change. It is the one permitted fade between scenes. Never into or out of `colour-event` in the templates [N]: see T16 |
+| T17             | At most once per film                                                                                                                   |
 
 ## Ranked catalog
 
-| Rank | Id    | Name                               | Frames                            | Where it is legal                                    | Showpiece | Refs                              |
-| ---- | ----- | ---------------------------------- | --------------------------------- | ---------------------------------------------------- | --------- | --------------------------------- |
-| 1    | `t1`  | Matched-velocity seam              | 9 to 12 out, cut, 10 to 15 in     | Same ground                                          | no        | ref A, ref B, ref C, ref D, ref G |
-| 2    | `t2`  | Hero-to-slot collapse              | 11 to 13                          | Inside a scene, or a shared anchor (resolver step 3) | no        | ref E, ref B, ref C               |
-| 3    | `t3`  | Dead-stop cut into word rise       | 0, then 5 to 13                   | Any boundary                                         | no        | ref A, ref D, ref B               |
-| 4    | `t4`  | Word slam over a held ground       | 1 overlap, 7 settle               | Same ground                                          | no        | ref F-BL, ref B, ref F-TR         |
-| 5    | `t5`  | Blink and rack                     | 2 blank, 4 rack                   | Same ground                                          | no        | ref E                             |
-| 6    | `t6`  | Object becomes world               | 9 to 24                           | Ground change                                        | yes       | ref G, ref B                      |
-| 7    | `t7`  | Tile flood with a persistent hero  | 6 to 11                           | Ground change                                        | yes       | ref G, ref D                      |
-| 8    | `t8`  | Container morph                    | 18 to 45                          | Inside a scene, or a shared box anchor               | no        | ref C                             |
-| 9    | `t9`  | Long ramp into cut                 | 26 to 55                          | Template-pinned                                      | no        | ref F-TL, ref F-BR, ref C         |
-| 10   | `t10` | Vertical conveyor                  | 25                                | Inside a scene                                       | no        | ref C, ref B                      |
-| 11   | `t11` | Soft-mask baton wipe               | 11                                | Inside a scene, or template-pinned                   | no        | ref C                             |
-| 12   | `t12` | Door split with a surviving centre | 8 moving, 2 clear, headline at 11 | Template-pinned                                      | yes       | ref E                             |
-| 13   | `t13` | Iris to dot and bloom              | 10 to 40                          | Template-pinned                                      | yes       | ref C, ref D                      |
-| 14   | `t14` | Ring wipe from a point             | 11 to 19, by origin [E]           | Template-pinned, identical layouts only              | yes       | ref F-TR                          |
-| 15   | `t15` | Two-beat colour hit                | 2, then 11                        | Template-pinned, hero beats only                     | yes       | ref F-BR, ref F-TR                |
-| 16   | `t16` | Dip to black                       | 10 out, 5 black, 12 up            | Ground change only                                   | no        | ref F-BL                          |
-| 17   | `t17` | Tension hold, colour slam          | 26 hold, 1 cut                    | Template-pinned, once                                | no        | ref G                             |
+| Rank | Id    | Name                               | Frames                            | Where it is legal                       | Showpiece | Refs                              |
+| ---- | ----- | ---------------------------------- | --------------------------------- | --------------------------------------- | --------- | --------------------------------- |
+| 1    | `t1`  | Matched-velocity seam              | 9 to 12 out, cut, 10 to 15 in     | Same ground                             | no        | ref A, ref B, ref C, ref D, ref G |
+| 2    | `t2`  | Hero-to-slot collapse              | 11 to 13                          | Inside a scene only, never a boundary   | no        | ref E, ref B, ref C               |
+| 3    | `t3`  | Dead-stop cut into word rise       | 0, then 5 to 13                   | Any boundary                            | no        | ref A, ref D, ref B               |
+| 4    | `t4`  | Word slam over a held ground       | 1 overlap, 7 settle               | Same ground                             | no        | ref F-BL, ref B, ref F-TR         |
+| 5    | `t5`  | Blink and rack                     | 2 blank, 4 rack                   | Same ground                             | no        | ref E                             |
+| 6    | `t6`  | Object becomes world               | 9 to 24                           | Ground change                           | yes       | ref G, ref B                      |
+| 7    | `t7`  | Tile flood with a persistent hero  | 6 to 11                           | Ground change                           | yes       | ref G, ref D                      |
+| 8    | `t8`  | Container morph                    | 18 to 45                          | Inside a scene only                     | no        | ref C                             |
+| 9    | `t9`  | Long ramp into cut                 | 26 to 55                          | Template-pinned                         | no        | ref F-TL, ref F-BR, ref C         |
+| 10   | `t10` | Vertical conveyor                  | 25                                | Inside a scene                          | no        | ref C, ref B                      |
+| 11   | `t11` | Soft-mask baton wipe               | 11                                | Inside a scene, or template-pinned      | no        | ref C                             |
+| 12   | `t12` | Door split with a surviving centre | 8 moving, 2 clear, headline at 11 | Template-pinned                         | yes       | ref E                             |
+| 13   | `t13` | Iris to dot and bloom              | 10 to 40                          | Template-pinned                         | yes       | ref C, ref D                      |
+| 14   | `t14` | Ring wipe from a point             | 11 to 19, by origin [E]           | Template-pinned, identical layouts only | yes       | ref F-TR                          |
+| 15   | `t15` | Two-beat colour hit                | 2, then 11                        | Template-pinned, hero beats only        | yes       | ref F-BR, ref F-TR                |
+| 16   | `t16` | Dip to black                       | 10 out, 5 black, 12 up            | Ground change only                      | no        | ref F-BL                          |
+| 17   | `t17` | Tension hold, colour slam          | 26 hold, 1 cut                    | Template-pinned, once                   | no        | ref G                             |
 
 ## Shared primitives
 
@@ -153,10 +168,9 @@ display word shrinks to exactly its size in the next sentence. It is not a cut.
 | First data row        | Enters at frame 7 of the 11, before the lift finishes                                                                                                                                                         | [M]                             |
 | Word collapse         | `collapse`, `Easing.bezier(0.94, 0.12, 0.34, 0.82)`, 13 frames, to `sentenceCap / displayCap`, about 0.37 at 2.7:1, never below the sentence minimum                                                          | [F] curve; [D] end scale        |
 | After a word collapse | Later words append as 1-frame pops, and the line re-centres with `arriveN(f, 0.72, 14)`                                                                                                                       | [M] ref B                       |
-| Anchor carry          | Resolver step 3 above                                                                                                                                                                                         | [D]                             |
+| Anchor carry          | Inside T1 and T5 only, never a boundary of its own (see the resolver)                                                                                                                                         | [D] carry; [N] where it runs    |
 
-**Pairs with.** `proof-bars` (lift), `word-slam` (collapse), consecutive scenes that share an
-anchor id.
+**Pairs with.** `proof-bars` (lift), `word-slam` (collapse). Never a boundary transition.
 
 **QC frames.** Lift: `f = 0`, `7` (first data row visible), `11` (headline at the slot, scale
 0.77). Collapse: its first frame, middle frame (`+6`) and `+13` (word at sentence size, cap height
@@ -311,7 +325,9 @@ frames, about 15x total speed) [M ref F-TL] or `depart.slowBuild` (r 1.037, 55 f
 frames, then decay with `arrive.long` (k 0.88, D 35) [M ref C, 167 px/f peak]. The ramp is drawn by
 the outgoing scene. The seam is a hard cut at peak speed.
 
-**Pairs with.** `tile-wall` (exit ramp, pinned in Standard), `site-scroll` (fling inside the scene).
+**Pairs with.** `tile-wall` (exit ramp, drawn only when its exit is T9), `site-scroll` (fling
+inside the scene). No first-build template pins T9: Standard's `tile-wall` exits by T3 and Long's
+by the chapter T5, both from its cruise [N].
 
 **QC frames.** `S - 26` (ramp start, about 11 px/f), `S - 1` (about 165 px/f), `S`.
 
@@ -436,7 +452,11 @@ The ground switches in the middle of the black hold. The outgoing scene loses it
 frames and the incoming scene its first 15, and those frames do not count toward `card.min`. PRE
 and POST are 0.
 
-**Pairs with.** Any ground change, most often into or out of `colour-event`.
+**Pairs with.** Any ground change, but never into or out of `colour-event` in the templates
+[N], and that is their only ground change. With T16 on both sides, a 39-frame `colour-event`
+keeps 12 legible frames (15 lost to the entry, 12 to the exit) and a 42-frame one 15. Out of it,
+the callback card (48 or 54 frames) keeps 33 or 39 legible frames, under `card.min` 43. The
+templates use T3 on both sides.
 
 **QC frames.** `S - 13` (full picture), `S - 7` (half), `S - 2` to `S + 2` (true black: maximum
 pixel at most 12/255 on all five), `S + 9`, `S + 15` (clear).
@@ -466,12 +486,14 @@ allows mid-film, up to 26 frames.
 ## Default seams in the templates
 
 The Director writes these. Each plan was checked against the limits above: dead-stop count, legal
-sets, the 3-use limit and adjacency. Seam `k` joins scene `k` and scene `k + 1`.
+sets, the 3-use limit and adjacency. Seam `k` joins scene `k` and scene `k + 1`. Every
+boundary into or out of `colour-event` is T3, and the only pin is T5 into a pivot. Each plan has
+the most dead stops its seam count allows (4, 6 and 9), so a substitution never adds a T3.
 
 | Template      | Seams 1 to the last                                                              |
 | ------------- | -------------------------------------------------------------------------------- |
 | Short (10)    | `t3 t1 t3 t1 t5 t1 t3 t3 t1 t1`. Seam 7 may be `t6` when scene 7 is `proof-bars` |
-| Standard (17) | `t3 t1 t3 t3 t1 t5 t5 t5 t1 t5 t5 t5 t3 t9 t3 t1 t1`                             |
+| Standard (17) | `t3 t1 t3 t3 t1 t5 t5 t5 t1 t5 t5 t5 t3 t3 t3 t1 t1`                             |
 | Long (26)     | `t3 t1 t3 t3 t5 t1 t3 t1 t5 t5 t3 t5 t5 t3 t1 t3 t5 t1 t5 t5 t5 t5 t3 t3 t1 t1`  |
 
 Standard seam 8 is the pinned chapter blink into the pivot card. It sits next to seam 7, an exempt
