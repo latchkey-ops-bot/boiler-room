@@ -121,9 +121,9 @@ const InterfaceReveal = ({ scene, props }: SceneProps<InterfaceRevealProps>) => 
           pose={pose}
           style={{
             opacity: fade * (1 - exit),
-            transform: `perspective(${camera.perspective}px) translateY(${
-              (1 - opened) * travel.container * stage.unit
-            }px) rotateX(${(1 - opened) * camera.tiltDegrees}deg) scale(${lerp(
+            // 2D only. Chrome picks the raster scale of a 3D-transformed layer from the frames
+            // before it, so a tilt would make a frame depend on what was rendered first.
+            transform: `translateY(${(1 - opened) * travel.container * stage.unit}px) scale(${lerp(
               camera.startScale,
               1,
               opened,

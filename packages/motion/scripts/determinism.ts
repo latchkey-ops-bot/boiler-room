@@ -1,16 +1,22 @@
 /**
- * Proves that a frame is a pure function of its number. Renders sampled frames once in order, then
- * again in a shuffled order in the same browser, and compares the two PNGs byte for byte. A frame
- * that depends on what was rendered before it, on the clock, or on randomness fails.
+ * Proves that a frame is a pure function of its number. The first pass renders the sampled frames
+ * in order in one page, so each frame follows the ones before it. The second pass renders them
+ * again in a shuffled order, each in a fresh page and at a later time. The two PNGs of each frame
+ * are compared byte for byte, so a frame that depends on what was rendered before it, on the
+ * clock, or on randomness fails.
  *
  *   node scripts/determinism.ts [--campaign nova.campaign.json] [--format 16:9] [--samples 24]
  */
-import { renderStill } from '@remotion/renderer';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { renderFrames, renderStill } from '@remotion/renderer';
 import {
   argValue,
   bundleFilm,
   FORMATS,
   type Format,
+  formatSlug,
+  OUT,
   openRenderBrowser,
   readCampaign,
   selectFilm,
@@ -37,7 +43,23 @@ try {
         browser,
       );
       const frames = sampleFrames(composition.durationInFrames, samples);
-      const render = async (frame: number) => {
+      const first = new Map<number, Buffer>();
+      await renderFrames({
+        serveUrl,
+        composition,
+        inputProps,
+        frames,
+        concurrency: 1,
+        imageFormat: 'png',
+        outputDir: null,
+        puppeteerInstance: browser,
+        onStart: () => undefined,
+        onFrameUpdate: () => undefined,
+        onFrameBuffer: (buffer, frame) => {
+          first.set(frame, Buffer.from(buffer));
+        },
+      });
+      for (const frame of shuffled(frames, seed)) {
         const { buffer } = await renderStill({
           serveUrl,
           composition,
@@ -47,16 +69,17 @@ try {
           puppeteerInstance: browser,
         });
         if (!buffer) throw new Error(`Frame ${frame} returned no image.`);
-        return buffer;
-      };
-      const first = new Map<number, Buffer>();
-      for (const frame of frames) first.set(frame, await render(frame));
-      for (const frame of shuffled(frames, seed)) {
-        const again = await render(frame);
+        const before = first.get(frame);
+        if (!before) throw new Error(`The first pass did not render frame ${frame}.`);
         compared += 1;
-        if (!again.equals(first.get(frame) as Buffer)) {
+        if (!buffer.equals(before)) {
           failures += 1;
-          console.error(`DIFFERENT: ${file} ${format} frame ${frame}`);
+          const dir = path.join(OUT, 'determinism');
+          mkdirSync(dir, { recursive: true });
+          const name = `${path.basename(file, '.campaign.json')}-${formatSlug(format)}-${frame}`;
+          writeFileSync(path.join(dir, `${name}-in-order.png`), before);
+          writeFileSync(path.join(dir, `${name}-shuffled.png`), buffer);
+          console.error(`DIFFERENT: ${file} ${format} frame ${frame}, both saved in ${dir}`);
         }
       }
       console.log(`${file} ${format}: ${frames.length} frames compared`);

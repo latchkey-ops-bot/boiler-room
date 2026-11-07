@@ -68,12 +68,10 @@ export const beat = {
   ctaPress: 0.56,
 } as const;
 
-/** How the interface camera opens. */
+/** How a browser frame opens, and how far the camera zooms by default. */
 export const camera = {
-  tiltDegrees: 13,
   startScale: 0.93,
   defaultZoom: 1.4,
-  perspective: 2200,
 } as const;
 
 /** Typography rules. Sizes are in stage units, where one unit is 1% of the short side. */

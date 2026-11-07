@@ -22,6 +22,9 @@ the change that fixes it.
 ## Rules the templates keep
 
 - Every frame is a pure function of its number. `scripts/determinism.ts` checks it.
+- Transforms are 2D. Chrome chooses the raster scale of a 3D-transformed layer (`perspective`,
+  `rotateX`) from the frames rendered before it, so a 3D tilt made a frame's pixels depend on the
+  render order. The determinism check caught this, and the browser frame now opens with a 2D rise.
 - Copy comes only from `scene.text`, so numbers do too. Props are parameters such as a focus point.
   The browser frame draws an empty address bar, since a URL would be copy.
 - Colours, fonts, radius and logo come from `campaign.brand`. A muted colour that cannot be read is
