@@ -31,6 +31,10 @@ export interface TaskInput {
   material: readonly MaterialRef[];
   budgetUsd: number;
   description?: string;
+  /** Extra Naive file ids to fetch alongside the capture tool (used by the injection test). */
+  extraFileIds?: readonly string[];
+  /** Extra numbered-step lines inserted after fetch_file and before setup (injection test). */
+  preSteps?: readonly string[];
 }
 
 /** The first message of a research session. */
@@ -39,6 +43,7 @@ export function researchTask(input: TaskInput): string {
     input.toolFileId,
     ...(input.materialManifestId ? [input.materialManifestId] : []),
     ...input.material.map((item) => item.file_id),
+    ...(input.extraFileIds ?? []),
   ];
   const material = input.material.length
     ? `Customer-supplied material (provenance "uploaded"; it arrives with the tool and the capture reads it):\n${input.material.map((item) => `- ${item.name} (${item.content_type}), file ${item.file_id}, cite as ${item.source_url}`).join('\n')}`
@@ -58,6 +63,7 @@ export function researchTask(input: TaskInput): string {
     'Steps. One tool call at a time.',
     '1. read_skill site-research.',
     `2. fetch_file with file_ids ${JSON.stringify(fileIds)} and dir "br". Below, TOOL is the path it gives for ${TOOL_NAME} (normally ~/br/${TOOL_NAME}).`,
+    ...(input.preSteps ?? []),
     '3. bash: node TOOL setup. Then bash: node TOOL wait, repeated until it prints "BR_JOB_DONE setup ok".',
     `4. bash: node TOOL discover ${input.url}. Then node TOOL wait until "BR_JOB_DONE discover ok".`,
     '5. Choose at most 15 pages in total from the discover summary, as the skill says, and run them in one command: node TOOL capture <site address> <page addresses...>. Then node TOOL wait until "BR_JOB_DONE capture ok". The summary lists the text files, the brand measurements, the files to publish and the template.',

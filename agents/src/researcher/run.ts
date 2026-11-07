@@ -33,6 +33,19 @@ export interface ResearchOptions {
   drillRepair: boolean;
   outRoot: string;
   definition?: AgentDefinition;
+  /** Extra Naive file ids fetched alongside the capture tool (the injection test's server). */
+  extraFileIds?: readonly string[];
+  /** Extra numbered steps run after fetch_file and before setup (the injection test). */
+  preSteps?: readonly string[];
+  /**
+   * Runs once after the session has stopped and before the agent (and its computer) is torn down,
+   * so a caller can read artefacts off the agent's computer. Best-effort; errors are swallowed.
+   */
+  onBeforeTeardown?: (ctx: {
+    client: Naive;
+    agentId: string;
+    sessionId: string | undefined;
+  }) => Promise<void>;
 }
 
 /** Stop reasons after which the agent can simply be asked to carry on. */
@@ -396,6 +409,13 @@ export async function research(options: ResearchOptions): Promise<number> {
         await client.sessions.interrupt(sessionId).catch(() => {});
       if (session) report.session_micro_usd = session.consumed_micro_usd;
     }
+    if (agentId && options.onBeforeTeardown) {
+      await options
+        .onBeforeTeardown({ client, agentId, sessionId })
+        .catch((cause) =>
+          say(`before-teardown hook failed: ${cause instanceof Error ? cause.message : cause}`),
+        );
+    }
     if (agentId && !options.keepAgent) {
       const { spend, leftover } = await teardown(client, agentId);
       report.agent_spend = spend;
@@ -456,6 +476,8 @@ export async function research(options: ResearchOptions): Promise<number> {
         material: refs,
         budgetUsd: budgetMicro / 1e6,
         description: options.description,
+        extraFileIds: options.extraFileIds,
+        preSteps: options.preSteps,
       }),
       budget_micro_usd: budgetMicro,
       ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),

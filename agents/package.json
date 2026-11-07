@@ -9,6 +9,7 @@
   "scripts": {
     "sync": "node src/cli/sync.ts",
     "research": "node src/cli/research.ts",
+    "injection": "node src/cli/injection.ts",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },
