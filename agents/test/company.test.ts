@@ -127,7 +127,7 @@ describe('every company toolset', () => {
   });
 
   it('gives each role exactly the tools its role file allows', () => {
-    const base = ['board_read', 'board_write', 'read_skill', 'session_spend', 'submit_output'];
+    const base = ['board_read', 'board_write', 'read_skill', 'session_spend'];
     const code = ['bash', 'edit', 'find', 'ls', 'publish_file', 'read', 'write'];
     const sorted = (names: string[]) => [...names].sort();
     expect(allowedTools(ceo.tools)).toEqual(sorted([...base, 'br-app.company_metrics']));
@@ -171,7 +171,7 @@ describe('every company toolset', () => {
     );
     expect(allowedTools(social.tools)).toEqual(sorted([...base, ...SOCIAL]));
     expect(allowedTools(inboxReader.tools)).toEqual(
-      sorted(['agentmail.get_message', 'read_skill', 'session_spend', 'submit_output']),
+      sorted(['agentmail.get_message', 'read_skill', 'session_spend']),
     );
   });
 

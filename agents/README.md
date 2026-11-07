@@ -20,6 +20,59 @@ Every toolset denies by default and names `vetta.tools_search`, `vetta.tools_exe
 `ask_operator`, `request_tools` and `propose_plan` as off, because a deny default still offers the
 first two until they are named.
 
+## The company
+
+The company around the product, specified in `docs/company/` on `dev`, is defined in
+`src/definitions/company/`. Each role's operating procedure is a skill in `skills/<role>/SKILL.md`,
+so the prompts stay short.
+
+| Agent             | Model      | Started by                        | Budget (day / task) |
+| ----------------- | ---------- | --------------------------------- | ------------------- |
+| `br-ceo`          | Sonnet 5.5 | The sweep (paused), board digests | $5 / $1.00          |
+| `br-eng-lead`     | Sonnet 5.5 | `BUILD`, `SHIP`, `RELEASE` cards  | $10 / $1.50         |
+| `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                       | $10 / $1.50         |
+| `br-product`      | Sonnet 5.5 | `DIR` cards                       | $4 / $1.00          |
+| `br-design`       | Sonnet 5.5 | `DESIGN` cards                    | $5 / $1.00          |
+| `br-gtm-lead`     | Sonnet 5.5 | Nothing until GTM is activated    | $0 / $0             |
+| `br-scout`        | Haiku 5.5  | Nothing until GTM is activated    | $0 / $0             |
+| `br-social`       | Haiku 5.5  | Nothing until GTM is activated    | $0 / $0             |
+| `br-inbox-reader` | Haiku 5.5  | The app, once GTM is activated    | $0 / $0             |
+
+`br-ceo` is the only coordinator. It has `board: true` and every agent above except the inbox
+reader on its roster, each pinned at the version `company:sync` just made, so a member's new
+version also re-versions the CEO. Nobody delegates: leads create cards and assign them.
+
+```sh
+pnpm company:sync     # idempotent: run it again and everything reads "unchanged"
+pnpm company:status
+pnpm company:verify   # one session per token holder, after its computer has paused
+```
+
+`company:sync`:
+
+1. Creates or versions each agent and pushes its skill, as `agents:sync` does.
+2. Ensures `br-ceo`'s board.
+3. Creates the sweep, cron `0 */2 * * *` in `America/New_York` at $1.00 a fire, with
+   `enabled: false`, so it is paused until someone resumes it (`naive deploy resume <id>`). It never
+   resumes or pauses an existing sweep.
+4. Writes `~/.netrc` (both `github.com` and `api.github.com`) on the computers of `br-eng-lead` and
+   `br-engineer-1` with `BR_GITHUB_TOKEN_ENG`, and of `br-product` and `br-design` with
+   `BR_GITHUB_TOKEN_DESIGN`. An agent's computer exists only once a session has needed a
+   filesystem, so an agent without one first gets a boot session that runs `echo computer-ready`
+   (about $0.015 on Sonnet). The token goes in by Naive's file write only; the shell commands, which
+   Naive keeps for 30 days, hold only the path. A file whose SHA-256 already matches is left alone.
+
+Toolsets deny by default and name every allowed tool. Every agent also names as off the invoker
+(`vetta.tools_search`, `vetta.tools_execute`), the teammate tools, the company settings tools, and
+every planned `br-app.*` tool, and keeps `allowed_apps` explicit. The inbox reader names all 54
+AgentMail tools and allows only `get_message`. Three things the platform decides:
+`submit_output` cannot be named (it is always offered), the `apps` tool stays off until the staging
+app exists (`STAGING_APP_ID`), and design's browser stays off until there is a staging domain to
+limit it to (`STAGING_DOMAIN`).
+
+Not provisioned yet, because nothing uses them until GTM is activated: the GTM persona and the
+inbox reader's AgentMail vault credential. The activation checklist is in `docs/company/roles/gtm.md`.
+
 ## The Researcher
 
 ```sh

@@ -10,14 +10,11 @@ import { ALWAYS_OFF, allow, off } from '../define.ts';
  * unnamed MCP or app tool is offered at "ask", which parks an unattended session.
  */
 
-/** Tools every company agent may use. */
-export const BASE_ALLOW = [
-  'board_read',
-  'board_write',
-  'submit_output',
-  'session_spend',
-  'read_skill',
-];
+/**
+ * Tools every company agent may use. `submit_output` is offered to every session even under a deny
+ * default, and Naive refuses it as a name ("`submit_output` is not a tool"), so it is not listed.
+ */
+export const BASE_ALLOW = ['board_read', 'board_write', 'session_spend', 'read_skill'];
 
 /** Teammate tools. Work moves by card, and nobody waits on a teammate. */
 export const TEAM_OFF = ['send_to_agent', 'wait_for_agents', 'list_agents'] as const;
