@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { framesWorthSeeing, sampleFrames, shuffled } from '../scripts/sampling.ts';
+import { framesWorthSeeing, pixelDifference, sampleFrames, shuffled } from '../scripts/sampling.ts';
 
 describe('render script helpers', () => {
   it('shuffles the same way for the same seed, and keeps every item', () => {
@@ -31,5 +31,12 @@ describe('render script helpers', () => {
       { label: 'b-settled', frame: 162 },
       { label: 'last', frame: 199 },
     ]);
+  });
+
+  it('counts the pixels two images differ in, and by how much', () => {
+    const first = new Uint8Array([0, 0, 0, 255, 10, 10, 10, 255, 9, 9, 9, 255]);
+    const second = new Uint8Array([0, 0, 0, 255, 10, 13, 10, 255, 9, 9, 8, 255]);
+    expect(pixelDifference(first, first)).toEqual({ pixels: 0, maxDelta: 0 });
+    expect(pixelDifference(first, second)).toEqual({ pixels: 2, maxDelta: 3 });
   });
 });

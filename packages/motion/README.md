@@ -25,6 +25,11 @@ the change that fixes it.
 - Transforms are 2D. Chrome chooses the raster scale of a 3D-transformed layer (`perspective`,
   `rotateX`) from the frames rendered before it, so a 3D tilt made a frame's pixels depend on the
   render order. The determinism check caught this, and the browser frame now opens with a 2D rise.
+- A browser frame sits on whole pixels. Chrome reuses a blurred shadow it drew at one sub-pixel
+  offset for the next frame, so a moving frame's shadow depended on the frames before it.
+- The determinism check compares bytes. When a frame differs, it saves both images and says how
+  many pixels changed and by how much: a level or two on a few edge pixels is Chrome raster
+  variance, while a history bug in a template moves whole shapes.
 - Copy comes only from `scene.text`, so numbers do too. Props are parameters such as a focus point.
   The browser frame draws an empty address bar, since a URL would be copy.
 - Colours, fonts, radius and logo come from `campaign.brand`. A muted colour that cannot be read is

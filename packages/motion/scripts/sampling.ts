@@ -42,3 +42,27 @@ export function framesWorthSeeing(plan: PlanShape): { label: string; frame: numb
   frames.push({ label: 'last', frame: plan.durationInFrames - 1 });
   return frames.sort((a, b) => a.frame - b.frame);
 }
+
+/**
+ * How two RGBA images of one size differ: how many pixels, and the largest change in any channel.
+ * A change of a level or two on a few edge pixels is raster variance in Chrome, while a frame that
+ * depends on its history in our code moves whole shapes.
+ */
+export function pixelDifference(
+  first: Uint8Array,
+  second: Uint8Array,
+): { pixels: number; maxDelta: number } {
+  if (first.length !== second.length) return { pixels: Number.POSITIVE_INFINITY, maxDelta: 255 };
+  let pixels = 0;
+  let maxDelta = 0;
+  for (let index = 0; index < first.length; index += 4) {
+    let pixelDelta = 0;
+    for (let channel = 0; channel < 4; channel += 1) {
+      const delta = Math.abs((first[index + channel] ?? 0) - (second[index + channel] ?? 0));
+      pixelDelta = Math.max(pixelDelta, delta);
+    }
+    if (pixelDelta > 0) pixels += 1;
+    maxDelta = Math.max(maxDelta, pixelDelta);
+  }
+  return { pixels, maxDelta };
+}

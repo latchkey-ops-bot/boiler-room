@@ -10,6 +10,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { renderFrames, renderStill } from '@remotion/renderer';
+import { PNG } from 'pngjs';
 import {
   argValue,
   bundleFilm,
@@ -21,7 +22,7 @@ import {
   readCampaign,
   selectFilm,
 } from './bundle.ts';
-import { sampleFrames, shuffled } from './sampling.ts';
+import { pixelDifference, sampleFrames, shuffled } from './sampling.ts';
 
 const campaigns = argValue('campaign')
   ? [argValue('campaign') as string]
@@ -79,7 +80,13 @@ try {
           const name = `${path.basename(file, '.campaign.json')}-${formatSlug(format)}-${frame}`;
           writeFileSync(path.join(dir, `${name}-in-order.png`), before);
           writeFileSync(path.join(dir, `${name}-shuffled.png`), buffer);
-          console.error(`DIFFERENT: ${file} ${format} frame ${frame}, both saved in ${dir}`);
+          const { pixels, maxDelta } = pixelDifference(
+            PNG.sync.read(before).data,
+            PNG.sync.read(buffer).data,
+          );
+          console.error(
+            `DIFFERENT: ${file} ${format} frame ${frame}: ${pixels} pixels differ, by at most ${maxDelta} of 255. Both saved in ${dir}`,
+          );
         }
       }
       console.log(`${file} ${format}: ${frames.length} frames compared`);

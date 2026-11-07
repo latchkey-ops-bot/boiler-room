@@ -19,8 +19,23 @@ export interface BrowserFrameProps {
  * copy that does not come from `scene.text`. Its colours follow the brand, which is why this is
  * drawn here and not taken from a mockup package with a fixed palette.
  */
-export const BrowserFrame = ({ rect, src, pose, overlay, style }: BrowserFrameProps) => {
+/** The rect with its edges on whole pixels. */
+const snap = ({ x, y, width, height }: Rect): Rect => {
+  const left = Math.round(x);
+  const top = Math.round(y);
+  return {
+    x: left,
+    y: top,
+    width: Math.round(x + width) - left,
+    height: Math.round(y + height) - top,
+  };
+};
+
+export const BrowserFrame = ({ rect: exact, src, pose, overlay, style }: BrowserFrameProps) => {
   const { colors, radius } = useBrand();
+  // Whole pixels, because Chrome reuses a blurred shadow it drew at one sub-pixel offset for the
+  // next, which made a moving frame's shadow differ by the frames rendered before it.
+  const rect = snap(exact);
   const chrome = chromeHeight(rect.width);
   const dot = chrome * 0.26;
   return (
