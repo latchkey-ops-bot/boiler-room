@@ -1,6 +1,6 @@
 ---
 name: director-beat-templates
-description: The Director's three beat templates (Short 25 s, Standard 45 s, Long 65 s) row by row, with frames, campaign start and end seconds, default transitionOut and each row's job. Read when filling a campaign.json.
+description: The Director's three beat templates (Short 25 s, Standard 45 s, Long 65 s) row by row, with frames, campaign start and end seconds, default transitionOut and each row's job, and the only allowed scene substitutions with the seams after each swap. Read when filling a campaign.json or substituting a scene.
 ---
 
 # Beat templates
@@ -56,7 +56,7 @@ Three fixes are built in [D]:
 | 11  | `feature-card`                  | 72     | 816  | 887  | 27.2      | 29.6      | `t5`              | Breadth                                                         |
 | 12  | `feature-card`                  | 72     | 888  | 959  | 29.6      | 32        | `t5`              | Breadth                                                         |
 | 13  | `feature-card`                  | 72     | 960  | 1031 | 32        | 34.4      | `t3`              | Breadth                                                         |
-| 14  | `tile-wall`                     | 66     | 1032 | 1097 | 34.4      | 36.6      | `t9`              | Scale, from captured pages                                      |
+| 14  | `tile-wall`                     | 66     | 1032 | 1097 | 34.4      | 36.6      | `t3`              | Scale, from captured pages                                      |
 | 15  | `colour-event`                  | 42     | 1098 | 1139 | 36.6      | 38        | `t3`              | Payoff, past 80% of runtime                                     |
 | 16  | `type-card`                     | 54     | 1140 | 1193 | 38        | 39.8      | `t1`              | Callback to the hook                                            |
 | 17  | `type-card`, `variant: "name"`  | 43     | 1194 | 1236 | 39.8      | 41.233333 | `t1`              | Name. 6 words at most                                           |
@@ -95,6 +95,7 @@ Three fixes are built in [D]:
 | 25  | `type-card`                     | 54     | 1740 | 1793 | 58        | 59.8      | `t1`              | Callback                            |
 | 26  | `type-card`, `variant: "name"`  | 43     | 1794 | 1836 | 59.8      | 61.233333 | `t1`              | Name. 6 words at most               |
 | 27  | `end-card`                      | 113    | 1837 | 1949 | 61.233333 | 65        | none (last scene) | CTA: 44 frames of build, 69 of hold |
+
 ## Rules that apply to every template
 
 | Rule                         | Value                                                                                                                                                                                                                                                                                                          |
@@ -110,11 +111,18 @@ Three fixes are built in [D]:
 
 ## Substitutions that keep the frames
 
-| Situation                                   | Change                                                                                              | Frames                                                                          |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| Standard with fewer than 3 numeric claims   | Replace the missing proof rows, from the last one back, with `feature-card` or `status-relay`       | The row keeps its 96 frames. The scene holds with drift after its timeline ends |
-| Short with no numeric claim at all          | Row 7 becomes a third `feature-card`. Record "no numeric proof" in your notes for the approval step | 96                                                                              |
-| Fewer than 6 captured tiles for `tile-wall` | `feature-card`                                                                                      | The row keeps its frames                                                        |
-| Long, row 17                                | `iso-chain` when 2 or 3 concepts can each key a hue, else `cell-type`                               | 108                                                                             |
+These are the only substitutions. The Director makes every one of them, because each swap needs
+copy. The Art Director never changes a scene's type: it sends the campaign back instead. The
+"Seams after the swap" column is [N]: the reference spec gives the swaps but not their seams. The
+Standard default has 6 dead stops in 17 seams, the most rule 2 in `director-seams` allows, so no
+swap adds a `t3`.
 
-No other substitution is allowed. Never add, drop or reorder rows.
+| Situation                                                            | Change                                                                                                                              | Frames                                                                                                                               | Seams after the swap                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Standard with fewer than 3 numeric claims                            | Replace the missing proof rows, from the last one back, with `feature-card` or `status-relay`, the same type for every replaced row | Each row keeps its 96 frames. The scene runs its build, then holds its final state with drift until its exit, as its scene file says | Row 8 replaced: seam 7 becomes `t1` into the first card, and seam 8 stays the pinned `t5`. Rows 7 and 8: seam 6 becomes `t1`, seam 7 stays `t5` (same type), seam 8 stays pinned. Rows 6 to 8: seam 5 stays `t1`, seams 6 and 7 stay `t5`, seam 8 stays pinned |
+| Short with no numeric claim at all                                   | Row 7 becomes a third `feature-card`. Write "no numeric proof" in your handoff for the approval step                                | 96                                                                                                                                   | Seam 6 becomes `t5`, so the three cards are one group. Seam 7 stays `t3`                                                                                                                                                                                       |
+| Fewer than 6 captured tiles from the customer's site for `tile-wall` | A `feature-card` with its own headline                                                                                              | The row keeps its frames: Standard 66, Long 72                                                                                       | Unchanged. Standard seams 13 and 14 stay `t3`. Long seam 5 stays the pinned `t5` into the pivot                                                                                                                                                                |
+| Long, row 17                                                         | `iso-chain` when 2 or 3 concepts can each key a hue, else `cell-type`                                                               | 108                                                                                                                                  | Unchanged: both exit by the pinned `t5`                                                                                                                                                                                                                        |
+
+No other substitution is allowed. Never add, drop or reorder rows. Record every substitution in
+your handoff: row, old type, new type.

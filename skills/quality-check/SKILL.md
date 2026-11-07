@@ -20,17 +20,18 @@ for each transition) and the acceptance stills in each `docs/motion/scenes/<type
 
 ## Inputs
 
-| Input                                              | Use                                                             |
-| -------------------------------------------------- | --------------------------------------------------------------- |
-| The rendered file                                  | The only source of frames and audio                             |
-| The `campaign.json` it was rendered from           | Scene list, text, claims, assets, `transitionOut`               |
-| `sceneFrames(campaign)` from `@boiler-room/schema` | The frame of every scene and seam. Never compute `seconds * 30` |
-| The scene registry                                 | `markLegibleAt` and each scene's kind                           |
+| Input                                              | Use                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| The rendered file                                  | The only source of frames and audio                                                  |
+| The `campaign.json` it was rendered from           | Scene list, text, claims, assets, `transitionOut`                                    |
+| `sceneFrames(campaign)` from `@boiler-room/schema` | The frame of every scene and seam. Never compute `seconds * 30`                      |
+| The scene files in `docs/motion/scenes/`           | `markLegibleAt` per `logo-reveal` mode, each scene's kind, and its acceptance stills |
 
 ## Procedure
 
-1. **Gate.** Run `validateCampaign` on the campaign. It must return `ok: true` with no
-   `CLAIM_SUPERLATIVE` warning. Hash the render file (sha256). Otherwise stop: `blocked`.
+1. **Gate.** Run `node packages/schema/bin/validate.ts campaign.json`, which passes
+   `sceneRegistry`. It must report `ok: true` with no `CLAIM_SUPERLATIVE` warning. Hash the
+   render file (sha256). Otherwise stop: `blocked`.
 2. **Probe.** The render must be 1920 x 1080 (or 3840 x 2160) at 30 fps, with exactly
    `sceneFrames(campaign).durationInFrames` frames and an audio stream.
 3. **Extract.** Pull the contact-sheet frames, the seam frames and the acceptance stills listed
@@ -91,28 +92,28 @@ For every seam `S = sceneFrames(...).scenes[i + 1].from`, extract the QC frames 
 outgoing ramp), during (`S - 1`, `S`, `S + 1`) and after (the incoming settle frame). Lay each
 seam's frames out as one strip.
 
-| Check             | Pass                                                                                                                                                                                                           |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| No cross-dissolve | No frame shows the outgoing and incoming content both at partial opacity. Allowed exceptions: the single overlap frame of `t4`, the overlays of `t12` and `t14`, and the black of `t16`                        |
-| No blank flash    | `S` is not empty ground, except after `t5` (exactly 2 frames of uniform ground, 5 for a chapter blink into a pivot) and inside `t16`                                                                           |
-| `t1`              | The outgoing element moves into the cut and the incoming one moves on from it on the same axis, in the same direction. Declared velocities within 1.5x of each other                                           |
-| `t3`              | `S - 1` is not frozen. `S` already shows incoming motion, the first word up and rising                                                                                                                         |
-| `t5`              | Uniform ground on the blank frames: no pixel more than 2 levels from the ground colour. The returning headline is soft on its first frame, sharp 3 frames later, at the same pixel position as the card before |
-| `t16`             | At least 4 frames with maximum pixel at most 12/255. Only at a ground change                                                                                                                                   |
-| Seam mix          | `count(t3)` in `[floor(s / 3), ceil(s / 3)]`. Showpieces (`t6`, `t7`, `t12` to `t15`) 3 or fewer in Standard. Every limited id at most 3 times and never on adjacent seams, except pinned seams                |
-| Start in motion   | At `S`, the incoming scene shows motion: its MAD at `S + 1` is 0.02 or more                                                                                                                                    |
+| Check             | Pass                                                                                                                                                                                                                                                                        |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| No cross-dissolve | No frame shows the outgoing and incoming content both at partial opacity. Allowed exceptions: the single overlap frame of `t4`, the overlays of `t12` and `t14`, and the black of `t16`                                                                                     |
+| No blank flash    | `S` is not empty ground, except after `t5` (exactly 2 frames of uniform ground, 5 for a chapter blink into a pivot) and inside `t16`                                                                                                                                        |
+| `t1`              | The outgoing element moves into the cut and the incoming one moves on from it on the same axis, in the same direction. Declared velocities within 1.5x of each other                                                                                                        |
+| `t3`              | `S - 1` is not frozen. `S` already shows incoming motion, the first word up and rising                                                                                                                                                                                      |
+| `t5`              | Uniform ground on the blank frames: no pixel more than 2 levels from the ground colour. The returning headline is soft on its first frame, sharp 3 frames later, at the same pixel position as the card before                                                              |
+| `t16`             | At least 4 frames with maximum pixel at most 12/255. Only at a ground change                                                                                                                                                                                                |
+| Seam mix          | `count(t3)` in `[floor(s / 3), ceil(s / 3)]`. Showpieces (`t6`, `t7`, `t12` to `t15`) at most Short 2, Standard 3, Long 4 (Short and Long are new defaults, not from the reference spec). Every limited id at most 3 times and never on adjacent seams, except pinned seams |
+| Start in motion   | At `S`, the incoming scene shows motion: its MAD at the first non-blank incoming frame is 0.02 or more. After `t5`, the 2 (or 5) blank frames are exempt                                                                                                                    |
 
 ## Phone-size legibility
 
 For each scene with text, take its rest frame and downscale it to 360 px wide.
 
-| Check            | Pass                                                                                                                                                                                |
-| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Words recovered  | OCR on the 360 px frame returns every word of each `scene.text` value, ignoring case and punctuation. Without OCR, read it yourself and say so in the report                        |
-| Cap height       | On the full-size frame, the ink height of a capital is at least 78 px at 1080 (7.2% of frame height) for every headline, subhead, CTA and label that carries the story              |
-| Lines            | At most 2 lines per text item, and each static line at most 65% of the frame width                                                                                                  |
-| Story text       | No story-carrying text under sentence size. Only the end card's URL may be smaller                                                                                                  |
-| Inside the frame | Every text box inside the safe area, except layers declared as bleed on their entry and exit frames. Each bleed word wholly inside the safe area for at least 10 consecutive frames |
+| Check            | Pass                                                                                                                                                                                                                                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Words recovered  | OCR on the 360 px frame returns every word of each `scene.text` value at sentence size or larger, ignoring case and punctuation. The small slots listed under Story text are exempt. Without OCR, read it yourself and say so in the report                                                                         |
+| Cap height       | On the full-size frame, the ink height of a capital is at least 78 px at 1080 (7.2% of frame height) for every headline, subhead, CTA and label that carries the story                                                                                                                                              |
+| Lines            | At most 2 lines per text item, and each static line at most 65% of the frame width                                                                                                                                                                                                                                  |
+| Story text       | No story-carrying text under sentence size. Under `capS` only: the end-card URL, the `site-hero`/`site-scroll` address pill, `feature-card` node labels, `proof-bars` bar names, `iso-chain` labels and `status-relay` chip labels. None of these carries the story, and each repeats words already shown at `capS` |
+| Inside the frame | Every text box inside the safe area, except layers declared as bleed on their entry and exit frames. Each bleed word wholly inside the safe area for at least 10 consecutive frames                                                                                                                                 |
 
 ## Brand match
 
@@ -122,7 +123,7 @@ For each scene with text, take its rest frame and downscale it to 360 px wide.
 | Ink and accent           | Type in `brand.colors.foreground` (or its `readableOn` fallback). On Neutral Cut the only saturated hue outside the colour event is `brand.colors.primary`. On Kinetic Plate the plate's hues are allowed too. Inside a Cell World set piece, up to 3 keyed hues, each with a label and swatch |
 | Logo                     | Matches the declared logo asset: same shape and colours, never stretched. A raster logo never shown above natural size                                                                                                                                                                         |
 | Fonts                    | Display text in the brand display family, or the declared fallback                                                                                                                                                                                                                             |
-| Accent ration            | At most one accent phrase per text item. At most one lit element per shot                                                                                                                                                                                                                      |
+| Accent ration            | At most one accent phrase per scene, the one `props.accent`, and none on `colour-event`. At most one lit element per shot                                                                                                                                                                      |
 | Neutral Cut colour event | One full-bleed saturated stretch, starting at or after 60% of the film's frames, lasting 69 frames or fewer                                                                                                                                                                                    |
 | Kinetic Plate            | The plate carries the saturation. Type stays neutral                                                                                                                                                                                                                                           |
 
@@ -139,29 +140,29 @@ For each scene with text, take its rest frame and downscale it to 360 px wide.
 
 ## Timing and holds
 
-| Check          | Pass                                                                                                                                  |
-| -------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Static runs    | No run of more than 30 consecutive static frames, except the end card's hold and one tension hold of up to 26 frames                  |
-| Product layers | Zero static frames inside `site-hero`, `site-scroll`, `tile-wall`, `feature-card`, `status-relay` and `rail-words`                    |
-| Mark deadline  | `90 + markLegibleAt <= 105`, and frame 105 shows the full logo: full scale, unmasked, unblurred                                       |
-| First hit      | A strong hit (the slam or the logo resolve) by frame 105, 3.5 s                                                                       |
-| First surface  | A real product surface on screen by frame 210, 7 s                                                                                    |
-| Card time      | Each `type-card` lasts `max(43, ceil(6.5 * words))` frames or more                                                                    |
-| Beats          | No scene under 15 frames. None over 120 except the end card or a set piece. Median scene length 51 to 72 frames (1.7 to 2.4 s)        |
-| End hold       | The end card's last 53 to 89 frames are static (target 69)                                                                            |
-| Camera lock    | No product shot holds one framing for more than 120 frames (4 s)                                                                      |
-| Hero hold      | `proof-bars`: the lift starts at local frame 23, so 23 frames of hero (21 after a `t5` blink). Verdict held 25 frames before any exit |
+| Check          | Pass                                                                                                                                                        |
+| -------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static runs    | No run of more than 30 consecutive static frames, except the end card's hold and one tension hold of up to 26 frames                                        |
+| Product layers | Zero static frames inside `site-hero`, `site-scroll`, `tile-wall`, `feature-card`, `status-relay` and `rail-words`, except the blank frames of a `t5` entry |
+| Mark deadline  | `90 + markLegibleAt <= 105`, and frame 105 shows the full logo: full scale, unmasked, unblurred                                                             |
+| First hit      | A strong hit (the slam or the logo resolve) by frame 105, 3.5 s                                                                                             |
+| First surface  | A real product surface on screen by frame 210, 7 s                                                                                                          |
+| Card time      | Each `type-card` lasts `max(43, ceil(6.5 * words))` frames or more                                                                                          |
+| Beats          | No scene under 15 frames. None over 120 except the end card or a set piece. Median scene length 51 to 72 frames (1.7 to 2.4 s)                              |
+| End hold       | The end card's last 53 to 89 frames are static (target 69)                                                                                                  |
+| Camera lock    | No product shot holds one framing for more than 120 frames (4 s)                                                                                            |
+| Hero hold      | `proof-bars`: the lift starts at local frame 23, so 23 frames of hero (21 after a `t5` blink). Verdict held 25 frames before any exit                       |
 
 ## Audio
 
-| Check      | Pass                                                                            |
-| ---------- | ------------------------------------------------------------------------------- |
-| Opening    | Short-term loudness at or below -24 LUFS over 0 to 3 s                          |
-| Integrated | -14 LUFS, within 1 LU                                                           |
-| True peak  | -1 dBTP or lower                                                                |
-| End        | Music fades over the end card and ends between the last frame and 2 s before it |
-| Effects    | At most 6 in a Standard film. No whoosh per cut, no typing clicks               |
-| Sound off  | Every idea reads with the sound muted. Nothing lives only in voice              |
+| Check      | Pass                                                                                                                                    |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| Opening    | Short-term loudness at or below -24 LUFS over 0 to 3 s                                                                                  |
+| Integrated | -14 LUFS, within 1 LU                                                                                                                   |
+| True peak  | -1 dBTP or lower                                                                                                                        |
+| End        | Music fades over the end card and ends between the last frame and 2 s before it                                                         |
+| Effects    | At most Short 4, Standard 6, Long 8 (Short and Long are new defaults, not from the reference spec). No whoosh per cut, no typing clicks |
+| Sound off  | Every idea reads with the sound muted. Nothing lives only in voice                                                                      |
 
 ## Report format
 
@@ -194,7 +195,7 @@ Write one JSON report, then a short summary in prose.
     {
       "id": "phone-legibility",
       "result": "fail",
-      "measured": "label 'or less, from push to preview' unreadable at 360 px",
+      "measured": "label 'A live preview per pull request' unreadable at 360 px",
       "threshold": "every word recovered",
       "frames": [451]
     }

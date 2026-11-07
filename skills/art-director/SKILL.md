@@ -7,8 +7,9 @@ description: Chooses the Boiler Room style family from a brand's colours (Neutra
 
 You take the Director's `campaign.json` and make it look right for this brand without breaking
 anything true. You set the colours the renderer derives its ground from, assign real assets to
-scenes, swap a scene only through the substitutions the Director's `director-scene-types` skill
-allows, and declare any generated asset honestly. You never write copy and never touch claims.
+scenes, and declare any generated asset honestly. You never write copy, never touch claims and
+never change a scene's type. When a missing asset needs one of the substitutions in the
+Director's `director-beat-templates` skill, you send the campaign back to the Director.
 
 Sources: `docs/motion/reference-spec.md` sections 1, 6 and 7, and the scene files in
 `docs/motion/scenes/`.
@@ -18,10 +19,11 @@ Sources: `docs/motion/reference-spec.md` sections 1, 6 and 7, and the scene file
 1. Compute the OKLCH lightness `L` of `brand.colors.background`. Choose the family.
 2. Fix the ground if it is mid-tone. Check ink, accent and muted against it.
 3. Check fonts and the logo.
-4. For each scene, pick assets from the highest tier available. Record a substitution where the
-   tier is missing.
+4. For each scene, pick assets from the highest tier available. Where a tier is missing, use the
+   fallbacks in section 4, or send the campaign back to the Director.
 5. Decide which missing assets may be generated. Generate them, or fall back.
-6. Run `validateCampaign`. It must pass with no `CONTRAST_LOW` and no `ASSET_UNDECLARED`.
+6. Run `node packages/schema/bin/validate.ts campaign.json`, which passes `sceneRegistry`. It must
+   report no `CONTRAST_LOW` and no `ASSET_UNDECLARED`.
 7. Write your report.
 
 ## 1. Style family
@@ -50,7 +52,8 @@ Checks: `#FFFFFF` is 1.0, `#808080` is 0.600, `#0B1020` is 0.177.
 **Set pieces, sparingly.** Continuous Diagram (`status-relay`) and Cell World (`cell-type`,
 `iso-chain`, `rail-words`) are never whole-film skins. They appear only as the scenes the Long
 template already holds: at most one set piece (`cell-type` or `iso-chain`) per film. Showpiece
-transitions stay at 3 or fewer in a Standard film.
+transitions stay within the Director's limits: Short 2, Standard 3, Long 4 (Short and Long are
+new defaults, not from the reference spec).
 
 ## 2. Colour that survives any brand
 
@@ -72,7 +75,7 @@ higher contrast.
 
 | Rule                             | Value                                                                                                                                                                                                                          |
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Accents                          | One per section. At most one accent phrase per text item                                                                                                                                                                       |
+| Accents                          | One per section. At most one accent phrase per scene, and none on `colour-event`                                                                                                                                               |
 | Light budget                     | `light.rim`, `light.sweep` and `ground.bloom` spend that one accent and never add a colour                                                                                                                                     |
 | Categorical hues                 | Only in a Cell World set piece: up to 3 extra hues derived in OKLCH from `primary` at matched lightness, each bound to one concept for the whole film and introduced with a label and swatch. Never reused for another concept |
 | Neutral Cut colour event         | One full-bleed shot, 2.3 s at most, past 60% of runtime. Everything else near-neutral                                                                                                                                          |
@@ -123,13 +126,13 @@ grey bars for text, no numerals, no brand-styled fake screens. Any numeral comes
 | A logo wall of companies the customer's site does not show, or any rival's logo      |     |
 | A static screenshot: every product layer keeps moving (push, scroll, drift or sweep) |     |
 
-**Fallbacks** when a tier is missing, within the Director's allowed substitutions:
+**Fallbacks** when a tier is missing:
 
-| Missing                                     | Do                                                      |
-| ------------------------------------------- | ------------------------------------------------------- |
-| Fewer than 6 captured tiles for `tile-wall` | Swap it for a `feature-card` in the same row and frames |
-| No crop for a feature                       | Tier 4 greeked demo in the `feature-card`               |
-| No second page for `site-scroll`            | Use a tier 2 page: docs, pricing, changelog             |
+| Missing                                     | Do                                                                                                                               |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Fewer than 6 captured tiles for `tile-wall` | Send the campaign back to the Director, citing the substitution in `director-beat-templates`. Never swap a scene that needs copy |
+| No crop for a feature                       | Tier 4 greeked demo in the `feature-card`                                                                                        |
+| No second page for `site-scroll`            | Use a tier 2 page: docs, pricing, changelog                                                                                      |
 
 ## 5. Generating missing assets
 
@@ -177,5 +180,5 @@ End with a short report the next agents and the customer can read.
 | Assets per scene | Scene id, asset ids, tier                                          |
 | Tier 4 scenes    | Listed for the customer's approval                                 |
 | Generated assets | Asset id, what it is, which scene uses it                          |
-| Substitutions    | Row, old type, new type, why                                       |
+| Sent back        | Row, the substitution the Director should make, and why            |
 | Flags            | Anything a human must decide, such as a many-colour brand gradient |
