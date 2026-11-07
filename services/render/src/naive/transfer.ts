@@ -12,6 +12,8 @@ import type { Naive } from './client.ts';
 import { runCommand, withRetry } from './exec.ts';
 
 export const UPLOAD_LINK_LIMIT = 60 * 1024 * 1024;
+/** The most one `fs write` takes. */
+export const FS_WRITE_LIMIT = 4 * 1024 * 1024;
 
 /** Uploads bytes from this machine to a new Naive file through a one-shot link. */
 export async function uploadBytes(

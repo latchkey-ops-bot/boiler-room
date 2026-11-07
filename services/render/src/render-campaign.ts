@@ -29,7 +29,7 @@ import { type BaseRecord, findBase, fitsBase, RECIPE_HASH } from './naive/base.t
 import { type Naive, naiveClient, scrub } from './naive/client.ts';
 import { Aborted, withRetry } from './naive/exec.ts';
 import { ComputerPool } from './naive/pool.ts';
-import { uploadBytes } from './naive/transfer.ts';
+import { FS_WRITE_LIMIT, uploadBytes } from './naive/transfer.ts';
 import { type RenderedChunk, renderChunkOnNaive, type WorkerContext } from './naive/workers.ts';
 import { planQuality, writeQualityArtifacts } from './quality.ts';
 import { checkFilm, compareSeams } from './verify.ts';
@@ -290,6 +290,14 @@ export async function renderCampaign(
       inputProps,
       concurrency: options.concurrency ?? null,
     };
+    // The job file reaches each computer through one `fs write`, so it is checked before any exists.
+    const jobBytes = Buffer.byteLength(JSON.stringify(chunkJob(spec, workDir, [0, 0], workDir)));
+    if (runner === 'naive' && jobBytes > FS_WRITE_LIMIT - 64 * 1024) {
+      throw new Error(
+        `The render job is ${(jobBytes / 2 ** 20).toFixed(1)} MiB, over the 4 MiB a computer's file write takes. ` +
+          'Move large data, such as inline data: URLs, out of the campaign into asset files.',
+      );
+    }
 
     // 4. Render the chunks.
     step = performance.now();
