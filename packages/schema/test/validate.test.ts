@@ -48,6 +48,10 @@ describe('validateCampaign', () => {
         );
         const issue = result.issues.find((candidate) => candidate.code === fixture.code);
         expect(issue?.path).toBe(fixture.path);
+        expect(issue?.severity).toBe(
+          fixture.severity ?? (fixture.code === 'CLAIM_SUPERLATIVE' ? 'warning' : 'error'),
+        );
+        if (fixture.message) expect(issue?.message).toContain(fixture.message);
         for (const each of result.issues) {
           expect(each.message.length).toBeGreaterThan(0);
           expect(each.fix.length).toBeGreaterThan(0);
@@ -183,6 +187,29 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(campaign.audio?.sfx ?? [], 0).at = 20;
       expect(await codes(campaign)).toEqual([]);
+    });
+
+    it('tolerates floating point noise on a sound effect at the very end', async () => {
+      const campaign = novaCopy();
+      at(campaign.audio?.sfx ?? [], 0).at = 20.0000001;
+      expect(await codes(campaign)).toEqual([]);
+    });
+
+    it('measures the next scene from where the last one really ended', async () => {
+      const campaign = novaCopy();
+      at(campaign.scenes, 1).end = 3;
+      at(campaign.scenes, 2).start = 3;
+      const { issues } = await validateCampaign(campaign);
+      expect(issues.map((issue) => issue.path)).toEqual(['scenes[1].end']);
+    });
+
+    it('names the time a scene should start at for a gap and for an overlap', async () => {
+      for (const start of [4.5, 3.5]) {
+        const campaign = novaCopy();
+        at(campaign.scenes, 1).start = start;
+        const { issues } = await validateCampaign(campaign);
+        expect(issues[0]?.fix).toBe('Set scenes[1].start to 4.');
+      }
     });
   });
 

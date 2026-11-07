@@ -10,6 +10,8 @@ export interface NegativeFixture {
   also?: IssueCode[];
   /** Fixtures are errors unless they say otherwise. */
   severity?: 'warning';
+  /** A fragment of the message, for fixtures whose wording is the point. */
+  message?: string;
   options?: ValidateOptions;
   /** Changes a copy of Nova. Return a value to replace the input outright. */
   build: (campaign: Campaign) => unknown;
@@ -100,11 +102,21 @@ export const negativeFixtures: NegativeFixture[] = [
       at(at(c.scenes, 0).text, 1).id = at(at(c.scenes, 0).text, 0).id;
     },
   },
+  {
+    name: 'a duplicate text id within a hook',
+    code: 'SCHEMA_INVALID',
+    path: 'variants.hooks[0].text[1].id',
+    build: (c) => {
+      const { text } = at(c.variants.hooks, 0);
+      text.push({ ...at(text, 0), value: 'Still waiting?' });
+    },
+  },
 
   {
     name: 'a gap between scenes',
     code: 'SCENE_TIMING',
     path: 'scenes[1].start',
+    message: 'there is a gap after 4s',
     build: (c) => {
       at(c.scenes, 1).start = 4.5;
     },
@@ -113,8 +125,36 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'overlapping scenes',
     code: 'SCENE_TIMING',
     path: 'scenes[1].start',
+    message: 'it overlaps the scene before, which ends at 4s',
     build: (c) => {
       at(c.scenes, 1).start = 3.5;
+    },
+  },
+  {
+    name: 'a gap of one millisecond, which lands on the same frame',
+    code: 'SCENE_TIMING',
+    path: 'scenes[1].start',
+    message: 'there is a gap',
+    build: (c) => {
+      at(c.scenes, 1).start = 4.001;
+    },
+  },
+  {
+    name: 'a gap of ten microseconds, just over the tolerance',
+    code: 'SCENE_TIMING',
+    path: 'scenes[1].start',
+    message: 'there is a gap',
+    build: (c) => {
+      at(c.scenes, 1).start = 4.00001;
+    },
+  },
+  {
+    name: 'an overlap of ten microseconds, just over the tolerance',
+    code: 'SCENE_TIMING',
+    path: 'scenes[1].start',
+    message: 'it overlaps',
+    build: (c) => {
+      at(c.scenes, 1).start = 3.99999;
     },
   },
   {
@@ -139,9 +179,18 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a first scene that does not start at 0',
     code: 'SCENE_TIMING',
     path: 'scenes[0].start',
+    message: 'the first scene must start at 0',
     build: (c) => {
       at(c.scenes, 0).start = 1;
       at(c.variants.hooks, 0).start = 1;
+    },
+  },
+  {
+    name: 'a last scene that stops ten microseconds before durationSeconds',
+    code: 'SCENE_TIMING',
+    path: 'scenes[3].end',
+    build: (c) => {
+      at(c.scenes, 3).end = 19.99999;
     },
   },
   {
@@ -160,6 +209,22 @@ export const negativeFixtures: NegativeFixture[] = [
       c.scenes.reverse();
       at(c.variants.hooks, 0).start = at(c.scenes, 0).start;
       at(c.variants.hooks, 0).end = at(c.scenes, 0).end;
+    },
+  },
+  {
+    name: 'a hook that starts after the first scene',
+    code: 'SCENE_TIMING',
+    path: 'variants.hooks[0].start',
+    build: (c) => {
+      at(c.variants.hooks, 0).start = 1;
+    },
+  },
+  {
+    name: 'a hook that ends ten microseconds after the first scene',
+    code: 'SCENE_TIMING',
+    path: 'variants.hooks[0].end',
+    build: (c) => {
+      at(c.variants.hooks, 0).end = 4.00001;
     },
   },
   {
@@ -209,6 +274,14 @@ export const negativeFixtures: NegativeFixture[] = [
     build: (c) => {
       c.durationSeconds = 20.35;
       at(c.scenes, 3).end = 20.349999999;
+    },
+  },
+  {
+    name: 'a sound effect ten microseconds after the end of the video',
+    code: 'SCENE_TIMING',
+    path: 'audio.sfx[0].at',
+    build: (c) => {
+      at(c.audio?.sfx ?? [], 0).at = 20.00001;
     },
   },
   {

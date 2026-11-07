@@ -229,6 +229,7 @@ describe('extractNumericTokens', () => {
     ['a digit inside an acronym', 'B2B teams'],
     ['the word one', 'one click, the one tool, someone'],
     ['a one-time fee', 'a one-time fee'],
+    ['the verb won after one', 'the one won the award'],
     ['an article with no preposition', 'a day to remember, an hour of focus'],
     ['words containing number words', 'often, weight, height, tone, behalf'],
     ['ordinary copy', 'Ship with Nova.'],
