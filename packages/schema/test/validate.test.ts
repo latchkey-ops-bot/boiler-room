@@ -186,6 +186,40 @@ describe('validateCampaign', () => {
     });
   });
 
+  describe('ASSET_UNDECLARED', () => {
+    it('names the kind it found and the kinds it needs', async () => {
+      const campaign = novaCopy();
+      campaign.brand.logoAssetId = 'music-bed';
+      const { issues } = await validateCampaign(campaign);
+      expect(issues[0]?.message).toContain('audio');
+      expect(issues[0]?.fix).toContain('image or svg');
+    });
+
+    it('accepts a logo of either kind', async () => {
+      const campaign = novaCopy();
+      campaign.brand.logoAssetId = 'dashboard-shot';
+      expect(await codes(campaign)).toEqual([]);
+    });
+
+    it('accepts a font URL with an upper case scheme', async () => {
+      const campaign = novaCopy();
+      campaign.brand.fonts.body.source = 'HTTPS://nova.example.com/fonts/inter.woff2';
+      expect(await codes(campaign)).toEqual([]);
+    });
+
+    it('accepts a font URL over plain http', async () => {
+      const campaign = novaCopy();
+      campaign.brand.fonts.body.source = 'http://nova.example.com/fonts/inter.woff2';
+      expect(await codes(campaign)).toEqual([]);
+    });
+
+    it('lets a scene use an asset of any kind', async () => {
+      const campaign = novaCopy();
+      at(campaign.scenes, 0).assetIds = ['logo', 'dashboard-shot', 'music-bed', 'font-display'];
+      expect(await codes(campaign)).toEqual([]);
+    });
+  });
+
   describe('CLAIM_UNBACKED', () => {
     it('accepts a number from any claim the text item cites', async () => {
       const campaign = novaCopy();

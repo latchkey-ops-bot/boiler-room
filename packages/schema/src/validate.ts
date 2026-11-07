@@ -1,5 +1,11 @@
-import type { z } from 'zod';
-import { type Campaign, campaignSchema, type Scene, type TextRole } from './campaign.ts';
+import { z } from 'zod';
+import {
+  type Asset,
+  type Campaign,
+  campaignSchema,
+  type Scene,
+  type TextRole,
+} from './campaign.ts';
 import { contrastRatio, readableOn } from './contrast.ts';
 import { toFrame } from './frames.ts';
 import { extractNumericTokens, isBacked, isWholeNumber, type NumericToken } from './numbers.ts';
@@ -324,34 +330,57 @@ function checkSceneTiming({ scenes, durationSeconds, fps, audio, variants }: Cam
   return issues;
 }
 
+/** The kinds a reference can use. A scene can use any kind, so its references list none. */
+type AssetReference = [path: string, id: string, kinds?: readonly Asset['kind'][]];
+
+/**
+ * An asset of the wrong kind is reported as `ASSET_UNDECLARED`, since the reference has no asset it
+ * can use. It would otherwise pass here and either crash the render or, for music that is not
+ * audio, render with no sound and report nothing.
+ */
 function checkAssetReferences(campaign: Campaign): Issue[] {
   const { brand, assets, audio } = campaign;
-  const references: [path: string, id: string][] = [['brand.logoAssetId', brand.logoAssetId]];
+  const references: AssetReference[] = [['brand.logoAssetId', brand.logoAssetId, ['image', 'svg']]];
 
   for (const role of ['display', 'body'] as const) {
     const { source } = brand.fonts[role];
-    if (!/^https?:\/\//i.test(source)) references.push([`brand.fonts.${role}.source`, source]);
+    if (!z.httpUrl().safeParse(source).success) {
+      references.push([`brand.fonts.${role}.source`, source, ['font']]);
+    }
   }
   for (const { scene, path } of allScenes(campaign)) {
     for (const [index, id] of scene.assetIds.entries()) {
       references.push([`${path}.assetIds[${index}]`, id]);
     }
   }
-  if (audio?.musicAssetId) references.push(['audio.musicAssetId', audio.musicAssetId]);
+  if (audio?.musicAssetId) references.push(['audio.musicAssetId', audio.musicAssetId, ['audio']]);
   for (const [index, effect] of (audio?.sfx ?? []).entries()) {
-    references.push([`audio.sfx[${index}].assetId`, effect.assetId]);
+    references.push([`audio.sfx[${index}].assetId`, effect.assetId, ['audio']]);
   }
 
-  return references
-    .filter(([, id]) => !Object.hasOwn(assets, id))
-    .map(([path, id]) =>
+  return references.flatMap(([path, id, kinds]) => {
+    const asset = Object.hasOwn(assets, id) ? assets[id] : undefined;
+    if (!asset) {
+      return [
+        error(
+          'ASSET_UNDECLARED',
+          path,
+          `${path} refers to "${id}", which is not declared in assets.`,
+          `Add "${id}" to assets, or change ${path} to an asset that is declared.`,
+        ),
+      ];
+    }
+    if (!kinds || kinds.includes(asset.kind)) return [];
+    const needed = kinds.join(' or ');
+    return [
       error(
         'ASSET_UNDECLARED',
         path,
-        `${path} refers to "${id}", which is not declared in assets.`,
-        `Add "${id}" to assets, or change ${path} to an asset that is declared.`,
+        `${path} refers to "${id}", which is declared as ${asset.kind}, not ${needed}.`,
+        `Change ${path} to a declared asset of kind ${needed}, or correct assets.${id}.kind if it is wrong.`,
       ),
-    );
+    ];
+  });
 }
 
 async function checkAssetAvailability(

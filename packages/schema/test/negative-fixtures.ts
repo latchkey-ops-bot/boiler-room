@@ -278,6 +278,55 @@ export const negativeFixtures: NegativeFixture[] = [
   },
 
   {
+    name: 'a logo that is an audio file',
+    code: 'ASSET_UNDECLARED',
+    path: 'brand.logoAssetId',
+    build: (c) => {
+      c.brand.logoAssetId = 'music-bed';
+    },
+  },
+  {
+    name: 'a font source that is an svg',
+    code: 'ASSET_UNDECLARED',
+    path: 'brand.fonts.display.source',
+    build: (c) => {
+      c.brand.fonts.display.source = 'logo';
+    },
+  },
+  {
+    name: 'a body font source that is audio',
+    code: 'ASSET_UNDECLARED',
+    path: 'brand.fonts.body.source',
+    build: (c) => {
+      c.brand.fonts.body.source = 'whoosh';
+    },
+  },
+  {
+    name: 'music that is an svg',
+    code: 'ASSET_UNDECLARED',
+    path: 'audio.musicAssetId',
+    build: (c) => {
+      Object.assign(c.audio as object, { musicAssetId: 'logo' });
+    },
+  },
+  {
+    name: 'a sound effect that is an image',
+    code: 'ASSET_UNDECLARED',
+    path: 'audio.sfx[0].assetId',
+    build: (c) => {
+      at(c.audio?.sfx ?? [], 0).assetId = 'dashboard-shot';
+    },
+  },
+  {
+    name: 'a font URL with no host',
+    code: 'ASSET_UNDECLARED',
+    path: 'brand.fonts.display.source',
+    build: (c) => {
+      c.brand.fonts.display.source = 'https://';
+    },
+  },
+
+  {
     name: 'a file that does not exist',
     code: 'ASSET_UNAVAILABLE',
     path: 'assets.logo.src',
