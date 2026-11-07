@@ -201,6 +201,25 @@ describe('validateCampaign', () => {
       expect(await codes(campaign)).toEqual(['CLAIM_UNBACKED']);
     });
 
+    it.each([
+      ['a phantom multiplier', 'Just double-click to deploy', 'Just double-click to deploy.'],
+      ['a different case', 'just double-click to deploy', 'Just double-click to deploy.'],
+      ['part of the quote', 'Launched in the first half', 'Launched in the first half of 2019.'],
+    ])('lets copy repeat a cited quote word for word: %s', async (_name, value, quote) => {
+      const campaign = novaCopy();
+      campaign.claims.push({
+        id: 'cited-quote',
+        text: quote,
+        sourceUrl: 'https://nova.example.com/customers',
+        quote,
+        status: 'approved',
+      });
+      const headline = at(at(campaign.scenes, 1).text, 0);
+      headline.value = value;
+      headline.claimIds = ['cited-quote'];
+      expect(await codes(campaign)).toEqual([]);
+    });
+
     it('does not read digits in the product name as a statistic', async () => {
       const campaign = novaCopy();
       campaign.brand.name = 'Nova 2';

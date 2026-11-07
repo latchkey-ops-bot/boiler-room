@@ -20,6 +20,20 @@ const registry = { hero: {}, stat: {}, outro: {} };
 
 export const novaCopy = () => structuredClone(nova) as Campaign;
 
+/** Puts `value` in the stat headline of scene 1, citing a new claim that quotes `quote`. */
+const citedHeadline = (c: Campaign, value: string, quote: string) => {
+  c.claims.push({
+    id: 'cited-quote',
+    text: quote,
+    sourceUrl: 'https://nova.example.com/customers',
+    quote,
+    status: 'approved',
+  });
+  const headline = at(at(c.scenes, 1).text, 0);
+  headline.value = value;
+  headline.claimIds = ['cited-quote'];
+};
+
 export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'input that is not an object',
@@ -406,6 +420,48 @@ export const negativeFixtures: NegativeFixture[] = [
     build: (c) => {
       at(c.variants.ctas, 0).label = 'Halve your bill';
     },
+  },
+  {
+    name: 'a specific number firmed up from a vague quote',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '1,000 teams', 'Used by thousands of teams.'),
+  },
+  {
+    name: 'a count backed only by a time in the quote',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '10 teams', 'Deploy in 10 minutes.'),
+  },
+  {
+    name: 'a unit hidden behind an adjective',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '10 short seconds', 'Deploy in 10 minutes.'),
+  },
+  {
+    name: 'a multiplier backed by an ordinary word in the quote',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '2x faster', 'Just double-click to deploy.'),
+  },
+  {
+    name: 'a count backed by a third party',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '3 teams', 'Audited by a third party.'),
+  },
+  {
+    name: 'a count backed by a year',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '2,019 teams', 'Founded in 2019.'),
+  },
+  {
+    name: 'a number that only reads as part of a longer quoted number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, '1,200', 'More than 1,200,000 teams.'),
   },
   {
     name: 'copy with a number smuggled into scene props',

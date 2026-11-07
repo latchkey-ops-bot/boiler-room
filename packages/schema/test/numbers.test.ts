@@ -3,7 +3,7 @@ import { extractNumericTokens, isBacked } from '../src/numbers.ts';
 
 const backed = (text: string, quote: string) => {
   const tokens = extractNumericTokens(text);
-  const quoteTokens = extractNumericTokens(quote);
+  const quoteTokens = extractNumericTokens(quote, 'literal');
   expect(tokens.length, `no number read from "${text}"`).toBeGreaterThan(0);
   return tokens.every((token) => isBacked(token, quoteTokens));
 };
@@ -237,6 +237,83 @@ describe('extractNumericTokens', () => {
   });
 });
 
+describe('reading modes', () => {
+  it.each([
+    ['a hyphenated double', 'Just double-click to deploy'],
+    ['a spaced double', 'Just double click to deploy'],
+    ['a hyphenated triple', 'Our triple-A rated uptime'],
+    ['a hyphenated doubled', 'We doubled-down on speed'],
+    ['a hyphenated twice', 'Our twice-daily digest'],
+    ['half of a period', 'Launched in the first half of the year'],
+    ['half an hour', 'Done in half an hour'],
+    ['a hyphenated half', 'A half-baked idea'],
+    ['a vague order of magnitude', 'Orders of magnitude faster'],
+  ])('reads %s as a number in copy, and not in a quote', (_name, text) => {
+    expect(extractNumericTokens(text).length).toBeGreaterThan(0);
+    expect(extractNumericTokens(text, 'literal')).toEqual([]);
+  });
+
+  it.each([
+    ['twice', 'twice as fast', 'multiplier', 2],
+    ['thrice', 'thrice as fast', 'multiplier', 3],
+    ['doubled', 'we doubled output', 'multiplier', 2],
+    ['doubles', 'Nova doubles output', 'multiplier', 2],
+    ['tripled', 'we tripled output', 'multiplier', 3],
+    ['double your', 'double your output', 'multiplier', 2],
+    ['triple the', 'triple the output', 'multiplier', 3],
+    ['halved', 'we halved the bill', 'percent', 50],
+    ['halve your', 'halve your bill', 'percent', 50],
+    ['half the', 'half the cost', 'percent', 50],
+    ['half as', 'half as much', 'percent', 50],
+    ['in half', 'cut the bill in half', 'percent', 50],
+    ['by half', 'cut by half', 'percent', 50],
+    ['a counted order of magnitude', 'an order of magnitude faster', 'multiplier', 10],
+    ['a percent word', 'ten percent', 'percent', 10],
+    ['a digit', '40% faster', 'percent', 40],
+    ['one before a unit', 'one minute', 'number', 1],
+  ])('reads %s in a quote', (_name, text, kind, value) => {
+    expect(kinds(text).map((token) => [token.kind, token.value])).toEqual([[kind, value]]);
+    expect(extractNumericTokens(text, 'literal').map((token) => [token.kind, token.value])).toEqual(
+      [[kind, value]],
+    );
+  });
+
+  it.each([
+    ['a third party', 'Audited by a third party'],
+    ['a hyphenated third party', 'A third-party audit'],
+    ['one third party', 'One third-party audit'],
+    ['plural third parties', 'Shared with a third parties list'],
+  ])('reads no fraction from %s in either mode', (_name, text) => {
+    expect(extractNumericTokens(text)).toEqual([]);
+    expect(extractNumericTokens(text, 'literal')).toEqual([]);
+  });
+});
+
+describe('nouns and units', () => {
+  it('records the word after a number as its noun', () => {
+    expect(extractNumericTokens('10 teams')[0]?.noun).toBe('teams');
+    expect(extractNumericTokens('1,200+ teams')[0]?.noun).toBe('teams');
+  });
+
+  it('records no noun when the number stands alone or has a unit', () => {
+    expect(extractNumericTokens('10')[0]?.noun).toBeUndefined();
+    expect(extractNumericTokens('10 minutes')[0]?.noun).toBeUndefined();
+    expect(extractNumericTokens('10ms')[0]?.noun).toBeUndefined();
+  });
+
+  it.each([
+    ['one adjective', '10 short seconds', 's'],
+    ['a hyphenated adjective', '14-free days', 'day'],
+  ])('reads a unit past %s', (_name, text, unit) => {
+    expect(extractNumericTokens(text)[0]?.unit).toBe(unit);
+  });
+
+  it('does not read a unit past two words or a sentence end', () => {
+    expect(extractNumericTokens('10 very short seconds')[0]?.unit).toBeUndefined();
+    expect(extractNumericTokens('10 teams. Seconds count.')[0]?.unit).toBeUndefined();
+  });
+});
+
 describe('isBacked', () => {
   it.each([
     ['the same number', '40% faster', 'cut build times by 40%'],
@@ -257,6 +334,11 @@ describe('isBacked', () => {
     ['a spelled quote', '3 teams', 'three teams'],
     ['a rank', '#1', 'the number one tool'],
     ['a plus sign', '1,200+ teams', 'More than 1,200 teams'],
+    ['a unit past an adjective', '10 short seconds', 'in 10 seconds'],
+    ['a year repeated as a year', '2019', 'Founded in 2019'],
+    ['an inflected multiple', '2x faster', 'we doubled output'],
+    ['half the', '50% cheaper', 'half the cost of Jenkins'],
+    ['a verb before the', '2x output', 'double the output'],
   ])('accepts %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(true);
   });
@@ -278,7 +360,23 @@ describe('isBacked', () => {
     ['a unit the quote does not state', '10 minutes', 'score of 10'],
     ['a number missing from the quote', '40% faster', 'dramatically faster builds'],
     ['a rank against a count', '#1', 'used by 1 team'],
-    ['a vague magnitude against a specific number', 'thousands of teams', 'used by 2,000 teams'],
+    ['a vague magnitude against a specific number', 'thousands of teams', 'used by 1,000 teams'],
+    ['a specific number against a vague quote', '1,000 teams', 'used by thousands of teams'],
+    ['a specific hundred against a vague quote', '100 teams', 'used by hundreds of teams'],
+    ['a specific dozen against a vague quote', '12 integrations', 'dozens of integrations'],
+    ['a plus sign against a vague quote', '1M+ users', 'trusted by millions of users'],
+    ['a spelled number against a vague quote', '1 million users', 'millions of users'],
+    ['a noun against a time', '10 teams', 'Deploy in 10 minutes'],
+    ['a noun against years', '10 customers', 'Founded 10 years ago'],
+    ['an unknown unit against a known one', '10 ns latency', 'Latency of 10 ms'],
+    ['a unit past an adjective against another unit', '10 short seconds', 'Deploy in 10 minutes'],
+    ['a noun after a plus sign against a time', '1,200+ teams', 'in 1,200 minutes'],
+    ['a multiplier against double-click', '2x faster', 'Just double-click to deploy'],
+    ['a multiplier against triple-A', '3x faster', 'Our triple-A rated uptime'],
+    ['a percent against half of a period', '50% cheaper', 'Launched in the first half of the year'],
+    ['a count against a third party', '3 teams', 'Audited by a third party'],
+    ['a grouped number against a year', '2,019 teams', 'Founded in 2019'],
+    ['a scaled number against a year', '2k teams', 'Founded in 2000'],
     ['a spaced scale word against the bare amount', '$5 bn saved', 'plans cost $5 per seat'],
     ['a spaced scale letter against the bare amount', '$5 M saved', 'plans cost $5 per seat'],
     ['an unknown scale against the bare amount', '$5mil saved', 'plans cost $5 per seat'],

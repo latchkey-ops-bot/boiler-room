@@ -84,6 +84,13 @@ interface CopyItem {
   sceneType: string | undefined;
 }
 
+/** What a claim's quote says, in both readings. */
+interface Quote {
+  text: string;
+  literal: NumericToken[];
+  strict: NumericToken[];
+}
+
 const issue =
   (severity: Issue['severity']) =>
   (code: IssueCode, path: string, message: string, fix: string): Issue => ({
@@ -366,9 +373,30 @@ function unbackedFix({ claimsPath }: CopyItem, { raw }: NumericToken): string {
     : `Remove "${raw}" from the label, or move it to a scene text item with role "cta" that cites a claim. Variant CTAs cannot cite claims.`;
 }
 
+const wording = (text: string) => text.normalize('NFKC').toLowerCase().replace(/\s+/g, ' ').trim();
+
+/**
+ * The numbers these quotes state for this copy. Copy that repeats a quote word for word says no
+ * more than the quote does, so it reads the quote as strictly as it reads itself. The numbers are
+ * still compared, so "10" is not backed by a quote saying "110".
+ */
+function backingFor(value: string, quotes: readonly Quote[]): NumericToken[] {
+  const copy = wording(value);
+  return quotes.flatMap((quote) =>
+    wording(quote.text).includes(copy) ? quote.strict : quote.literal,
+  );
+}
+
 function checkClaims(campaign: Campaign): Issue[] {
   const quotes = new Map(
-    campaign.claims.map((claim) => [claim.id, extractNumericTokens(claim.quote)]),
+    campaign.claims.map((claim): [string, Quote] => [
+      claim.id,
+      {
+        text: claim.quote,
+        literal: extractNumericTokens(claim.quote, 'literal'),
+        strict: extractNumericTokens(claim.quote),
+      },
+    ]),
   );
   const brandName = wholePhrase(campaign.brand.name);
   const issues: Issue[] = [];
@@ -389,7 +417,10 @@ function checkClaims(campaign: Campaign): Issue[] {
     }
 
     const cited = item.claimIds.flatMap((id) => (quotes.has(id) ? [id] : []));
-    const quoteTokens = cited.flatMap((id) => quotes.get(id) ?? []);
+    const quoteTokens = backingFor(
+      item.value,
+      cited.flatMap((id) => quotes.get(id) ?? []),
+    );
     for (const token of extractNumericTokens(item.value.replace(brandName, ' '))) {
       if (!isBacked(token, quoteTokens)) {
         const source = cited.length

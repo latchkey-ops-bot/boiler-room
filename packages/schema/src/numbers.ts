@@ -7,7 +7,16 @@ export interface NumericToken {
   value: number;
   /** The currency for money, otherwise the unit, when the text states one. */
   unit: string | undefined;
+  /** The word after the number, when that word is not its unit. */
+  noun: string | undefined;
 }
+
+/**
+ * `strict` is for copy, where an ambiguous word counts as a number so that nothing slips past the
+ * gate. `literal` is for quotes, where the same reading would let "double-click" back "2x", so a
+ * word counts only when it states the number outright.
+ */
+export type ReadMode = 'strict' | 'literal';
 
 // "one" is left out on purpose: "one click" and "the one tool" are not statistics. It still counts
 // inside a larger number, such as "one hundred" or "twenty one", and before a unit, such as
@@ -186,6 +195,10 @@ const MULTIPLE_STEMS = new Map(
 /** Marks "thousands of", which is a different statement from a specific 1,000. */
 const VAGUE_UNIT = 'plural';
 
+/** Shaped like a year, as a quote writes one. */
+const YEAR = /^(?:19|20)\d\d$/;
+const FOUR_DIGITS = /^\d{4}$/;
+
 const CARDINAL = [...CARDINALS.keys()].join('|');
 const MAGNITUDE = [...MAGNITUDES.keys()].join('|');
 const NOT_WORD_BEFORE = '(?<![\\p{L}\\p{N}_])';
@@ -199,8 +212,9 @@ const NUMBER_WORDS = new RegExp(
   'gi',
 );
 
+// A "third party" is not a fraction.
 const FRACTION = new RegExp(
-  `\\b(?:an?|one)[\\s-](${[...FRACTION_DENOMINATORS.keys()].join('|')})\\b`,
+  `\\b(?:an?|one)[\\s-](${[...FRACTION_DENOMINATORS.keys()].join('|')})\\b(?![\\s-]+part(?:y|ies)\\b)`,
   'gi',
 );
 
@@ -212,7 +226,16 @@ const AN_AMOUNT = /\ban?(?=\s+(?:dollar|euro|pound|buck)\b)/gi;
 const AN_AMOUNT_OF_TIME =
   /\b(in|under|within|than)\s+an?(?=\s+(?:second|minute|hour|day|week|month|year)\b)/gi;
 const COUNTED_ORDERS = /\b(?:(?:an?|one)\s+order|(\d+)\s+orders)\s+of\s+magnitude\b/gi;
-const MULTIPLES = new RegExp(`\\b(${[...MULTIPLE_STEMS.keys()].join('|')})(?:e[sd]?|ing)\\b`, 'gi');
+const STEM = [...MULTIPLE_STEMS.keys()].join('|');
+const MULTIPLES = new RegExp(`\\b(${STEM})(?:e[sd]?|ing)\\b`, 'gi');
+// "double-click" and "triple A" are names, so the bare word counts only before what it multiplies.
+const LITERAL_MULTIPLES = new RegExp(
+  `(?<!-)\\b(${STEM})(?:e[sd]|ing|e(?=\\s+(?:the|your)\\b))\\b(?!-)`,
+  'gi',
+);
+// "half the cost" and "cut in half" state 50%. "the first half of the year" and "half an hour" do not.
+const LITERAL_HALF =
+  /(?<!-)\b(?:half(?=\s+(?:the|as)\b)|(?<=\b(?:in|by)\s+)half(?!\s+an?\b))\b(?!-)/gi;
 
 const TOKEN = new RegExp(
   `${NOT_WORD_BEFORE}(?<rank>#|no\\.\\s?)?` +
@@ -246,8 +269,25 @@ function wordsToNumber(phrase: string): number {
   return total + current;
 }
 
-function spelledToDigits(text: string): string {
+function readMultiples(text: string, mode: ReadMode): string {
+  const multiple = (_match: string, stem: string) => `${MULTIPLE_STEMS.get(stem.toLowerCase())}`;
+  if (mode === 'literal') {
+    return text
+      .replace(/(?<!-)\btwice\b(?!-)/gi, '2x')
+      .replace(/(?<!-)\bthrice\b(?!-)/gi, '3x')
+      .replace(LITERAL_HALF, '50%')
+      .replace(LITERAL_MULTIPLES, multiple);
+  }
   return text
+    .replace(/\borders?\s+of\s+magnitude\b/gi, '10x')
+    .replace(/\btwice\b/gi, '2x')
+    .replace(/\bthrice\b/gi, '3x')
+    .replace(/\bhalf\b/gi, '50%')
+    .replace(MULTIPLES, multiple);
+}
+
+function spelledToDigits(text: string, mode: ReadMode): string {
+  const digits = text
     .normalize('NFKC')
     .replace(/\bnumber[\s-]one\b/gi, '#1')
     .replace(new RegExp(`\\b(${CARDINAL}|${MAGNITUDE})fold\\b`, 'gi'), '$1 fold')
@@ -263,27 +303,38 @@ function spelledToDigits(text: string): string {
     .replace(AN_AMOUNT, '1')
     .replace(AN_AMOUNT_OF_TIME, '$1 1')
     .replace(/\b(?:a\s+)?factor\s+of\s+(?=\.?\d)/gi, 'x')
-    .replace(COUNTED_ORDERS, (_match, count?: string) => `${10 ** Number(count ?? 1)}x`)
-    .replace(/\borders?\s+of\s+magnitude\b/gi, '10x')
-    .replace(/\btwice\b/gi, '2x')
-    .replace(/\bthrice\b/gi, '3x')
-    .replace(/\bhalf\b/gi, '50%')
-    .replace(MULTIPLES, (_match, stem: string) => `${MULTIPLE_STEMS.get(stem.toLowerCase())}`);
+    .replace(COUNTED_ORDERS, (_match, count?: string) => `${10 ** Number(count ?? 1)}x`);
+  return readMultiples(digits, mode);
 }
 
-function readTrailingWord(rest: string): { word: string; attached: boolean } | undefined {
-  const attached = /^\p{L}+/u.exec(rest)?.[0];
-  if (attached) return { word: attached.toLowerCase(), attached: true };
-  const spaced = /^[\s-]+(\p{L}+)/u.exec(rest)?.[1];
-  return spaced ? { word: spaced.toLowerCase(), attached: false } : undefined;
+interface TrailingWords {
+  word: string;
+  attached: boolean;
+  /** The word after that one, which is the unit when `word` is an adjective. */
+  next: string | undefined;
+}
+
+const TRAILING_WORDS =
+  /^(?:(?<attached>\p{L}+)|\+?[\s-]+(?<spaced>\p{L}+))(?:\s+(?<next>\p{L}+))?/u;
+
+function readTrailingWords(rest: string): TrailingWords | undefined {
+  const { attached, spaced, next } = TRAILING_WORDS.exec(rest)?.groups ?? {};
+  const word = (attached ?? spaced)?.toLowerCase();
+  if (!word) return undefined;
+  return { word, attached: attached !== undefined, next: next?.toLowerCase() };
+}
+
+function readUnit({ word, attached, next }: TrailingWords): string | undefined {
+  if (attached) return UNITS.get(word) ?? word;
+  return UNITS.get(word) ?? (next && UNITS.get(next));
 }
 
 /**
  * Finds every numeric statement in a piece of copy. Both the copy and a claim's quote go through
  * this, so they are compared as values and never as substrings: "10" is not backed by "110".
  */
-export function extractNumericTokens(text: string): NumericToken[] {
-  const normalized = spelledToDigits(text);
+export function extractNumericTokens(text: string, mode: ReadMode = 'strict'): NumericToken[] {
+  const normalized = spelledToDigits(text, mode);
   const matches = [...normalized.matchAll(TOKEN)];
   const tokens = matches.map((match) => readToken(match, normalized));
   return tokens.map((token, index) => {
@@ -294,7 +345,9 @@ export function extractNumericTokens(text: string): NumericToken[] {
       (lowerMatch?.index ?? 0) + (lowerMatch?.[0].length ?? 0),
       upperMatch?.index,
     );
-    return RANGE_GAP.test(gap) ? { ...token, kind: upper.kind, unit: upper.unit } : token;
+    return RANGE_GAP.test(gap)
+      ? { ...token, kind: upper.kind, unit: upper.unit, noun: upper.noun }
+      : token;
   });
 }
 
@@ -312,31 +365,40 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
   const scale = SCALES.get((scaleWord ?? scaleLetter ?? '').toLowerCase()) ?? 1;
   const value = Number((Number(digits.replaceAll(',', '')) * scale).toPrecision(12));
   const raw = match[0].trim();
+  const trailing = readTrailingWords(normalized.slice(match.index + match[0].length));
+  const read = { raw, value, unit: undefined, noun: trailing?.word };
 
-  if (rank) return { raw, kind: 'rank', value, unit: undefined };
+  if (rank) return { ...read, kind: 'rank' };
   const moneySign = currency ?? symbol;
   if (moneySign) {
-    return { raw, kind: 'money', value, unit: CURRENCIES.get(moneySign.toLowerCase()) };
+    return { ...read, kind: 'money', unit: CURRENCIES.get(moneySign.toLowerCase()) };
   }
   if (prefix || (suffix && /^(?:[x×]|times|fold)$/i.test(suffix))) {
-    return { raw, kind: 'multiplier', value, unit: undefined };
+    return { ...read, kind: 'multiplier' };
   }
-  if (suffix) return { raw, kind: 'percent', value, unit: undefined };
+  if (suffix) return { ...read, kind: 'percent' };
 
-  const trailing = readTrailingWord(normalized.slice(match.index + match[0].length));
   const trailingCurrency = trailing && CURRENCIES.get(trailing.word);
-  if (trailingCurrency) return { raw, kind: 'money', value, unit: trailingCurrency };
-  const unit =
-    trailing && (UNITS.get(trailing.word) ?? (trailing.attached ? trailing.word : undefined));
-  return { raw, kind: 'number', value, unit };
+  if (trailingCurrency) {
+    return { ...read, kind: 'money', unit: trailingCurrency, noun: undefined };
+  }
+  const unit = trailing && readUnit(trailing);
+  return { ...read, kind: 'number', unit, noun: unit === undefined ? trailing?.word : undefined };
 }
 
-/** True when the quote states this value. A bare number may match a quote that adds a unit. */
+const readsAsYear = ({ kind, unit, raw }: NumericToken) =>
+  kind === 'number' && unit === undefined && YEAR.test(raw);
+
+/**
+ * True when the quote states this value. A number on its own may match a quote that adds a unit,
+ * but a number with a noun may not: "10" is backed by "10 minutes", and "10 teams" is not.
+ */
 export function isBacked(token: NumericToken, quoteTokens: readonly NumericToken[]): boolean {
-  return quoteTokens.some(
-    (quoted) =>
-      quoted.kind === token.kind &&
-      quoted.value === token.value &&
-      (token.unit === undefined || quoted.unit === token.unit),
-  );
+  return quoteTokens.some((quoted) => {
+    if (quoted.kind !== token.kind || quoted.value !== token.value) return false;
+    if (readsAsYear(quoted) && !FOUR_DIGITS.test(token.raw)) return false;
+    if (quoted.unit === VAGUE_UNIT) return token.unit === VAGUE_UNIT;
+    if (token.unit !== undefined) return quoted.unit === token.unit;
+    return quoted.unit === undefined || token.noun === undefined;
+  });
 }
