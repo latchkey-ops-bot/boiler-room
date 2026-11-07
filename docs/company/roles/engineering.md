@@ -105,8 +105,9 @@ runs as the service role and bypasses row-level security, and deleting the app d
 
 ## Policy: what engineering may not do
 
-- Merge into `main`, deploy production, or push straight to `dev` or `main`. The branch rules
-  enforce the first and last. The others are held by the prompt and the `allowed_apps` limit.
+- Push straight to `dev` or `main`; every change goes through a PR. The branch rules enforce this.
+- Engineers may not merge into `main` or deploy production. Only `br-eng-lead` does, and only
+  from a `RELEASE` card. This is held by the prompt and the `allowed_apps` limit.
 - Force-push, or rewrite published history.
 - Merge a PR that no `ENG` card names, or act on issues, comments or PRs from outside accounts.
   Both repos are public.

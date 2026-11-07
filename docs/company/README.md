@@ -11,7 +11,7 @@ Status words used below: **verified** means a probe ran it on 2026-11-07 and the
 
 ```mermaid
 flowchart TD
-  founder["Founder<br/>sets priorities and budgets<br/>promotes dev to main"]
+  founder["Founder<br/>owns the accounts and keys<br/>approves nothing"]
   ceo["CEO<br/>br-ceo<br/>owns the board"]
   founder -.-> ceo
 
@@ -167,7 +167,7 @@ a fixed prefix and the slug, so the board reads as a log and a retried write can
 | 5. Build | `br-engineer-1`, by an `ENG` card | The card, the spec, and the code | Branch **`feat/<slug>-<n>`** and a **pull request into `dev`**. Commits carry `Board-Card:` and `Naive-Session:` trailers. `pnpm test`, `pnpm typecheck` and `pnpm lint` must pass. | `ENG` moves to `done` with the PR URL and the test summary. When the last one is done, `SHIP` starts the lead. |
 | 6. Review and ship | `br-eng-lead`, by the `SHIP` card | Each PR's diff, against the card's acceptance criteria and the rules in `CLAUDE.md` | PRs **merged into `dev`**, a **staging deploy** of the Naive app, and a smoke check | `SHIP` moves to `done` with the merged PRs, the `dev` commit, the deployment id and URL, and the smoke result. The CEO gets a digest. |
 | 7. Close the loop | `br-ceo`, by the digest | The `SHIP` note, against the `DIR` card's done-when | A comment on `DIR: <slug>`: delivered, or not. If not, a new `DIR` card next sweep. | The next sweep's report |
-| 8. Promote | The founder | The CEO's report and the `SHIP` notes | A PR from `dev` into `main`, and the production deploy | Section 7 says why this stays human |
+| 8. Promote | `br-eng-lead`, by a `RELEASE` card the CEO creates when a `DIR` slug is delivered | The CEO's report and the `SHIP` notes | A PR from `dev` into `main`, merged by the lead, and the production deploy | `RELEASE` moves to `done` with the `main` commit and the production URL. The CEO gets a digest. |
 
 **When a step fails.** A failing member moves its card to `blocked` with the reason. A run that
 stops without moving its card is parked as `blocked` by the board. The docs say either way the CEO
@@ -184,9 +184,10 @@ reading lags the running turn (verified), so it is approximate.
 A lead that rejects a PR creates a new `ENG: <slug> fix <n>` card and a new `SHIP: <slug> r2` card
 blocked by it, because a card's `blocked_by` is fixed once the card is created.
 
-**Escalating to the founder.** The CEO creates `FOUNDER: <question>`, leaves it `blocked` with no
-blocker, and lists it at the top of its sweep report. The founder answers with a comment or closes
-the card.
+**Escalating to the founder.** The company decides for itself. The CEO escalates only what a
+person must physically do, such as creating an account, clicking an OAuth link, topping up credit or
+raising an agent budget. It creates `FOUNDER: <need>`, leaves it `blocked` with no blocker, and lists
+it at the top of its sweep report.
 
 **What the CEO does with a digest.** It reads each card and acts only on what is blocked, or on what
 a note asks for. A finished card is a report, not a cue to make more work. This is the board's own
@@ -236,11 +237,9 @@ temporary folder and will be lost. That is fine.
 **C. Branch rules.** In each repo, go to Settings, Rules, Rulesets, New branch ruleset.
 
 - `protect-main`: target `main`. Turn on Restrict deletions, Block force pushes, and Require a pull
-  request before merging, with 1 required approval and "Dismiss stale pull request approvals when
-  new commits are pushed". Leave the bypass list empty. Every agent acts as `latchkey-ops-bot`, and
-  GitHub does not let an author approve their own PR, so only another account can let a change into
-  `main`. Approve from your own GitHub account. If it is not a collaborator yet, add it with write
-  access. How these rules treat the agents' tokens has not been tested.
+  request before merging, with 0 required approvals. Leave the bypass list empty. Agents merge their
+  own PRs, so every change to `main` still leaves a PR record. How these rules treat the agents'
+  tokens has not been tested.
 - `protect-dev`: target `dev`. The same rules, with 0 required approvals. Agents can still merge
   PRs into `dev`, but nothing can push to it directly.
 
@@ -280,10 +279,11 @@ prompt. A cap of $0 means the agent cannot spend anything (docs), which keeps GT
 - GTM agents have no `bash`, no file writes, no repo token, and the `apps` tool off. They still get
   the app's own tools (verified).
 - No agent holds a key that can change agents, agent budgets, vault credentials or cron
-  deployments. Only the provisioning script, run by the founder, can. The app's own key is limited
+  deployments. Only the provisioning script, which runs outside every agent, can. The app's own key is limited
   to sessions, but `sessions:write` can start any agent's session and raise any session's budget
   (docs), within each agent's daily cap. We accept that.
-- Merges into `main` and production deploys need the founder (section 5, C).
+- Only `br-eng-lead` merges into `main` and deploys production, and only from a `RELEASE` card.
+  Engineers cannot.
 
 **Prompt injection.** Customer email, social content, lead data and customer websites are all
 untrusted. Naive adds one guard by itself: after an agent calls any external MCP tool or connected
@@ -343,9 +343,9 @@ blocked, and every `FOUNDER:` card.
 | 3. Product and design | The `br-design` token, `br-product` and `br-design` | One `DIR` card goes through steps 1 to 7 with no human step. |
 | 4. GTM, provisioned but inactive | `br-gtm-lead`, `br-scout`, `br-social` and `br-inbox-reader` at a $0 budget, plus the GTM persona. No cards, no cron. | The agents exist and cannot spend. The founder decides when the product is nailed down. Activation is in [roles/gtm.md](roles/gtm.md). |
 
-**Why `main` stays human for now.** Agents land everything in `dev` and on staging. Promoting to
-`main` and deploying production is the founder's one standing step in normal operation. Letting the
-CEO or the lead promote too is a founder decision, and it is a one-line change to the branch rules.
+**Shipping to `main` is autonomous.** The founder has given the company full permission. Work lands
+in `dev` and on staging first. When a `DIR` slug is delivered, the CEO creates a `RELEASE` card and
+the engineering lead promotes `dev` to `main` and deploys production. No person approves it.
 
 ## 8. What is verified and what is not
 
