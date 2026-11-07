@@ -85,7 +85,7 @@ describe('validateCampaign', () => {
 
     it('marks every other fixture as an error', async () => {
       for (const fixture of negativeFixtures) {
-        if (fixture.code === 'CLAIM_SUPERLATIVE') continue;
+        if (fixture.code === 'CLAIM_SUPERLATIVE' || fixture.severity === 'warning') continue;
         const copy = novaCopy();
         const replacement = fixture.build(copy);
         const input = replacement === undefined ? copy : replacement;
@@ -295,6 +295,77 @@ describe('validateCampaign', () => {
       expect(await codes(campaign)).toEqual([]);
       at(at(campaign.scenes, 0).text, 0).value = 'Nova (Mk.2) is 9x faster';
       expect(await codes(campaign)).toEqual(['CLAIM_UNBACKED']);
+    });
+
+    describe('brand.name', () => {
+      it.each([
+        ['Ten', 'ten times faster'],
+        ['Ten', 'Ten times faster'],
+        ['Half', 'Half the cost'],
+        ['Zero', 'Zero downtime'],
+        ['10x', '10x faster builds'],
+        ['Nova 10x', 'Nova 10x faster builds'],
+        ['Nova, 73% faster', 'Nova, 73% faster'],
+      ])('does not hide a statistic behind the name %s', async (name, value) => {
+        const campaign = novaCopy();
+        campaign.brand.name = name;
+        at(at(campaign.scenes, 0).text, 0).value = value;
+        const { ok, issues } = await validateCampaign(campaign);
+        expect(ok).toBe(false);
+        expect(issues.map((issue) => issue.path)).toEqual([
+          'brand.name',
+          'scenes[0].text[0].value',
+        ]);
+      });
+
+      it('makes copy cite the claim that quotes a name that reads as a statistic', async () => {
+        const campaign = novaCopy();
+        campaign.brand.name = '10x Genomics';
+        campaign.claims.push({
+          id: 'brand-name',
+          text: '10x Genomics makes sequencing tools',
+          sourceUrl: 'https://nova.example.com/about',
+          quote: '10x Genomics makes sequencing tools.',
+          status: 'approved',
+        });
+        const headline = at(at(campaign.scenes, 0).text, 0);
+        headline.value = 'Meet 10x Genomics';
+        expect((await validateCampaign(campaign)).ok).toBe(false);
+
+        headline.claimIds = ['brand-name'];
+        const result = await validateCampaign(campaign);
+        expect(result.ok).toBe(true);
+        expect(result.issues).toMatchObject([
+          { code: 'CLAIM_UNBACKED', severity: 'warning', path: 'brand.name' },
+        ]);
+      });
+
+      it('tells an agent how to resolve the name', async () => {
+        const campaign = novaCopy();
+        campaign.brand.name = 'Nova: 40% faster CI';
+        const { issues } = await validateCampaign(campaign);
+        expect(issues[0]?.message).toContain('Nova: 40% faster CI');
+        expect(issues[0]?.fix).toContain('add a claim that quotes it');
+      });
+
+      it.each(['Nova', 'Nova 2', 'Nova (Mk.2)', '3M', 'Web3 Labs', 'Zero Downtime'])(
+        'accepts %s as a name',
+        async (name) => {
+          const campaign = novaCopy();
+          campaign.brand.name = name;
+          at(at(campaign.scenes, 0).text, 0).value = `Meet ${name}.`;
+          expect(await codes(campaign)).toEqual([]);
+        },
+      );
+
+      it('does not read a name with digits in a quote', async () => {
+        const campaign = novaCopy();
+        campaign.brand.name = 'Nova 2';
+        at(campaign.claims, 0).quote = 'Nova 2 cuts build times by 40%.';
+        expect(await codes(campaign)).toEqual([]);
+        at(at(campaign.scenes, 1).text, 0).value = '2 faster builds';
+        expect(await codes(campaign)).toEqual(['CLAIM_UNBACKED']);
+      });
     });
 
     it.each([

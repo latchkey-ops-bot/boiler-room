@@ -1,7 +1,7 @@
 import type { z } from 'zod';
 import { type Campaign, campaignSchema, type Scene, type TextRole } from './campaign.ts';
 import { contrastRatio, readableOn } from './contrast.ts';
-import { extractNumericTokens, isBacked, type NumericToken } from './numbers.ts';
+import { extractNumericTokens, isBacked, isWholeNumber, type NumericToken } from './numbers.ts';
 
 export const ISSUE_CODES = [
   'SCHEMA_INVALID',
@@ -72,6 +72,9 @@ const STATEMENT_KINDS: ReadonlySet<NumericToken['kind']> = new Set([
   'multiplier',
   'money',
 ]);
+
+/** Number kinds that make a brand name read as a claim. A plain number does not: "Nova 2". */
+const CLAIM_KINDS: ReadonlySet<NumericToken['kind']> = new Set([...STATEMENT_KINDS, 'rank']);
 
 interface CopyItem {
   /** Where the copy is. */
@@ -364,7 +367,41 @@ async function checkAssetAvailability(
 
 function wholePhrase(phrase: string): RegExp {
   const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'gu');
+}
+
+/** True when a name reads as a statistic, so it cannot be told apart from copy that states one. */
+function brandReadsAsClaim(name: string): boolean {
+  const isNumberWord = isWholeNumber(name) && !/\p{N}/u.test(name.normalize('NFKC'));
+  return isNumberWord || extractNumericTokens(name).some(({ kind }) => CLAIM_KINDS.has(kind));
+}
+
+/**
+ * Nothing cites a claim for `brand.name`, and templates put it on screen. A name that reads as a
+ * statistic therefore needs a claim that quotes it. Even then copy gets no exemption for it, so
+ * every use of the name cites that claim.
+ */
+function checkBrandName({ brand: { name }, claims }: Campaign): Issue[] {
+  if (!brandReadsAsClaim(name)) return [];
+  const path = 'brand.name';
+  if (claims.some((claim) => claim.quote.includes(name))) {
+    return [
+      warning(
+        'CLAIM_UNBACKED',
+        path,
+        `"${name}" reads as a statistic. A claim quotes it, so it passes as a name, and copy that uses it must cite that claim.`,
+        `Keep ${path} if this is the product's real name. Otherwise change it to the name alone.`,
+      ),
+    ];
+  }
+  return [
+    error(
+      'CLAIM_UNBACKED',
+      path,
+      `"${name}" reads as a statistic, and no claim quotes it.`,
+      `Change ${path} to the product's name alone. If this is its real name, add a claim that quotes it, and cite that claim wherever copy uses the name.`,
+    ),
+  ];
 }
 
 function unbackedFix({ claimsPath }: CopyItem, { raw }: NumericToken): string {
@@ -423,18 +460,23 @@ function checkTextTogether(
 }
 
 function checkClaims(campaign: Campaign): Issue[] {
+  const brandName = brandReadsAsClaim(campaign.brand.name)
+    ? undefined
+    : wholePhrase(campaign.brand.name);
+  const withoutBrand = (text: string) => (brandName ? text.replace(brandName, ' ') : text);
   const quotes = new Map(
-    campaign.claims.map((claim): [string, Quote] => [
-      claim.id,
-      {
-        text: claim.quote,
-        literal: extractNumericTokens(claim.quote, 'literal'),
-        strict: extractNumericTokens(claim.quote),
-      },
-    ]),
+    campaign.claims.map((claim): [string, Quote] => {
+      const text = withoutBrand(claim.quote);
+      return [
+        claim.id,
+        {
+          text,
+          literal: extractNumericTokens(text, 'literal'),
+          strict: extractNumericTokens(text),
+        },
+      ];
+    }),
   );
-  const brandName = wholePhrase(campaign.brand.name);
-  const withoutBrand = (text: string) => text.replace(brandName, ' ');
   const issues: Issue[] = [];
 
   for (const item of allCopy(campaign)) {
@@ -453,11 +495,12 @@ function checkClaims(campaign: Campaign): Issue[] {
     }
 
     const cited = item.claimIds.flatMap((id) => (quotes.has(id) ? [id] : []));
+    const value = withoutBrand(item.value);
     const quoteTokens = backingFor(
-      item.value,
+      value,
       cited.flatMap((id) => quotes.get(id) ?? []),
     );
-    for (const token of extractNumericTokens(withoutBrand(item.value))) {
+    for (const token of extractNumericTokens(value)) {
       if (!isBacked(token, quoteTokens)) {
         issues.push(
           error(
@@ -653,6 +696,7 @@ export async function validateCampaign(
     ...checkSceneTiming(campaign),
     ...checkAssetReferences(campaign),
     ...(await checkAssetAvailability(campaign, options.assetExists)),
+    ...checkBrandName(campaign),
     ...checkClaims(campaign),
     ...checkPropsForCopy(campaign),
     ...checkTextLength(campaign, options.sceneRegistry),

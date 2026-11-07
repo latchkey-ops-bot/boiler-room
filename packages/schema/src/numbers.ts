@@ -386,6 +386,13 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
   return { ...read, kind: 'number', unit, noun: unit === undefined ? trailing?.word : undefined };
 }
 
+/** True when the text is one number and nothing else, such as "1,200", "10K", "#1" or "Ten". */
+export function isWholeNumber(text: string): boolean {
+  const [token, ...others] = extractNumericTokens(text);
+  if (!token || others.length > 0) return false;
+  return !/[\p{L}\p{N}]/u.test(spelledToDigits(text, 'strict').replace(token.raw, ''));
+}
+
 const readsAsYear = ({ kind, unit, raw }: NumericToken) =>
   kind === 'number' && unit === undefined && YEAR.test(raw);
 

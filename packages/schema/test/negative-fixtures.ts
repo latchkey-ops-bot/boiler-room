@@ -8,6 +8,8 @@ export interface NegativeFixture {
   code: IssueCode;
   path: string;
   also?: IssueCode[];
+  /** Fixtures are errors unless they say otherwise. */
+  severity?: 'warning';
   options?: ValidateOptions;
   /** Changes a copy of Nova. Return a value to replace the input outright. */
   build: (campaign: Campaign) => unknown;
@@ -530,6 +532,72 @@ export const negativeFixtures: NegativeFixture[] = [
       at(hook.text, 0).value = '40';
       at(hook.text, 0).claimIds = ['cited-quote'];
       hook.text.push({ id: 'hook-label', role: 'label', value: 'percent cheaper', claimIds: [] });
+    },
+  },
+  {
+    name: 'a statistic in the brand name and nowhere else',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Nova: 40% faster CI';
+    },
+  },
+  {
+    name: 'a money amount in the brand name',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Nova from $5';
+    },
+  },
+  {
+    name: 'a rank in the brand name',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Nova, the #1 CI';
+    },
+  },
+  {
+    name: 'a brand name that is only a number word',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Ten';
+    },
+  },
+  {
+    name: 'a brand name that reads as a multiplier, which a claim quotes',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    severity: 'warning',
+    build: (c) => {
+      c.brand.name = '10x Genomics';
+      c.claims.push({
+        id: 'brand-name',
+        text: '10x Genomics makes sequencing tools',
+        sourceUrl: 'https://nova.example.com/about',
+        quote: '10x Genomics makes sequencing tools.',
+        status: 'approved',
+      });
+    },
+  },
+  {
+    name: 'a quote backed only by the digits in the brand name',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => {
+      c.brand.name = '3M';
+      citedHeadline(c, '3 million users', '3M announced a new plan.');
+    },
+  },
+  {
+    name: 'copy that changes the case of a name with digits',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 2';
+      at(at(c.scenes, 0).text, 0).value = 'Ship nova 2 today';
     },
   },
   {
