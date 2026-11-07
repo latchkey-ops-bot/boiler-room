@@ -358,6 +358,56 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a one unit statistic in a headline',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => {
+      const headline = at(at(c.scenes, 1).text, 0);
+      headline.value = 'Deploy in one minute';
+      headline.claimIds = [];
+    },
+  },
+  {
+    name: 'a one unit statistic in a voiceover',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].voiceover.text',
+    build: (c) => {
+      Object.assign(at(c.scenes, 0).voiceover as object, { text: 'Deploy in under one minute.' });
+    },
+  },
+  {
+    name: 'a one unit statistic in a hook',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.hooks[0].text[0].value',
+    build: (c) => {
+      at(at(c.variants.hooks, 0).text, 0).value = 'Live in under an hour';
+    },
+  },
+  {
+    name: 'a one unit statistic in a variant CTA',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.ctas[0].label',
+    build: (c) => {
+      at(c.variants.ctas, 0).label = 'One month free';
+    },
+  },
+  {
+    name: 'a spelled multiplier missing from the word lists',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].voiceover.text',
+    build: (c) => {
+      Object.assign(at(c.scenes, 0).voiceover as object, { text: 'Builds run thrice as fast.' });
+    },
+  },
+  {
+    name: 'a halving in a variant CTA',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.ctas[0].label',
+    build: (c) => {
+      at(c.variants.ctas, 0).label = 'Halve your bill';
+    },
+  },
+  {
     name: 'copy with a number smuggled into scene props',
     code: 'CLAIM_UNBACKED',
     path: 'scenes[0].props.stat',

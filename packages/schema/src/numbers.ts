@@ -10,7 +10,8 @@ export interface NumericToken {
 }
 
 // "one" is left out on purpose: "one click" and "the one tool" are not statistics. It still counts
-// inside a larger number, such as "one hundred" or "twenty one".
+// inside a larger number, such as "one hundred" or "twenty one", and before a unit, such as
+// "one minute".
 const CARDINALS = new Map(
   Object.entries({
     zero: 0,
@@ -55,22 +56,40 @@ const MAGNITUDES = new Map(
 );
 
 const FRACTION_DENOMINATORS = new Map(
-  Object.entries({ third: 3, quarter: 4, fifth: 5, tenth: 10 }),
+  Object.entries({
+    third: 3,
+    quarter: 4,
+    fourth: 4,
+    fifth: 5,
+    sixth: 6,
+    seventh: 7,
+    eighth: 8,
+    ninth: 9,
+    tenth: 10,
+    twentieth: 20,
+    hundredth: 100,
+    thousandth: 1000,
+  }),
 );
 
 const SCALES = new Map(
   Object.entries({
     hundred: 100,
     k: 1e3,
+    grand: 1e3,
     thousand: 1e3,
     m: 1e6,
     mm: 1e6,
     mn: 1e6,
+    mil: 1e6,
+    mln: 1e6,
     million: 1e6,
     b: 1e9,
     bn: 1e9,
+    bln: 1e9,
     billion: 1e9,
     t: 1e12,
+    tn: 1e12,
     trillion: 1e12,
   }),
 );
@@ -82,8 +101,22 @@ const CURRENCIES = new Map(
     usd: 'USD',
     dollar: 'USD',
     dollars: 'USD',
+    buck: 'USD',
+    bucks: 'USD',
+    // Kept apart from the currency, because the word does not say which currency it divides.
+    cent: 'cents',
+    cents: 'cents',
     a$: 'AUD',
+    au$: 'AUD',
+    aud: 'AUD',
     c$: 'CAD',
+    ca$: 'CAD',
+    cad: 'CAD',
+    chf: 'CHF',
+    nz$: 'NZD',
+    hk$: 'HKD',
+    s$: 'SGD',
+    r$: 'BRL',
     '€': 'EUR',
     eur: 'EUR',
     euro: 'EUR',
@@ -94,6 +127,8 @@ const CURRENCIES = new Map(
     pounds: 'GBP',
     '¥': 'JPY',
     '₹': 'INR',
+    '₩': 'KRW',
+    won: 'KRW',
   }),
 );
 
@@ -135,6 +170,19 @@ const UNITS = new Map(
   }),
 );
 
+/** Each stem takes the endings of "double": double, doubles, doubled, doubling. */
+const MULTIPLE_STEMS = new Map(
+  Object.entries({
+    doubl: '2x',
+    tripl: '3x',
+    trebl: '3x',
+    quadrupl: '4x',
+    quintupl: '5x',
+    sextupl: '6x',
+    halv: '50%',
+  }),
+);
+
 /** Marks "thousands of", which is a different statement from a specific 1,000. */
 const VAGUE_UNIT = 'plural';
 
@@ -142,6 +190,8 @@ const CARDINAL = [...CARDINALS.keys()].join('|');
 const MAGNITUDE = [...MAGNITUDES.keys()].join('|');
 const NOT_WORD_BEFORE = '(?<![\\p{L}\\p{N}_])';
 const NOT_WORD_AFTER = '(?![\\p{L}\\p{N}])';
+const CURRENCY_WORDS = [...CURRENCIES.keys()].filter((word) => /^[a-z]+$/.test(word));
+const UNIT_WORDS = [...UNITS.keys()].filter((word) => word.length > 1);
 
 const NUMBER_WORDS = new RegExp(
   `(?<!\\d[\\s-]?)\\b(?:(?:an?|one)[\\s-]+(?=(?:${MAGNITUDE})\\b))?(?:${CARDINAL}|${MAGNITUDE})\\b` +
@@ -149,16 +199,35 @@ const NUMBER_WORDS = new RegExp(
   'gi',
 );
 
+const FRACTION = new RegExp(
+  `\\b(?:an?|one)[\\s-](${[...FRACTION_DENOMINATORS.keys()].join('|')})\\b`,
+  'gi',
+);
+
+const ONE_BEFORE_UNIT = new RegExp(
+  `\\bone(?=[\\s-]+(?:${[...UNIT_WORDS, ...CURRENCY_WORDS].join('|')}|per[\\s-]?cent|pct|times)\\b)`,
+  'gi',
+);
+const AN_AMOUNT = /\ban?(?=\s+(?:dollar|euro|pound|buck)\b)/gi;
+const AN_AMOUNT_OF_TIME =
+  /\b(in|under|within|than)\s+an?(?=\s+(?:second|minute|hour|day|week|month|year)\b)/gi;
+const COUNTED_ORDERS = /\b(?:(?:an?|one)\s+order|(\d+)\s+orders)\s+of\s+magnitude\b/gi;
+const MULTIPLES = new RegExp(`\\b(${[...MULTIPLE_STEMS.keys()].join('|')})(?:e[sd]?|ing)\\b`, 'gi');
+
 const TOKEN = new RegExp(
   `${NOT_WORD_BEFORE}(?<rank>#|no\\.\\s?)?` +
-    '(?:(?<currency>us\\$|a\\$|c\\$|\\$|€|£|¥|₹|usd|eur|gbp)\\s?)?' +
+    '(?:(?<currency>us\\$|ca\\$|au\\$|nz\\$|hk\\$|a\\$|c\\$|s\\$|r\\$|\\$|€|£|¥|₹|₩|usd|eur|gbp|chf|cad|aud)\\s?)?' +
     '(?<prefix>[x×]\\s?)?' +
     '(?<digits>\\d{1,3}(?:,\\d{3})+(?:\\.\\d+)?|\\d+(?:\\.\\d+)?|\\.\\d+)' +
     `(?:(?:st|nd|rd|th)${NOT_WORD_AFTER})?` +
-    `(?:\\s?(?<scaleWord>hundred|thousand|million|billion|trillion)\\b|(?<scaleLetter>k|mm|mn|m|bn|b|t)${NOT_WORD_AFTER})?` +
-    `(?:\\s?(?<suffix>%|per\\s?cent\\b|pct\\b|[x×]${NOT_WORD_AFTER}|times\\b|-?fold\\b))?`,
+    `(?:[\\s-]*(?<scaleWord>hundred|thousand|million|billion|trillion|grand)\\b|\\s*(?<scaleLetter>k|mm|mn|mil|mln|m|bn|bln|b|tn|t)${NOT_WORD_AFTER})?` +
+    '(?:\\s?(?<symbol>[$€£¥₹₩])(?![\\d.]))?' +
+    `(?:[\\s-]*(?<suffix>%|per[\\s-]?cent\\b|pct\\b|[x×]${NOT_WORD_AFTER}|times\\b|fold\\b))?`,
   'giu',
 );
+
+/** What may sit between the bounds of a range. */
+const RANGE_GAP = /^\s*(?:-|–|—|to)\s*$/i;
 
 function wordsToNumber(phrase: string): number {
   let total = 0;
@@ -181,19 +250,25 @@ function spelledToDigits(text: string): string {
   return text
     .normalize('NFKC')
     .replace(/\bnumber[\s-]one\b/gi, '#1')
-    .replace(new RegExp(`\\b(${CARDINAL}|hundred|thousand)fold\\b`, 'gi'), '$1 fold')
+    .replace(new RegExp(`\\b(${CARDINAL}|${MAGNITUDE})fold\\b`, 'gi'), '$1 fold')
     .replace(
-      /\b(?:a|one)[\s-](third|quarter|fifth|tenth)\b/gi,
+      FRACTION,
       (_match, word: string) => `1/${FRACTION_DENOMINATORS.get(word.toLowerCase())}`,
     )
     .replace(new RegExp(`\\b(${MAGNITUDE})s\\b`, 'gi'), (_match, word: string) => {
       return `${MAGNITUDES.get(word.toLowerCase())}${VAGUE_UNIT}`;
     })
     .replace(NUMBER_WORDS, (phrase) => String(wordsToNumber(phrase)))
-    .replace(/\b(?:twice|doubl(?:e[sd]?|ing))\b/gi, '2x')
-    .replace(/\btripl(?:e[sd]?|ing)\b/gi, '3x')
-    .replace(/\bquadrupl(?:e[sd]?|ing)\b/gi, '4x')
-    .replace(/\b(?:half|halv(?:e[sd]|ing))\b/gi, '50%');
+    .replace(ONE_BEFORE_UNIT, '1')
+    .replace(AN_AMOUNT, '1')
+    .replace(AN_AMOUNT_OF_TIME, '$1 1')
+    .replace(/\b(?:a\s+)?factor\s+of\s+(?=\.?\d)/gi, 'x')
+    .replace(COUNTED_ORDERS, (_match, count?: string) => `${10 ** Number(count ?? 1)}x`)
+    .replace(/\borders?\s+of\s+magnitude\b/gi, '10x')
+    .replace(/\btwice\b/gi, '2x')
+    .replace(/\bthrice\b/gi, '3x')
+    .replace(/\bhalf\b/gi, '50%')
+    .replace(MULTIPLES, (_match, stem: string) => `${MULTIPLE_STEMS.get(stem.toLowerCase())}`);
 }
 
 function readTrailingWord(rest: string): { word: string; attached: boolean } | undefined {
@@ -209,36 +284,51 @@ function readTrailingWord(rest: string): { word: string; attached: boolean } | u
  */
 export function extractNumericTokens(text: string): NumericToken[] {
   const normalized = spelledToDigits(text);
-  return [...normalized.matchAll(TOKEN)].map((match) => {
-    const {
-      rank,
-      currency,
-      prefix,
-      digits = '',
-      scaleWord,
-      scaleLetter,
-      suffix,
-    } = match.groups ?? {};
-    const scale = SCALES.get((scaleWord ?? scaleLetter ?? '').toLowerCase()) ?? 1;
-    const value = Number((Number(digits.replaceAll(',', '')) * scale).toPrecision(12));
-    const raw = match[0].trim();
-
-    if (rank) return { raw, kind: 'rank', value, unit: undefined };
-    if (currency) {
-      return { raw, kind: 'money', value, unit: CURRENCIES.get(currency.toLowerCase()) };
-    }
-    if (prefix || (suffix && /^(?:[x×]|times|-?fold)$/i.test(suffix))) {
-      return { raw, kind: 'multiplier', value, unit: undefined };
-    }
-    if (suffix) return { raw, kind: 'percent', value, unit: undefined };
-
-    const trailing = readTrailingWord(normalized.slice(match.index + match[0].length));
-    const trailingCurrency = trailing && CURRENCIES.get(trailing.word);
-    if (trailingCurrency) return { raw, kind: 'money', value, unit: trailingCurrency };
-    const unit =
-      trailing && (UNITS.get(trailing.word) ?? (trailing.attached ? trailing.word : undefined));
-    return { raw, kind: 'number', value, unit };
+  const matches = [...normalized.matchAll(TOKEN)];
+  const tokens = matches.map((match) => readToken(match, normalized));
+  return tokens.map((token, index) => {
+    const upper = tokens[index + 1];
+    if (!upper || token.kind !== 'number' || token.unit !== undefined) return token;
+    const [lowerMatch, upperMatch] = [matches[index], matches[index + 1]];
+    const gap = normalized.slice(
+      (lowerMatch?.index ?? 0) + (lowerMatch?.[0].length ?? 0),
+      upperMatch?.index,
+    );
+    return RANGE_GAP.test(gap) ? { ...token, kind: upper.kind, unit: upper.unit } : token;
   });
+}
+
+function readToken(match: RegExpExecArray, normalized: string): NumericToken {
+  const {
+    rank,
+    currency,
+    prefix,
+    digits = '',
+    scaleWord,
+    scaleLetter,
+    symbol,
+    suffix,
+  } = match.groups ?? {};
+  const scale = SCALES.get((scaleWord ?? scaleLetter ?? '').toLowerCase()) ?? 1;
+  const value = Number((Number(digits.replaceAll(',', '')) * scale).toPrecision(12));
+  const raw = match[0].trim();
+
+  if (rank) return { raw, kind: 'rank', value, unit: undefined };
+  const moneySign = currency ?? symbol;
+  if (moneySign) {
+    return { raw, kind: 'money', value, unit: CURRENCIES.get(moneySign.toLowerCase()) };
+  }
+  if (prefix || (suffix && /^(?:[x×]|times|fold)$/i.test(suffix))) {
+    return { raw, kind: 'multiplier', value, unit: undefined };
+  }
+  if (suffix) return { raw, kind: 'percent', value, unit: undefined };
+
+  const trailing = readTrailingWord(normalized.slice(match.index + match[0].length));
+  const trailingCurrency = trailing && CURRENCIES.get(trailing.word);
+  if (trailingCurrency) return { raw, kind: 'money', value, unit: trailingCurrency };
+  const unit =
+    trailing && (UNITS.get(trailing.word) ?? (trailing.attached ? trailing.word : undefined));
+  return { raw, kind: 'number', value, unit };
 }
 
 /** True when the quote states this value. A bare number may match a quote that adds a unit. */
