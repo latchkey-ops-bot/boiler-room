@@ -15,7 +15,7 @@
     },
     "fonts": {
       "display": { "family": "Sora", "source": "font-display" },
-      "body": { "family": "Inter", "source": "https://nova.example.com/fonts/inter.woff2" }
+      "body": { "family": "Inter", "source": "font-body" }
     },
     "logoAssetId": "logo",
     "radius": 12
@@ -38,6 +38,12 @@
     "font-display": {
       "kind": "font",
       "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
       "provenance": "library",
       "license": "OFL-1.1"
     },
@@ -86,7 +92,7 @@
   "scenes": [
     {
       "id": "open",
-      "type": "hero",
+      "type": "kinetic-title",
       "start": 0,
       "end": 4,
       "props": { "align": "center" },
@@ -106,14 +112,14 @@
       ],
       "voiceover": { "text": "Your builds are waiting. Nova gets them moving.", "claimIds": [] },
       "assetIds": ["logo"],
-      "transitionOut": "fade"
+      "transitionOut": "push"
     },
     {
       "id": "speed",
-      "type": "stat",
+      "type": "interface-reveal",
       "start": 4,
       "end": 9,
-      "props": { "layout": "split" },
+      "props": { "focus": { "x": 0.8, "y": 0.4 }, "zoom": 1.6 },
       "text": [
         {
           "id": "speed-headline",
@@ -133,14 +139,14 @@
         "claimIds": ["build-times"]
       },
       "assetIds": ["dashboard-shot"],
-      "transitionOut": "slide"
+      "transitionOut": "carry"
     },
     {
       "id": "adoption",
-      "type": "stat",
+      "type": "feature-sequence",
       "start": 9,
       "end": 14,
-      "props": { "layout": "stacked" },
+      "props": { "stops": [{ "x": 0.4, "y": 0.3, "zoom": 1.5 }] },
       "text": [
         {
           "id": "adoption-headline",
@@ -159,14 +165,15 @@
         "text": "More than 1,200 teams ship with Nova, and customers deploy 3x more often.",
         "claimIds": ["team-count", "deploy-rate"]
       },
-      "assetIds": ["dashboard-shot"]
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "carry"
     },
     {
       "id": "close",
-      "type": "outro",
+      "type": "cta",
       "start": 14,
       "end": 20,
-      "props": { "align": "center" },
+      "props": {},
       "text": [
         { "id": "close-headline", "role": "headline", "value": "Ship with Nova.", "claimIds": [] },
         {
@@ -193,7 +200,7 @@
     "hooks": [
       {
         "id": "open-question",
-        "type": "hero",
+        "type": "kinetic-title",
         "start": 0,
         "end": 4,
         "props": { "align": "left" },

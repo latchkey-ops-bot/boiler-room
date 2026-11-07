@@ -1,0 +1,220 @@
+{
+  "schemaVersion": 1,
+  "id": "quillhaven-launch",
+  "sourceUrl": "https://quillhaven.example.com",
+  "fps": 24,
+  "durationSeconds": 18,
+  "brand": {
+    "name": "Quillhaven Manuscript Studio",
+    "colors": {
+      "background": "#FBF7EF",
+      "foreground": "#1F1B16",
+      "primary": "#8C2F1B",
+      "accent": "#2F5D50",
+      "muted": "#A39A8F"
+    },
+    "fonts": {
+      "display": { "family": "Fraunces", "source": "font-display" },
+      "body": { "family": "Source Serif 4", "source": "font-body" }
+    },
+    "logoAssetId": "favicon",
+    "radius": 4
+  },
+  "assets": {
+    "favicon": {
+      "kind": "image",
+      "src": "assets/quillhaven/favicon.png",
+      "provenance": "captured",
+      "width": 32,
+      "height": 32,
+      "sourceUrl": "https://quillhaven.example.com"
+    },
+    "editor-shot": {
+      "kind": "image",
+      "src": "assets/quillhaven/editor.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://quillhaven.example.com/editor"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/fraunces.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/source-serif-4.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [
+    {
+      "id": "trial",
+      "text": "Quillhaven is free to try for 30 days",
+      "sourceUrl": "https://quillhaven.example.com/pricing",
+      "quote": "Try Quillhaven free for 30 days, with every feature included.",
+      "status": "approved"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "kinetic-title",
+      "start": 0,
+      "end": 3.5,
+      "props": { "align": "left" },
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Every draft, kept in one quiet room.",
+          "claimIds": []
+        },
+        {
+          "id": "open-subhead",
+          "role": "subhead",
+          "value": "A writing studio for people finishing long books.",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Every draft, kept in one quiet room.",
+        "claimIds": []
+      },
+      "assetIds": [],
+      "transitionOut": "push"
+    },
+    {
+      "id": "revise",
+      "type": "interface-reveal",
+      "start": 3.5,
+      "end": 8.75,
+      "props": { "focus": { "x": 0.44, "y": 0.45 }, "zoom": 1.7 },
+      "text": [
+        {
+          "id": "revise-label",
+          "role": "label",
+          "value": "Revision history",
+          "claimIds": []
+        },
+        {
+          "id": "revise-headline",
+          "role": "headline",
+          "value": "Revise without losing a word",
+          "claimIds": []
+        },
+        {
+          "id": "revise-body",
+          "role": "body",
+          "value": "Every change is kept, so any passage can go back to how it read before.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["editor-shot"],
+      "transitionOut": "carry"
+    },
+    {
+      "id": "features",
+      "type": "feature-sequence",
+      "start": 8.75,
+      "end": 14,
+      "props": {
+        "stops": [
+          { "x": 0.88, "y": 0.3, "zoom": 1.7 },
+          { "x": 0.1, "y": 0.25, "zoom": 1.7 },
+          { "x": 0.1, "y": 0.5, "zoom": 1.7 }
+        ]
+      },
+      "text": [
+        {
+          "id": "features-headline",
+          "role": "headline",
+          "value": "Built for the long haul",
+          "claimIds": []
+        },
+        {
+          "id": "features-notes",
+          "role": "body",
+          "value": "Notes from your editor sit beside the page.",
+          "claimIds": []
+        },
+        {
+          "id": "features-chapters",
+          "role": "body",
+          "value": "Chapters move with a drag, never a copy and paste.",
+          "claimIds": []
+        },
+        {
+          "id": "features-research",
+          "role": "body",
+          "value": "Research stays beside every chapter.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["editor-shot"]
+    },
+    {
+      "id": "close",
+      "type": "cta",
+      "start": 14,
+      "end": 18,
+      "props": {},
+      "text": [
+        {
+          "id": "close-headline",
+          "role": "headline",
+          "value": "Finish the book.",
+          "claimIds": []
+        },
+        {
+          "id": "close-trial",
+          "role": "label",
+          "value": "Free for 30 days",
+          "claimIds": ["trial"]
+        },
+        { "id": "close-cta", "role": "cta", "value": "Start writing", "claimIds": [] }
+      ],
+      "voiceover": {
+        "text": "Try it free for 30 days.",
+        "claimIds": ["trial"]
+      },
+      "assetIds": ["favicon"]
+    }
+  ],
+  "variants": {
+    "hooks": [
+      {
+        "id": "open-blank-page",
+        "type": "kinetic-title",
+        "start": 0,
+        "end": 3.5,
+        "props": { "align": "center" },
+        "text": [
+          {
+            "id": "blank-page-headline",
+            "role": "headline",
+            "value": "The blank page was never the hard part.",
+            "claimIds": []
+          }
+        ],
+        "assetIds": []
+      }
+    ],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-writing",
+        "label": "Start writing",
+        "href": "https://quillhaven.example.com/signup"
+      },
+      {
+        "id": "see-pricing",
+        "label": "See pricing",
+        "href": "https://quillhaven.example.com/pricing"
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@ export {
   FORMATS,
   TEXT_ROLES,
 } from './campaign.ts';
+export { contrastRatio, readableOn } from './contrast.ts';
 export type { CampaignFrames, SceneFrames } from './frames.ts';
 export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';

@@ -6,6 +6,7 @@ import { DEFAULT_TEXT_LIMITS, ISSUE_CODES, validateCampaign } from '../src/valid
 import { negativeFixtures, novaCopy } from './negative-fixtures.ts';
 
 const at = <T>(list: T[], index: number): T => list[index] as T;
+const registry = { 'kinetic-title': {}, 'interface-reveal': {}, 'feature-sequence': {}, cta: {} };
 const codes = async (campaign: Campaign) =>
   (await validateCampaign(campaign)).issues.map((issue) => issue.code);
 
@@ -17,8 +18,7 @@ describe('validateCampaign', () => {
 
   it('passes Nova with every option supplied', async () => {
     const assetExists = vi.fn(async () => true);
-    const sceneRegistry = { hero: {}, stat: {}, outro: {} };
-    const result = await validateCampaign(nova, { assetExists, sceneRegistry });
+    const result = await validateCampaign(nova, { assetExists, sceneRegistry: registry });
     expect(result.issues).toEqual([]);
     expect(assetExists).toHaveBeenCalledTimes(Object.keys(nova.assets).length);
     expect(assetExists).toHaveBeenCalledWith('assets/nova/logo.svg');
@@ -158,9 +158,9 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(campaign.scenes, 0).type = 'carousel';
       const { issues } = await validateCampaign(campaign, {
-        sceneRegistry: { hero: {}, stat: {}, outro: {} },
+        sceneRegistry: registry,
       });
-      expect(issues[0]?.fix).toContain('hero, stat, outro');
+      expect(issues[0]?.fix).toContain('kinetic-title, interface-reveal, feature-sequence, cta');
     });
 
     it('reports why an asset check failed', async () => {
@@ -488,7 +488,7 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(at(campaign.scenes, 0).text, 0).value = 'x'.repeat(DEFAULT_TEXT_LIMITS.headline + 1);
       const { issues } = await validateCampaign(campaign, {
-        sceneRegistry: { hero: { text: { headline: 200 } }, stat: {}, outro: {} },
+        sceneRegistry: { ...registry, 'kinetic-title': { text: { headline: 200 } } },
       });
       expect(issues).toEqual([]);
     });

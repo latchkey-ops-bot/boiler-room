@@ -20,7 +20,12 @@ export interface NegativeFixture {
 const at = <T>(list: T[], index: number): T => list[index] as T;
 
 const longText = 'x'.repeat(61);
-const registry = { hero: {}, stat: {}, outro: {} };
+const registry = {
+  'kinetic-title': {},
+  'interface-reveal': {},
+  'feature-sequence': {},
+  cta: {},
+};
 
 export const novaCopy = () => structuredClone(nova) as Campaign;
 
@@ -876,7 +881,7 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a headline over a limit the registry lowers',
     code: 'TEXT_TOO_LONG',
     path: 'scenes[0].text[0].value',
-    options: { sceneRegistry: { ...registry, hero: { text: { headline: 10 } } } },
+    options: { sceneRegistry: { ...registry, 'kinetic-title': { text: { headline: 10 } } } },
     build: () => undefined,
   },
   {
@@ -909,7 +914,7 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a scene type the registry does not know',
     code: 'SCENE_TYPE_UNKNOWN',
     path: 'scenes[0].type',
-    options: { sceneRegistry: { stat: {}, outro: {}, hero: {} } },
+    options: { sceneRegistry: registry },
     build: (c) => {
       at(c.scenes, 0).type = 'carousel';
     },
