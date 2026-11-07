@@ -7,7 +7,8 @@
 - Never invent product claims. Every number, percentage, multiplier or money amount on screen or
   in voiceover must appear in the verbatim `quote` of a claim that text item cites.
 - Render only a campaign that `validateCampaign` passed. The `schema` prop on `<Composition>` is
-  not a gate: it drives Studio, and `remotion render` does not check it.
+  not a gate: it drives Studio, and `remotion render` does not check it. Call `validateCampaign` in
+  `calculateMetadata` and throw on `!ok`, which stops both `remotion render` and `remotion still`.
 - Content lives in `campaign.json`, motion lives in templates. Visible copy goes in `scene.text`,
   never in `scene.props`, and templates render numbers only from `scene.text`.
 - Take every frame number from `sceneFrames`, or `toFrame` for a single time such as a sound
