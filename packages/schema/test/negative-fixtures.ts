@@ -20,6 +20,14 @@ const registry = { hero: {}, stat: {}, outro: {} };
 
 export const novaCopy = () => structuredClone(nova) as Campaign;
 
+/** Gives scene 1 a backed headline and an uncited label that changes what the number means. */
+const relabelled = (c: Campaign, value: string, label: string, quote: string) => {
+  citedHeadline(c, value, quote);
+  const item = at(at(c.scenes, 1).text, 1);
+  item.value = label;
+  item.claimIds = [];
+};
+
 /** Puts `value` in the stat headline of scene 1, citing a new claim that quotes `quote`. */
 const citedHeadline = (c: Campaign, value: string, quote: string) => {
   c.claims.push({
@@ -458,10 +466,71 @@ export const negativeFixtures: NegativeFixture[] = [
     build: (c) => citedHeadline(c, '2,019 teams', 'Founded in 2019.'),
   },
   {
+    name: 'one word lifted from a quote that does not state a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text[0].value',
+    build: (c) => citedHeadline(c, 'Half', 'Launched in the first half of the year.'),
+  },
+  {
     name: 'a number that only reads as part of a longer quoted number',
     code: 'CLAIM_UNBACKED',
     path: 'scenes[1].text[0].value',
     build: (c) => citedHeadline(c, '1,200', 'More than 1,200,000 teams.'),
+  },
+  {
+    name: 'a label that turns a cited count into a percent',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '40', 'percent faster builds', 'More than 40 teams ship.'),
+  },
+  {
+    name: 'a label that turns a cited count into a multiplier',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '40', 'x faster', 'More than 40 teams ship.'),
+  },
+  {
+    name: 'a label that turns a cited count into money',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '40', 'dollars per seat', 'More than 40 teams ship.'),
+  },
+  {
+    name: 'a label that changes the unit of a cited number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '40', 'seconds to deploy', 'Deploys take 40 minutes.'),
+  },
+  {
+    name: 'a label that gives a cited count a unit',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) =>
+      relabelled(c, '1,200', 'hours saved every week', 'More than 1,200 teams ship with Nova.'),
+  },
+  {
+    name: 'a label that gives a cited time a noun',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '10', 'teams', 'Deploy in 10 minutes.'),
+  },
+  {
+    name: 'a label that scales a cited number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[1].text',
+    build: (c) => relabelled(c, '40', 'k teams', 'More than 40 teams ship.'),
+  },
+  {
+    name: 'a number split across the text of a hook',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.hooks[0].text',
+    build: (c) => {
+      citedHeadline(c, '40 teams', 'More than 40 teams ship.');
+      const hook = at(c.variants.hooks, 0);
+      at(hook.text, 0).value = '40';
+      at(hook.text, 0).claimIds = ['cited-quote'];
+      hook.text.push({ id: 'hook-label', role: 'label', value: 'percent cheaper', claimIds: [] });
+    },
   },
   {
     name: 'copy with a number smuggled into scene props',

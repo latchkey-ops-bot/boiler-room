@@ -377,14 +377,49 @@ const wording = (text: string) => text.normalize('NFKC').toLowerCase().replace(/
 
 /**
  * The numbers these quotes state for this copy. Copy that repeats a quote word for word says no
- * more than the quote does, so it reads the quote as strictly as it reads itself. The numbers are
- * still compared, so "10" is not backed by a quote saying "110".
+ * more than the quote does, so it reads the quote as strictly as it reads itself. One word is too
+ * little to count as repeating a quote, and the numbers are still compared, so "10" is not backed
+ * by a quote saying "110".
  */
 function backingFor(value: string, quotes: readonly Quote[]): NumericToken[] {
   const copy = wording(value);
   return quotes.flatMap((quote) =>
-    wording(quote.text).includes(copy) ? quote.strict : quote.literal,
+    copy.includes(' ') && wording(quote.text).includes(copy) ? quote.strict : quote.literal,
   );
+}
+
+const citationSource = (cited: readonly string[]) =>
+  cited.length ? `the quotes of ${cited.join(', ')} do not state it` : 'it cites no claim';
+
+/**
+ * A number can be backed in one text item and given a new meaning by the next, such as "40" citing
+ * "40 teams" beside "percent faster". Items sit together on screen, so they are also read in order
+ * as one sentence, against everything each of them may state alone.
+ */
+function checkTextTogether(
+  values: readonly string[],
+  scene: Scene,
+  path: string,
+  quotes: Map<string, Quote>,
+): Issue[] {
+  const quotesOf = (ids: readonly string[]) => ids.flatMap((id) => quotes.get(id) ?? []);
+  const quoteTokens = scene.text.flatMap((item, index) =>
+    backingFor(values[index] ?? '', quotesOf(item.claimIds)),
+  );
+  const cited = [...new Set(scene.text.flatMap((item) => item.claimIds))].filter((id) =>
+    quotes.has(id),
+  );
+  const together = values.join(' ');
+  return extractNumericTokens(together)
+    .filter((token) => !isBacked(token, quoteTokens))
+    .map(({ raw }) =>
+      error(
+        'CLAIM_UNBACKED',
+        `${path}.text`,
+        `The text of ${path} reads "${together}", which states "${raw}", but ${citationSource(cited)}.`,
+        `Reword ${path}.text so its items do not read as "${raw}" together, or cite a claim whose quote states it.`,
+      ),
+    );
 }
 
 function checkClaims(campaign: Campaign): Issue[] {
@@ -399,6 +434,7 @@ function checkClaims(campaign: Campaign): Issue[] {
     ]),
   );
   const brandName = wholePhrase(campaign.brand.name);
+  const withoutBrand = (text: string) => text.replace(brandName, ' ');
   const issues: Issue[] = [];
 
   for (const item of allCopy(campaign)) {
@@ -421,16 +457,13 @@ function checkClaims(campaign: Campaign): Issue[] {
       item.value,
       cited.flatMap((id) => quotes.get(id) ?? []),
     );
-    for (const token of extractNumericTokens(item.value.replace(brandName, ' '))) {
+    for (const token of extractNumericTokens(withoutBrand(item.value))) {
       if (!isBacked(token, quoteTokens)) {
-        const source = cited.length
-          ? `the quotes of ${cited.join(', ')} do not state it`
-          : 'it cites no claim';
         issues.push(
           error(
             'CLAIM_UNBACKED',
             item.path,
-            `"${item.value}" states "${token.raw}", but ${source}.`,
+            `"${item.value}" states "${token.raw}", but ${citationSource(cited)}.`,
             unbackedFix(item, token),
           ),
         );
@@ -448,6 +481,16 @@ function checkClaims(campaign: Campaign): Issue[] {
             : 'Reword the label. Variant CTAs cannot cite claims.',
         ),
       );
+    }
+  }
+
+  // Only once each item passes alone, so one bad number is reported once.
+  const reportedIn = (path: string) =>
+    issues.some(({ code, path: where }) => code === 'CLAIM_UNBACKED' && where.startsWith(path));
+  for (const { scene, path } of allScenes(campaign)) {
+    if (scene.text.length > 1 && !reportedIn(`${path}.text[`)) {
+      const values = scene.text.map((item) => withoutBrand(item.value));
+      issues.push(...checkTextTogether(values, scene, path, quotes));
     }
   }
 

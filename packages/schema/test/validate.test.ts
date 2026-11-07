@@ -220,6 +220,67 @@ describe('validateCampaign', () => {
       expect(await codes(campaign)).toEqual([]);
     });
 
+    describe('text items read together', () => {
+      const stat = (quote: string, first: string, second: string, secondClaims: string[]) => {
+        const campaign = novaCopy();
+        campaign.claims.push({
+          id: 'split-stat',
+          text: quote,
+          sourceUrl: 'https://nova.example.com/customers',
+          quote,
+          status: 'approved',
+        });
+        const [headline, label] = at(campaign.scenes, 1).text;
+        Object.assign(headline as object, { value: first, claimIds: ['split-stat'] });
+        Object.assign(label as object, { value: second, claimIds: secondClaims });
+        return campaign;
+      };
+
+      it('accepts a number and label that say what the quote says', async () => {
+        const campaign = stat('Deploys take 40 minutes.', '40', 'minutes to deploy', []);
+        expect(await codes(campaign)).toEqual([]);
+      });
+
+      it('accepts a label that adds no new reading of the number', async () => {
+        const campaign = stat('More than 40 teams ship.', '40', 'teams', []);
+        expect(await codes(campaign)).toEqual([]);
+      });
+
+      it('reads the items in order, so a label before the number says nothing', async () => {
+        const campaign = stat('More than 40 teams ship.', 'percent faster builds', '40', []);
+        Object.assign(at(at(campaign.scenes, 1).text, 0), { claimIds: [] });
+        Object.assign(at(at(campaign.scenes, 1).text, 1), { claimIds: ['split-stat'] });
+        expect(await codes(campaign)).toEqual([]);
+      });
+
+      it('checks the joined reading against the claims of every item', async () => {
+        const campaign = stat('More than 40 teams ship.', '40', 'percent faster', ['build-times']);
+        expect(await codes(campaign)).toEqual([]);
+      });
+
+      it('reports an item that fails alone once, and not again for the scene', async () => {
+        const campaign = stat('More than 40 teams ship.', '90', 'percent faster', []);
+        expect((await validateCampaign(campaign)).issues).toMatchObject([
+          { code: 'CLAIM_UNBACKED', path: 'scenes[1].text[0].value' },
+        ]);
+      });
+
+      it('names the reading and both ways to fix it', async () => {
+        const campaign = stat('More than 40 teams ship.', '40', 'percent faster', []);
+        const { issues } = await validateCampaign(campaign);
+        expect(issues).toHaveLength(1);
+        expect(issues[0]?.message).toContain('40 percent');
+        expect(issues[0]?.fix).toContain('scenes[1].text');
+      });
+
+      it('does not join a voiceover to the text', async () => {
+        const campaign = novaCopy();
+        at(at(campaign.scenes, 0).text, 1).value = 'Ship it';
+        Object.assign(at(campaign.scenes, 0).voiceover as object, { text: 'percent faster' });
+        expect(await codes(campaign)).toEqual([]);
+      });
+    });
+
     it('does not read digits in the product name as a statistic', async () => {
       const campaign = novaCopy();
       campaign.brand.name = 'Nova 2';
