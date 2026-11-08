@@ -65,8 +65,12 @@ export function DeliveryScreen({
           {current ? (
             <span>
               <Icon name="film" />
-              Version {current.version}
-              {campaign ? ` · ${clock(campaign.durationSeconds)} long` : null}
+              {[
+                current.version > 0 ? `Version ${current.version}` : null,
+                campaign ? `${clock(campaign.durationSeconds)} long` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
             </span>
           ) : null}
           {state === 'delivered' ? (
@@ -162,10 +166,11 @@ function Files({
           Your files
         </h2>
         <span className="label muted">
-          {cut.files.length === 1 ? '1 file' : `${cut.files.length} files`} · version {cut.version}
+          {cut.files.length === 1 ? '1 file' : `${cut.files.length} files`}
+          {cut.version > 0 ? ` · version ${cut.version}` : null}
         </span>
       </div>
-      <ul className="files" aria-label={`Files of version ${cut.version}`}>
+      <ul className="files" aria-label={`Files of ${cutName(cut.version)}`}>
         {cut.files.map((file) => (
           <FileRow key={file.id} file={file} campaign={campaign} showVariant={variants} />
         ))}
@@ -179,7 +184,7 @@ function Files({
             <ul
               key={older.version}
               className="files"
-              aria-label={`Files of version ${older.version}`}
+              aria-label={`Files of ${cutName(older.version)}`}
             >
               {older.files.map((file) => (
                 <FileRow key={file.id} file={file} campaign={campaign} showVariant compact />
@@ -211,7 +216,7 @@ function FileRow({
       <div className="what">
         <strong>
           {shape.name}
-          {compact ? ` · version ${file.scriptVersion}` : null}
+          {compact && file.scriptVersion > 0 ? ` · version ${file.scriptVersion}` : null}
         </strong>
         {compact ? null : <span className="use">{shape.use}</span>}
         {showVariant ? <span className="use">{variantName(file, campaign)}</span> : null}
@@ -285,8 +290,8 @@ function Revising({
       <div className="text">
         <h3>Your new script is ready</h3>
         <p>
-          Approve {version} and the crew makes the new cut. The files below are from version {shown}
-          .
+          Approve {version} and the crew makes the new cut. The files below are from{' '}
+          {cutName(shown)}.
         </p>
       </div>
       <Link className="btn btn-primary" href={`/films/${filmId}/script`}>
@@ -299,8 +304,8 @@ function Revising({
       <div className="text">
         <h3>The crew is working on your changes</h3>
         <p>
-          You'll approve the new script before anything renders. The files below are from version{' '}
-          {shown}, and they stay here until the new cut is ready.
+          You'll approve the new script before anything renders. The files below are from{' '}
+          {cutName(shown)}, and they stay here until the new cut is ready.
         </p>
       </div>
       <Link className="btn" href={`/films/${filmId}`}>
@@ -332,6 +337,13 @@ function Failed({ url }: { url: string }) {
       </p>
     </EmptyState>
   );
+}
+
+/**
+ * "version 2". Files delivered before versions were kept carry 0, and are named by when they came.
+ */
+function cutName(version: number): string {
+  return version > 0 ? `version ${version}` : 'your last delivery';
 }
 
 /** One shape per format for the player: the first variant of each. */

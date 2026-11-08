@@ -408,6 +408,26 @@ describe('delivery words', () => {
   });
 });
 
+describe('files from before versions were kept', () => {
+  it('never says version 0', async () => {
+    const delivered = await simulatedFilm('delivered');
+    const old = {
+      ...delivered,
+      deliverables: delivered.deliverables.map((file) => ({ ...file, scriptVersion: 0 })),
+    };
+    expect(text(delivery(old))).not.toMatch(/version 0/i);
+
+    const revising = await simulatedFilm('revising');
+    const oldRevising = {
+      ...revising,
+      deliverables: revising.deliverables.map((file) => ({ ...file, scriptVersion: 0 })),
+    };
+    const html = text(delivery(oldRevising));
+    expect(html).not.toMatch(/version 0/i);
+    expect(html).toContain('The files below are from your last delivery');
+  });
+});
+
 // ---------- Optional: write each screen as a page in the app shell ----------
 
 function shoot(name: string, pathname: string, screen: string, simulated: boolean) {
