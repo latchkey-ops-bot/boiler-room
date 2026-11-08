@@ -148,6 +148,8 @@ function LaunchForm({
           type="date"
           value={date}
           min={utcToday()}
+          // The server's today can be a day off the browser's around midnight UTC.
+          suppressHydrationWarning
           onChange={(event) => setDate(event.target.value)}
           aria-invalid={error ? true : undefined}
           aria-describedby={error ? errorId : undefined}

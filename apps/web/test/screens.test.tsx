@@ -239,10 +239,14 @@ describe('the film page', () => {
 describe('the app home', () => {
   it('lists every video with its state, and puts the one that needs you first', async () => {
     const ctx = await signIn();
-    // Delivered yesterday.
-    at(-26 * 60 * MINUTE);
+    // Delivered yesterday at noon, in this machine's calendar, so "Yesterday" holds at any hour.
+    const noon = new Date(NOW);
+    noon.setDate(noon.getDate() - 1);
+    noon.setHours(12, 0, 0, 0);
+    const yesterday = noon.getTime() - NOW;
+    at(yesterday);
     const pebble = await createFilm(await ctx(), { url: 'pebble.example.com' });
-    at(-26 * 60 * MINUTE + 31 * SECOND);
+    at(yesterday + 31 * SECOND);
     await reviewScript(await ctx(), pebble.film.id, {
       decision: 'approve',
       version: 1,
@@ -250,7 +254,7 @@ describe('the app home', () => {
       ctaId: 'start-free',
       formats: ['16:9'],
     });
-    at(-26 * 60 * MINUTE + 90 * SECOND);
+    at(yesterday + 90 * SECOND);
     await getFilmDetail(await ctx(), pebble.film.id);
     // Waiting on the founder since 12 minutes ago.
     at(-12 * MINUTE);
