@@ -114,6 +114,11 @@ lists, and `validateFilm` checks the counts.
 | `colour-event` | `headline`, 1 to 3 words on one line                                          | `card`: simple, frosted          | none, the ground is the primary |
 | `end-card`     | `cta`, optional `label`, the URL                                              | `urlReveal`                      | none, shows the logo            |
 
+`feature-card` draws no corner mark, as its scene file has none: in 9:16 the mark sat just above
+the headline. Its headline drifts larger to the scene's last frame, so it is set narrower than the
+line box wherever that drift would otherwise carry it out of the safe area, which is every card in
+9:16 and a long one in 1:1. Stacked in 9:16, its connector starts under the cause's label.
+
 `stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
 no quote states. The count-up is built to its scene file and tested, so approving it means removing
 that refusal. Its number is fitted to its box down to 0.13 W and its label is set at the sentence
@@ -176,6 +181,7 @@ A scene type is a `defineScene` entry in `src/scenes/registry.ts`, under its nam
 - `anchors`: each `{ id, entry?, exit?, colour?, box(f, request) }`. Velocities are data, or a
   function of props, so the resolver reads them before anything renders. `box` is the anchor's
   rect in frame pixels at spec frame `f`, from props, text and `specFit` only, never the DOM;
+- `markAnchor`, only if the scene draws the brand mark, where it draws it;
 - `holdFrom`, for a scene that ends still, which stops the ground too.
 
 Inside the component, `useSceneClock()` gives `f` and `dur` in spec frames, `abs`, `b` (blank

@@ -140,7 +140,11 @@ export interface SceneDefinition<Props> {
    * aspect limit, and never to one screen, which the gate's advice says.
    */
   scrollsImages?: boolean;
-  markAnchor: (stage: Stage) => MarkPlacement;
+  /**
+   * Where the scene draws the brand mark. A scene that draws none, as its scene file says, declares
+   * none.
+   */
+  markAnchor?: (stage: Stage) => MarkPlacement;
   kind: SceneKind;
   /** The ground the `Stage` draws under the scene, in each skin. */
   ground: Record<Skin, Ground> | ((props: Props) => Record<Skin, Ground>);

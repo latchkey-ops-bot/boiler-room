@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark } from '../components/scene-base.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import { specPx } from '../components/type.tsx';
 import { type Point, WHOLE_IMAGE } from '../core/camera.ts';
@@ -160,7 +159,6 @@ export const siteHero = defineScene<SiteHeroProps>({
       zoom: 1 + drift.push * specFrame(durationInFrames, fps),
     };
   },
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'product',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   anchors: [

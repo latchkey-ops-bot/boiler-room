@@ -7,7 +7,6 @@ import { readableOn } from '@boiler-room/schema';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
 import { mix, withAlpha } from '../brand/color.ts';
-import { cornerMark } from '../components/scene-base.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import {
   baselineOffset,
@@ -329,7 +328,6 @@ export const colourEventScene = defineScene<ColourEventProps>({
   image: 'none',
   maxImages: 0,
   // The scene draws no mark: the frame is the event colour and the card. This is where one sits.
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'type',
   ground: { 'neutral-cut': 'event', 'kinetic-plate': 'event' },
   // Both of its boundaries change the ground, where T1 is never legal, so it declares no velocity.
