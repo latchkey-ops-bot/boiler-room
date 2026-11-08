@@ -17,6 +17,7 @@ describe('@boiler-room/schema', () => {
         'campaignSchema',
         'contrastRatio',
         'extractNumericTokens',
+        'isBacked',
         'readableOn',
         'sceneRegistry',
         'researchPartsSchema',

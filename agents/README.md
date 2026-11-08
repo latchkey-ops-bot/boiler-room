@@ -33,13 +33,14 @@ so the prompts stay short.
 | `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                                           | $10 / $1.50         |
 | `br-product`      | Sonnet 5.5 | `DIR` cards                                           | $4 / $1.00          |
 | `br-design`       | Sonnet 5.5 | `DESIGN` cards                                        | $5 / $1.00          |
-| `br-gtm-lead`     | Sonnet 5.5 | Nothing until GTM is activated                        | $0 / $0             |
-| `br-scout`        | Haiku 5.5  | Nothing until GTM is activated                        | $0 / $0             |
-| `br-social`       | Haiku 5.5  | Nothing until GTM is activated                        | $0 / $0             |
-| `br-inbox-reader` | Haiku 5.5  | The app, once GTM is activated                        | $0 / $0             |
+| `br-gtm-lead`     | Sonnet 5.5 | The GTM executor's `pick` brief, once GTM is active   | $0 / $0             |
+| `br-scout`        | Haiku 5.5  | The GTM executor's `qualify` brief                    | $0 / $0             |
+| `br-social`       | Haiku 5.5  | The GTM executor's `pick` brief, for the X pick       | $0 / $0             |
+| `br-inbox-reader` | Haiku 5.5  | The GTM executor's inbox phase (not built yet)        | $0 / $0             |
 
 `br-ceo` is the only coordinator and the organization's CEO (`ceo_agent_id`); Naive's default CEO
-is never created. It has `board: true` and every agent above except the inbox reader on its roster,
+is never created. It has `board: true` and the four builders on its roster (the GTM agents are not:
+the GTM executor starts them, see "GTM" below),
 each pinned at the version `company:sync` just made, so a member's new version also re-versions the
 CEO. Nobody delegates: leads create cards and assign them.
 
@@ -119,9 +120,9 @@ offered `board_read` and `board_write` even under a deny default: a throwaway ag
 default and neither tool named was offered both. Naming a tool off removes it: with `board_write`
 named off it was offered `board_read` only. So:
 
-- The GTM agents name `board_write` off while GTM is inactive, and keep `board_read`. Activating
-  GTM gives `board_write` back.
-- The inbox reader names both off, as before.
+- The four GTM agents name both off. They read websites, launch posts and email, so they never
+  read or write cards, whether GTM is active or not; the GTM executor, which is code, writes the
+  GTM cards.
 - Every production-crew toolset (`toolset()` in `src/define.ts`) names both off. That covers
   `br-researcher` from this branch. `br-director`, `br-art-director` and `br-quality-check` are
   defined on their own branches and synced by their own jobs: until those branches take this
@@ -133,7 +134,7 @@ named off it was offered `board_read` only. So:
 Naive has no organization-wide policy (docs: concepts/policies) and no way to seat only a roster on
 the company board, so nothing here can close this for an agent another branch syncs. What this
 branch does is find it: `company:sync` warns about each agent the board offers a tool its
-definition does not give it (a crew or probe agent: any board tool; a GTM agent: `board_write`),
+definition does not give it (a crew, probe or GTM agent: any board tool),
 `company:status` lists them, and `company:verify` fails on them. A card any of them creates and
 assigns starts its assignee at once, sweep or not.
 
@@ -148,8 +149,9 @@ with no session and no spend. Run it before trusting a `br-ceo` run, and before 
 An `ask` call parks the session as `awaiting_approval`, which `company:status` lists; approving it
 would run the call.
 
-Not provisioned yet, because nothing uses them until GTM is activated: the GTM persona and the
-inbox reader's AgentMail vault credential. The activation checklist is in `docs/company/roles/gtm.md`.
+Not provisioned yet, because nothing uses them until GTM is activated: the GTM identity for Naive
+social and the executor's own key. No GTM agent holds an identity or a vault credential. The
+activation checklist is in `docs/company/gtm-operations.md` section 15.
 
 Verified on 2026-11-07, on the real company:
 
@@ -335,7 +337,32 @@ Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
   merge. Adding the rules is the founder's (above).
 - **Who writes cards.** The spec seats the roster on the CEO's board. Live: `br-ceo` is the
   organization's CEO, so its board seats every agent of the organization. The GTM agents and the
-  crew name `board_write` off; see "The company board seats every agent".
+  crew name both board tools off; see "The company board seats every agent".
+
+## GTM
+
+Go-to-market runs as **agents decide, code acts**. The GTM executor (`src/gtm/`) is deterministic
+code: it finds startups that launched in the last 72 hours (Show HN, the Product Hunt feed, launch
+posts on X), reads their sites, starts `br-scout`, `br-gtm-lead` and `br-social` with fenced briefs,
+checks every field they return, orders sample films through `FilmOrder`, writes the X caption from
+a founder-approved template and the email around the lead's two lines, and does every post and
+send itself. No GTM agent holds a tool that acts. The spec is
+[`docs/company/gtm-operations.md`](../docs/company/gtm-operations.md).
+
+```sh
+pnpm gtm:day                 # one whole day, dry run: drafts and a report in out/gtm/<date>/, nothing sent
+pnpm gtm:day --board         # the same, writing the day card on the company board
+pnpm gtm:report              # the metrics from the store; --days 30, --json
+pnpm gtm:halt                # every lane but removals stops; --lift returns to dry run
+pnpm gtm:schedule --install  # the daily 05:00 Pacific timer, created paused; --enable starts it
+pnpm gtm:flags               # the store's flags; --set key=value records an activation step
+```
+
+Dry run is the default and the only mode this build can reach: a lane goes live only when its flag
+and every precondition pass at run time, and today the film pipeline, the cold sender, the postal
+address, the X account and the executor's own key (`GTM_NAIVE_API_KEY`) are all missing. Every GTM
+agent stays at $0 until `GTM_ACTIVE` in `src/definitions/company/gtm.ts` is set by a reviewed
+change; the budgets it switches to are next to it.
 
 ## The Researcher
 

@@ -1,4 +1,4 @@
-import { CEO } from '../definitions/company/common.ts';
+import { CEO, GTM_LEAD, INBOX_READER, SCOUT, SOCIAL_AGENT } from '../definitions/company/common.ts';
 import { company } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
 import { HASH_KEY } from '../sync.ts';
@@ -17,6 +17,9 @@ import { HELD_STOP_REASONS, heldSessions } from './status.ts';
 /** Stored in place of br-ceo's definition hash, so `company:sync` sees the halt and restores nothing unasked. */
 export const HALTED = 'halted';
 
+/** The GTM agents the halt also sets to $0, so no executor-started session can spend either. */
+export const GTM_HALTED = [GTM_LEAD, SCOUT, SOCIAL_AGENT, INBOX_READER] as const;
+
 /** Stop reasons of a session that is still live: it resumes, or runs a call, once someone acts. */
 export const LIVE_STOP_REASONS = [
   ...HELD_STOP_REASONS,
@@ -30,6 +33,8 @@ export interface HaltReport {
   ceo: { id: string; version: number };
   /** `zeroed` when this run set the $0 cap, `already` when br-ceo was halted before. */
   budget: 'zeroed' | 'already' | 'would zero';
+  /** The four GTM agents' budgets, set to $0 with br-ceo's. */
+  gtm: { name: string; id: string; action: 'zeroed' | 'already' | 'would zero' }[];
   sweeps: { id: string; action: 'paused' | 'already paused' | 'would pause' }[];
   sessions: { id: string; state: string; action: 'interrupted' | 'would interrupt' }[];
   deleted: boolean;
@@ -101,6 +106,25 @@ export async function haltCeo(
   }
   log(`budget    ${budget} ${CEO} ${ceo.id}: $0 a day, so no turn can run`);
 
+  const gtm: HaltReport['gtm'] = [];
+  const listed = await listAll((query) => client.agents.list(query));
+  for (const name of GTM_HALTED) {
+    const matches = listed.filter((agent) => agent.name === name);
+    if (matches.length !== 1) continue;
+    const agent = await client.agents.get((matches[0] as { id: string }).id);
+    const zero = agent.budget?.cap_micro_usd === 0 && agent.budget?.max_task_micro_usd === 0;
+    const action = zero ? 'already' : dryRun ? 'would zero' : 'zeroed';
+    if (action === 'zeroed') {
+      await client.agents.update(agent.id, {
+        budget: { cap_micro_usd: 0, max_task_micro_usd: 0, period: agent.budget.period },
+        metadata: { ...agent.metadata, [HASH_KEY]: HALTED },
+        expected_version: agent.current_version,
+      });
+    }
+    gtm.push({ name, id: agent.id, action });
+    log(`budget    ${action} ${name} ${agent.id}: $0 a day`);
+  }
+
   const sweeps: HaltReport['sweeps'] = [];
   const deployments = (await listAll((query) => client.deployments.list(query))).filter(
     (deployment) => deployment.agent_id === ceo.id,
@@ -137,6 +161,7 @@ export async function haltCeo(
     dry_run: dryRun,
     ceo: { id: ceo.id, version: ceo.current_version },
     budget,
+    gtm,
     sweeps,
     sessions,
     deleted,

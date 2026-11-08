@@ -35,14 +35,19 @@ describe('the company board', () => {
     expect(boardOffered({ board_write: { enabled: false } }, 'board_write')).toBe(false);
   });
 
-  it('means only br-ceo and the builders to write cards, GTM to read them, and no one else', () => {
+  it('means only br-ceo and the builders to use the board, and no one else', () => {
     for (const name of ['br-ceo', 'br-eng-lead', 'br-engineer-1', 'br-product', 'br-design']) {
       expect(intendedBoardTools(name), name).toEqual(['board_read', 'board_write']);
     }
-    for (const name of ['br-gtm-lead', 'br-scout', 'br-social']) {
-      expect(intendedBoardTools(name), name).toEqual(['board_read']);
-    }
-    for (const name of ['br-inbox-reader', 'br-researcher', 'br-director', 'br-probe-x']) {
+    for (const name of [
+      'br-gtm-lead',
+      'br-scout',
+      'br-social',
+      'br-inbox-reader',
+      'br-researcher',
+      'br-director',
+      'br-probe-x',
+    ]) {
       expect(intendedBoardTools(name), name).toEqual([]);
     }
   });

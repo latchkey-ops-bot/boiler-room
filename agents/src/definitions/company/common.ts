@@ -21,7 +21,11 @@ export const SOCIAL_AGENT = 'br-social';
 export const INBOX_READER = 'br-inbox-reader';
 export const CEO = 'br-ceo';
 
-/** Card title prefixes. A fixed prefix and a slug make the board read as a log. */
+/**
+ * Card title prefixes. A fixed prefix and a slug make the board read as a log. `GTM`, `REMOVE` and
+ * `FOUNDER: gtm ...` cards are written by the GTM executor, which is code; `GTM-HOLD` is anyone's,
+ * and stops every GTM lane while it is open.
+ */
 export const CARD_PREFIXES = [
   'DIR',
   'DESIGN',
@@ -31,8 +35,8 @@ export const CARD_PREFIXES = [
   'RELEASE',
   'FOUNDER',
   'GTM',
-  'LEADS',
-  'POST',
+  'REMOVE',
+  'GTM-HOLD',
 ] as const;
 
 const COMPANY = 'Boiler Room is an autonomous company that turns any website into a launch film.';

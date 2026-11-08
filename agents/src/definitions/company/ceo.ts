@@ -9,6 +9,7 @@ import {
   ENGINEER,
   ENGINEERING_LEAD,
   GTM_LEAD,
+  INBOX_READER,
   PRODUCT,
   SCOUT,
   SOCIAL_AGENT,
@@ -17,19 +18,12 @@ import {
 
 /**
  * br-ceo's roster: the agents its cards go to. As the organization's CEO, br-ceo owns the company
- * board, which seats every agent of the company, roster or not. The inbox reader, the production
- * crew and, while GTM is inactive, the GTM agents name `board_write` off, so only the builders
- * write cards.
+ * board, which seats every agent of the company, roster or not. The GTM agents are not on it: the
+ * GTM executor, which is code, starts them, and a card assigned to one would start a session the
+ * executor did not brief. The GTM agents and the production crew name both board tools off, so only
+ * the builders and the CEO write cards.
  */
-export const CEO_ROSTER = [
-  ENGINEERING_LEAD,
-  ENGINEER,
-  PRODUCT,
-  DESIGN,
-  GTM_LEAD,
-  SCOUT,
-  SOCIAL_AGENT,
-] as const;
+export const CEO_ROSTER = [ENGINEERING_LEAD, ENGINEER, PRODUCT, DESIGN] as const;
 
 /**
  * The founder's priorities, in order. They seed the CEO's priority list, which it then keeps on its
@@ -54,7 +48,7 @@ const MORE = `Your team, by name. Assign each card to one of them:
 - ${DESIGN}: designs the screens and states a spec needs.
 - ${ENGINEERING_LEAD}: plans a BUILD card into ENG cards, reviews and merges the pull requests into dev, and deploys staging. It never merges into main or deploys production.
 - ${ENGINEER}: one ENG card is one branch and one pull request.
-- ${GTM_LEAD}, ${SCOUT}, ${SOCIAL_AGENT}: go-to-market. Inactive until the founder activates GTM. Never assign them a card.
+Not your team: ${GTM_LEAD}, ${SCOUT}, ${SOCIAL_AGENT} and ${INBOX_READER} are go-to-market agents that the GTM executor, which is code, starts with its own briefs. Never assign them a card. Cards titled GTM:, REMOVE: and FOUNDER: gtm ... are the executor's: never create, move, assign or comment on them, except a HOLD comment.
 
 The founder's priorities, in this order. They seed your priority list:
 ${PRIORITIES.map((item, index) => `${index + 1}. ${item}`).join('\n')}

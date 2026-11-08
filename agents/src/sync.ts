@@ -110,7 +110,9 @@ export async function syncSkills(
 
 /**
  * Makes Naive match the definitions, by name. A missing agent is created; one whose stored
- * definition hash differs gets a new version; one that matches is left alone. Two agents with one
+ * definition hash differs, or that still holds an MCP server its definition no longer names, gets a
+ * new version (with `mcp_servers` always written, so a dropped server is cleared); one that matches
+ * is left alone. Two agents with one
  * name is an error to resolve by hand, never a guess. Agents with a roster are synced after every
  * other agent, so their members exist and are pinned at the version this run left them on.
  */
@@ -151,7 +153,11 @@ export async function syncAgents(
       });
       continue;
     }
-    if (current.metadata?.[HASH_KEY] === config.metadata?.[HASH_KEY]) {
+    // An update replaces only the fields it names, and the hash covers only what the definition
+    // names, so a server the definition dropped would stay stored for ever. It counts as a change.
+    const leftoverServers =
+      !definition.mcp_servers?.length && (current.mcp_servers?.length ?? 0) > 0;
+    if (current.metadata?.[HASH_KEY] === config.metadata?.[HASH_KEY] && !leftoverServers) {
       record({
         name: definition.name,
         id: current.id,
@@ -163,6 +169,7 @@ export async function syncAgents(
     const { name: _name, harness: _harness, ...patch } = config;
     const updated = await client.agents.update(current.id, {
       ...patch,
+      mcp_servers: config.mcp_servers ?? [],
       expected_version: current.current_version,
     });
     record({
