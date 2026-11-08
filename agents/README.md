@@ -97,6 +97,43 @@ on a live session.
 
 Asset `src` values name Naive files as `naive://files/<fil_ id>`; `fileIdOf` reads them.
 
+## The Art Director
+
+```sh
+pnpm art out/art/linear.app/campaign.json --research out/research/linear.app/research.json
+```
+
+Input is a campaign that passes `validateCampaign` with `sceneRegistry`, and the Researcher's
+`research.json` (default `out/research/<host>/research.json`) for the site's light or dark mode and
+its page kinds. Output is the same campaign, art-directed, at `<name>.art.json` beside the input,
+with `<name>.art.report.json`, the session events, and a copy of any generated image under
+`assets/generated/`. The run prints what it cost.
+
+| Step                  | Where                                              | Who                                                                                                                                                                     |
+| --------------------- | -------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Style family, colours | `src/art/style.ts`, `packages/schema/src/style.ts` | Code. OKLCH `L >= 0.90` is Neutral Cut, `L <= 0.22` Kinetic Plate; a mid-tone ground is tinted toward the site's mode; ink, accent and muted are fixed to pass contrast |
+| Fonts, logo           | `src/art/brand.ts`                                 | Code. A font with no known open licence falls back to Inter (library, OFL-1.1); a generated or raster logo is flagged, never changed                                    |
+| Assets per scene      | `src/art/assets.ts`                                | Code ranks by the asset ladder and proposes a default; one offer per picture by file digest                                                                             |
+| Generation            | `src/art/generate.ts`                              | Code. Only a `colour-event` field when the primary reads as nothing, and one `iso-chain` texture; at most 2 images and $0.10 per film                                   |
+| Review                | `src/art/review.ts`                                | `br-art-director` (Sonnet 5.5, `view_image` and `read_skill` only, no computer), one short session per batch of at most 4 pictures                                      |
+| Merge and gate        | `src/art/apply.ts`, `run.ts`                       | Code. A pick outside the candidates, an unseen review or a failed batch keeps the default; a generated image is declared only when accepted                             |
+
+The style family is not a field in `campaign.json`: the renderer derives it from the background
+with the same thresholds, which is why they live in `@boiler-room/schema`.
+
+Cost is held in code. A review session that starts a second `view_image` call or runs past 3
+minutes is interrupted, and once a film's reviews have spent `--budget-usd` (default $1) no further
+review starts. Measured: $0.05 per review of 4 pictures; a Long film of 27 scenes took 14 reviews
+and $0.72 in all, a Short film 2 reviews and $0.05.
+
+Exit codes: 0 written, 1 refused (an invalid input, or a result that fails `validateCampaign`), 3
+written with a `tile-wall` sent back to the Director for want of 6 distinct captured tiles.
+
+Two things about `view_image` on the `pi` harness, seen in live runs: its tool result is captions
+and links only, and the pictures follow as images in the conversation; and after submitting, the
+agent sometimes writes that the pictures never arrived, though its submitted reasons describe
+detail only the pixels hold. The structured result, with its `seen` field, is what code reads.
+
 ## Testing the capture tool locally
 
 `BR_LOCAL=1` makes the tool skip swap, system packages and killing stray browsers, which are only

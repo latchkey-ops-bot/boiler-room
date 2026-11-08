@@ -156,7 +156,9 @@ spend on images. It generates the first two rows only: the third has no slot in 
 under 0.04 [N]. Code writes the prompt, uses Naive image generation, and stops at 2 images or
 $0.10 per film, whichever comes first. You inspect each image with `view_image` and accept or
 reject it; only an accepted image is declared. A rejected or capped image leaves the code-built
-field for `colour-event` and `iso-chain` untextured.
+field for `colour-event` and `iso-chain` untextured. Code also sets the colours (sections 1 and 2),
+checks fonts and the logo (section 3) and ranks the assets (section 4); you review its ranking in
+small batches, one session each, with at most 4 pictures in one `view_image` call.
 
 **Label it.** Every generated asset is declared like this, and listed in your report:
 

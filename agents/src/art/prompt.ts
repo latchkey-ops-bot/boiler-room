@@ -1,7 +1,7 @@
 import type { Campaign } from '@boiler-room/schema';
 import { fileIdOf } from '../researcher/output.ts';
 import type { Batch } from './apply.ts';
-import { batchFiles } from './apply.ts';
+import { batchFiles, VIEW_LIMIT } from './apply.ts';
 import type { AssetInfo } from './assets.ts';
 import type { StyleDecision } from './style.ts';
 
@@ -71,7 +71,7 @@ export function reviewTask(
     review = {
       review: 'tiles',
       scene_id: batch.proposal.sceneId,
-      note: `A tile wall needs at least ${batch.proposal.slot.min} tiles in all; other groups of tiles are reviewed separately.`,
+      note: `This wall has ${batch.proposal.candidates.length} candidate tiles in all, reviewed in groups of up to ${VIEW_LIMIT}, and the code fills it from every group. Judge only these tiles; the size of this group is not a problem to flag.`,
       tiles: batch.assetIds.map(picture),
     };
     answer = 'Fill tiles with one entry per tile. Set scene to null and leave generated empty.';
