@@ -54,8 +54,10 @@ go to wrangler through its environment or stdin, never on a command line, and ar
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`             | Sign-in, in the browser. Inlined at build, and a Worker secret |
 
 Any of them can be set per environment with a prefix: `STAGING_CLERK_SECRET_KEY` wins over
-`CLERK_SECRET_KEY` for staging, `PRODUCTION_CLERK_SECRET_KEY` for production. Today staging uses
-Clerk's development instance.
+`CLERK_SECRET_KEY` for staging. Production reads only `PRODUCTION_CLERK_SECRET_KEY` and
+`PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, never the unscoped keys, and the build and secret
+sync stop if either is a development key (`sk_test_` or `pk_test_`). Today staging uses Clerk's
+development instance.
 
 The token in the env file today could create the staging D1 database and R2 bucket, apply
 migrations, set secrets, deploy, list versions and tail logs. A Cloudflare token reaches the whole

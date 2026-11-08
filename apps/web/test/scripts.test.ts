@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseEnvFile, valueFor } from '../scripts/lib/env.mjs';
+import { developmentKeysIn, parseEnvFile, valueFor } from '../scripts/lib/env.mjs';
 import {
   environmentConfig,
   readWranglerConfig,
@@ -22,8 +22,35 @@ describe('env file', () => {
   it('prefers the environment-scoped value, and treats empty as missing', () => {
     const vars = parseEnvFile('CLERK_SECRET_KEY=dev\nSTAGING_CLERK_SECRET_KEY=stage\nEMPTY=');
     expect(valueFor(vars, 'CLERK_SECRET_KEY', 'staging')).toBe('stage');
-    expect(valueFor(vars, 'CLERK_SECRET_KEY', 'production')).toBe('dev');
+    expect(valueFor(vars, 'CLERK_SECRET_KEY', 'development')).toBe('dev');
     expect(valueFor(vars, 'EMPTY', 'staging')).toBeNull();
+  });
+
+  it('gives production only PRODUCTION_ values, never the unscoped development keys', () => {
+    const unscoped = parseEnvFile(
+      'CLERK_SECRET_KEY=sk_test_FAKE\nNEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_FAKE',
+    );
+    expect(valueFor(unscoped, 'CLERK_SECRET_KEY', 'production')).toBeNull();
+    expect(valueFor(unscoped, 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'production')).toBeNull();
+    const scoped = parseEnvFile(
+      'CLERK_SECRET_KEY=sk_test_FAKE\nPRODUCTION_CLERK_SECRET_KEY=sk_live_FAKE',
+    );
+    expect(valueFor(scoped, 'CLERK_SECRET_KEY', 'production')).toBe('sk_live_FAKE');
+  });
+
+  it('names production values that are Clerk development keys, by prefix only', () => {
+    expect(
+      developmentKeysIn([
+        ['CLERK_SECRET_KEY', 'sk_test_FAKE'],
+        ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_FAKE'],
+      ]),
+    ).toEqual(['CLERK_SECRET_KEY', 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY']);
+    expect(
+      developmentKeysIn([
+        ['CLERK_SECRET_KEY', 'sk_live_FAKE'],
+        ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_FAKE'],
+      ]),
+    ).toEqual([]);
   });
 });
 
@@ -44,6 +71,8 @@ describe('wrangler.jsonc', () => {
         { binding: 'WORKER_SELF_REFERENCE', service: `boiler-room-web-${env}` },
       ]);
       expect(section.vars.APP_ENV).toBe(env);
+      // The showcase's house film is chosen by owner: every environment states the account.
+      expect(typeof section.vars.BR_HOUSE_ACCOUNT_ID).toBe('string');
       expect(environmentConfig(env)).toMatchObject({
         databaseName: `boiler-room-${env}`,
         bucketName: `boiler-room-films-${env}`,

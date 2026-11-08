@@ -24,6 +24,10 @@ Staging makes simulated films (`PIPELINE=simulated`): no crew runs, and every sc
 Production never does (`PIPELINE=naive`): until the Naive pipeline is wired, starting a film there
 answers 503.
 
+`BR_HOUSE_ACCOUNT_ID` names Boiler Room's own account (`acc_…`). Its newest film on the showcase
+goes first, with the "Our own" badge. It is chosen by owner, never by URL, so no customer can take
+the slot. It is empty in every environment until the founder's film exists; set it by pull request.
+
 ## Before you start
 
 1. **The keys.** The scripts read `~/.boiler-room.env` (or the file named by `BR_ENV_FILE`). It
@@ -177,9 +181,10 @@ to a moment. A restore on staging needs the founder's go; on production only the
 | `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | What the scripts use to reach Cloudflare. Never in the Worker | The env file only                                 |
 
 - `pnpm web:secrets:sync:<env>` copies the Worker secrets from the env file to Cloudflare, one
-  `wrangler secret put` each, with the value on stdin. A value named `STAGING_<NAME>` or
-  `PRODUCTION_<NAME>` wins for that environment, so the environments can use different Clerk
-  instances.
+  `wrangler secret put` each, with the value on stdin. A value named `STAGING_<NAME>` wins for
+  staging. Production reads only `PRODUCTION_<NAME>`, with no fallback to the unscoped keys, and
+  refuses a Clerk development key (`sk_test_`, `pk_test_`), so production can never land on the
+  development instance.
 - Local development gets them from `apps/web/.dev.vars`, which `pnpm web:dev` writes. It is
   gitignored. Never commit it, and never write a secret into `wrangler.jsonc`, a `.env` file in the
   app (Next would bundle it into the Worker), a card, a commit, a log or a command line.

@@ -44,6 +44,11 @@ export interface ScriptApproval {
   /** A CTA id from the campaign, or null when the campaign has none. */
   ctaId: string | null;
   formats: Format[];
+  /**
+   * Claims the crew found but nobody had confirmed, which the customer confirmed as right. The crew
+   * may now treat them as approved.
+   */
+  confirmedClaimIds: string[];
 }
 
 export interface PipelineStatus {

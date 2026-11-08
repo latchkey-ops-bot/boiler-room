@@ -2,12 +2,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { getDb } from '../src/db/client.ts';
 import { deliverables, filmEvents, films } from '../src/db/schema.ts';
 import type { Format, PipelineKind } from '../src/lib/film.ts';
-import { parseRange, showcaseFilms, showcaseVideo, siteHost } from '../src/server/showcase.ts';
+import { parseRange, showcaseFilms, showcaseVideo } from '../src/server/showcase.ts';
 import { contextFor, startWorkerEnv } from './helpers.ts';
 
 type Proxy = Awaited<ReturnType<typeof startWorkerEnv>>;
 let proxy: Proxy;
 let accountId: string;
+/** Boiler Room's own account, whose film leads the wall. */
+let houseAccountId: string;
 
 beforeAll(async () => {
   proxy = await startWorkerEnv();
@@ -17,6 +19,12 @@ beforeAll(async () => {
     () => new Date(),
   );
   accountId = ctx.account.id;
+  const house = await contextFor(
+    { userId: 'user_house', orgId: null },
+    proxy.env,
+    () => new Date(),
+  );
+  houseAccountId = house.account.id;
 });
 afterAll(async () => {
   await proxy?.dispose();
@@ -38,12 +46,16 @@ async function film({
   optIn = true,
   status = 'done',
   pipeline = 'naive',
+  owner = accountId,
+  scriptVersion = 1,
 }: {
   url: string;
   deliveredAt: string;
   optIn?: boolean;
   status?: 'done' | 'working';
   pipeline?: PipelineKind;
+  owner?: string;
+  scriptVersion?: number;
 }): Promise<string> {
   serial += 1;
   const id = `flm_${String(serial).padStart(20, '0')}`;
@@ -52,7 +64,7 @@ async function film({
     .insert(films)
     .values({
       id,
-      accountId,
+      accountId: owner,
       createdBy: 'user_showcase',
       url,
       status,
@@ -60,19 +72,27 @@ async function film({
       pipeline,
       pipelineRunId: `run_${serial}`,
       showcaseOptIn: optIn,
+      scriptVersion,
       createdAt: at,
       updatedAt: at,
     });
   return id;
 }
 
-async function file(filmId: string, format: Format, body: string | null): Promise<void> {
-  const r2Key = body === null ? null : `films/${filmId}/${format.replace(':', 'x')}.mp4`;
+async function file(
+  filmId: string,
+  format: Format,
+  body: string | null,
+  scriptVersion = 1,
+): Promise<void> {
+  const shape = format.replace(':', 'x');
+  const r2Key = body === null ? null : `films/${filmId}/v${scriptVersion}/${shape}.mp4`;
   await db()
     .insert(deliverables)
     .values({
-      id: `dlv_${filmId}_${format.replace(':', 'x')}`,
+      id: `dlv_${filmId}_${shape}_v${scriptVersion}`,
       filmId,
+      scriptVersion,
       variantKey: `${format}.main.start`,
       format,
       fileName: `${format.replace(':', 'x')}.mp4`,
@@ -104,22 +124,33 @@ describe('the launch wall', () => {
 
   it("puts Boiler Room's own film first, however old it is", async () => {
     const newest = await film({ url: 'https://orbit.com/', deliveredAt: '2026-11-06' });
-    const ours = await film({ url: 'https://www.boilerroom.example/', deliveredAt: '2026-10-01' });
-    // A look-alike host is somebody else's film.
-    await film({ url: 'https://boilerroom.example.evil.com/', deliveredAt: '2026-11-04' });
+    const ours = await film({
+      url: 'https://www.boilerroom.example/',
+      deliveredAt: '2026-10-01',
+      owner: houseAccountId,
+    });
+    await film({ url: 'https://pebble.app/', deliveredAt: '2026-11-04' });
 
-    const wall = await showcaseFilms(db(), { houseHost: 'boilerroom.example:443' });
+    const wall = await showcaseFilms(db(), { houseAccountId });
     expect(wall.map((item) => [item.id, item.house])).toEqual([
       [ours, true],
       [newest, false],
       [expect.any(String), false],
     ]);
     // Even when the wall is shorter than the list of newer films.
-    expect((await showcaseFilms(db(), { houseHost: 'boilerroom.example', limit: 1 }))[0]?.id).toBe(
-      ours,
-    );
-    // Without a house host, nothing is pinned.
+    expect((await showcaseFilms(db(), { houseAccountId, limit: 1 }))[0]?.id).toBe(ours);
+    // Without a house account, nothing is pinned.
     expect((await showcaseFilms(db()))[0]?.id).toBe(newest);
+  });
+
+  it("never gives a customer's film the house slot, even a film of our own site", async () => {
+    // A customer films the site the wall is served from, on a long workers.dev host.
+    const theirs = await film({
+      url: 'https://boiler-room-web-production.boilerroom.workers.dev/',
+      deliveredAt: '2026-11-06',
+    });
+    const wall = await showcaseFilms(db(), { houseAccountId });
+    expect(wall.map((item) => [item.id, item.house])).toEqual([[theirs, false]]);
   });
 
   it('dates a film by when the crew delivered it, not when its founder opted in', async () => {
@@ -169,6 +200,29 @@ describe('a film on the wall', () => {
     expect(response.headers.get('accept-ranges')).toBe('bytes');
     expect(response.headers.get('content-length')).toBe('15');
     expect(await response.text()).toBe('wide film bytes');
+  });
+
+  it('plays the cut the founder has now, never one they asked to change', async () => {
+    const id = await film({
+      url: 'https://orbit.com/',
+      deliveredAt: '2026-11-02',
+      scriptVersion: 2,
+    });
+    await file(id, '16:9', 'bytes of cut v1', 1);
+    await file(id, '16:9', 'bytes of cut v2', 2);
+    const response = await showcaseVideo(db(), proxy.env.FILMS, id, get());
+    expect(await response.text()).toBe('bytes of cut v2');
+  });
+
+  it('offers no video while the newest cut has no stored file', async () => {
+    const id = await film({
+      url: 'https://orbit.com/',
+      deliveredAt: '2026-11-02',
+      scriptVersion: 2,
+    });
+    await file(id, '16:9', 'bytes of cut v1', 1);
+    expect((await showcaseFilms(db()))[0]?.videoPath).toBeNull();
+    expect((await showcaseVideo(db(), proxy.env.FILMS, id, get())).status).toBe(404);
   });
 
   it('answers byte ranges, as Safari needs', async () => {
@@ -230,22 +284,5 @@ describe('byte ranges', () => {
     expect(parseRange('bytes=0-1,5-6', 100)).toBeNull();
     expect(parseRange('items=0-1', 100)).toBeNull();
     expect(parseRange('bytes=-', 100)).toBeNull();
-  });
-});
-
-describe('the house host', () => {
-  it('is the bare host a page is served from', () => {
-    expect(siteHost('boilerroom.example')).toBe('boilerroom.example');
-    expect(siteHost('WWW.BoilerRoom.example:8443')).toBe('boilerroom.example');
-    expect(siteHost('boiler-room-web.boilerroom.workers.dev')).toBe(
-      'boiler-room-web.boilerroom.workers.dev',
-    );
-  });
-
-  it('is nothing for a host no film can be made from', () => {
-    expect(siteHost('localhost:3000')).toBeNull();
-    expect(siteHost('')).toBeNull();
-    expect(siteHost('evil.com/%')).toBeNull();
-    expect(siteHost('a_b.com')).toBeNull();
   });
 });

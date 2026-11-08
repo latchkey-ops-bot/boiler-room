@@ -71,9 +71,55 @@ export const STAGE_LABELS: Record<Stage, string> = {
   motion: 'Motion',
   audio: 'Audio',
   render: 'Render',
-  review: 'Review',
+  // Not "Review": that word is the founder's step, the script review.
+  review: 'Quality check',
   delivery: 'Delivery',
 };
+
+/**
+ * The four stops a founder sees, the same four as How it works on the landing page and What
+ * happens next on the new-video page. The ten stages stay the pipeline's own; each maps to a stop.
+ */
+export const STOPS = ['research', 'script', 'approve', 'make'] as const;
+export type Stop = (typeof STOPS)[number];
+
+export const STOP_LABELS: Record<Stop, string> = {
+  research: 'Research',
+  script: 'Script',
+  approve: 'You approve',
+  make: 'Animate and deliver',
+};
+
+export const STOP_OF: Record<Stage, Stop> = {
+  research: 'research',
+  script: 'script',
+  checks: 'script',
+  approval: 'approve',
+  art_direction: 'make',
+  motion: 'make',
+  audio: 'make',
+  render: 'make',
+  review: 'make',
+  delivery: 'make',
+};
+
+/** Who works at each stop. The landing page lists the same cast, so the two always agree. */
+export const STOP_CREW: Record<Stop, readonly CrewMember[]> = {
+  research: ['researcher'],
+  script: ['director', 'validator'],
+  approve: ['customer'],
+  make: ['art_director', 'motion', 'audio', 'render', 'quality_check', 'account_manager'],
+};
+
+export function stopIndex(stage: Stage): number {
+  return STOPS.indexOf(STOP_OF[stage]);
+}
+
+/**
+ * How long a simulated film takes, in seconds at demo pace: from the start to the script, and from
+ * approval to delivery. The simulator's timeline uses these. A real film's times are not known yet.
+ */
+export const SIMULATED_SECONDS = { script: 30, delivery: 40 } as const;
 
 export const STATUS_LABELS: Record<FilmStatus, string> = {
   queued: 'Queued',
@@ -93,7 +139,7 @@ export const WORKING_LABELS: Record<Stage, string> = {
   motion: 'Animating',
   audio: 'Adding sound',
   render: 'Rendering',
-  review: 'Reviewing',
+  review: 'Final check',
   delivery: 'Delivering',
 };
 

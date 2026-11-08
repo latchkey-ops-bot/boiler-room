@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, isNotNull, like, max, ne, or } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, isNotNull, max, ne } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
 import { deliverables, filmEvents, films } from '../db/schema.ts';
 import { displayHost, type Format } from '../lib/film.ts';
@@ -25,36 +25,28 @@ const PLAY_ORDER: readonly Format[] = ['16:9', '1:1', '9:16'];
  * The public launch wall: delivered films whose founders opted in. Simulated films never appear,
  * because the showcase is for real films only.
  *
- * Boiler Room's own film goes first, as the founder decided. It is the film of the site the wall
- * is served from: pass that host as `houseHost`, and a film made from it leads the wall, however
- * old it is.
+ * Boiler Room's own film goes first, as the founder decided. It is chosen by who owns it, never by
+ * its URL: pass Boiler Room's own account as `houseAccountId` (the `BR_HOUSE_ACCOUNT_ID` var), and
+ * that account's newest film on the wall leads it, however old it is. No other account's film is
+ * ever marked as ours.
  */
 export async function showcaseFilms(
   db: Db,
-  { limit = 24, houseHost = null }: { limit?: number; houseHost?: string | null } = {},
+  { limit = 24, houseAccountId = null }: { limit?: number; houseAccountId?: string | null } = {},
 ): Promise<ShowcaseFilm[]> {
   const shown = and(
     eq(films.showcaseOptIn, true),
     eq(films.status, 'done'),
     ne(films.pipeline, 'simulated'),
   );
-  const host = houseHost ? siteHost(houseHost) : null;
-  const houseRows = host
-    ? (
-        await db
-          .select()
-          .from(films)
-          .where(
-            and(
-              shown,
-              or(...houseUrlPrefixes(host).map((prefix) => like(films.url, `${prefix}%`))),
-            ),
-          )
-          .orderBy(desc(films.updatedAt))
-          .limit(4)
-      ).filter((film) => displayHost(film.url) === host)
+  const house = houseAccountId
+    ? await db
+        .select()
+        .from(films)
+        .where(and(shown, eq(films.accountId, houseAccountId)))
+        .orderBy(desc(films.updatedAt))
+        .limit(1)
     : [];
-  const house = houseRows.slice(0, 1);
   const newest = await db
     .select()
     .from(films)
@@ -67,7 +59,7 @@ export async function showcaseFilms(
   const ids = rows.map((film) => film.id);
   const [files, deliveries] = await Promise.all([
     db
-      .select({ filmId: deliverables.filmId })
+      .select({ filmId: deliverables.filmId, scriptVersion: deliverables.scriptVersion })
       .from(deliverables)
       .where(and(inArray(deliverables.filmId, ids), isNotNull(deliverables.r2Key))),
     // When the crew delivered it. `updatedAt` also moves when the founder opts in, later.
@@ -82,7 +74,9 @@ export async function showcaseFilms(
     const campaign = parseCampaign(film.campaignJson);
     const headline =
       campaign?.scenes[0]?.text.find((item) => item.role === 'headline')?.value ?? null;
-    const playable = files.some((file) => file.filmId === film.id);
+    const playable = files.some(
+      (file) => file.filmId === film.id && file.scriptVersion === film.scriptVersion,
+    );
     const delivered = deliveries.find((row) => row.filmId === film.id)?.at ?? film.updatedAt;
     return {
       id: film.id,
@@ -124,10 +118,19 @@ export async function showcaseVideo(
     ),
   });
   if (!film) return missing();
+  // The cut the founder has now. Earlier cuts stay downloadable for them, but the wall never plays
+  // a version they asked to change.
   const rows = await db
     .select()
     .from(deliverables)
-    .where(and(eq(deliverables.filmId, id), isNotNull(deliverables.r2Key)));
+    .where(
+      and(
+        eq(deliverables.filmId, id),
+        eq(deliverables.scriptVersion, film.scriptVersion),
+        isNotNull(deliverables.r2Key),
+      ),
+    )
+    .orderBy(asc(deliverables.variantKey));
   const file = PLAY_ORDER.map((format) => rows.find((row) => row.format === format)).find(Boolean);
   if (!file?.r2Key) return missing();
 
@@ -187,19 +190,14 @@ export function parseRange(
   return end < start ? null : { start, end };
 }
 
-/** The bare host a page is served from, such as `boilerroom.example` for `www.boilerroom.example:443`. */
-export function siteHost(value: string): string | null {
-  const host = value
-    .trim()
-    .toLowerCase()
-    .replace(/:\d+$/, '')
-    .replace(/^www\./, '');
-  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(host) ? host : null;
-}
-
-/** Films store a URL normalised by parseFilmUrl, so these prefixes find every film of `host`. */
-function houseUrlPrefixes(host: string): string[] {
-  return ['https://', 'http://', 'https://www.', 'http://www.'].map(
-    (scheme) => `${scheme}${host}/`,
-  );
+/** True once at least one real film is on the wall. The nav shows Showcase only then. */
+export async function hasShowcaseFilms(db: Db): Promise<boolean> {
+  const [row] = await db
+    .select({ id: films.id })
+    .from(films)
+    .where(
+      and(eq(films.showcaseOptIn, true), eq(films.status, 'done'), ne(films.pipeline, 'simulated')),
+    )
+    .limit(1);
+  return row !== undefined;
 }

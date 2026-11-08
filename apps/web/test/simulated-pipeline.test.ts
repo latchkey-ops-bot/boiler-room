@@ -62,8 +62,9 @@ describe('SimulatedPipeline', () => {
     const { clock, pipeline } = setup();
     clock.advance(31);
     const events = await pipeline.events('sim_1');
+    // The cast is the landing page's crew: no one the founder was never introduced to.
     expect(events.map((event) => event.agent)).toEqual([
-      'coordinator',
+      'account_manager',
       'researcher',
       'researcher',
       'researcher',
@@ -71,9 +72,18 @@ describe('SimulatedPipeline', () => {
       'validator',
       'director',
       'validator',
-      'coordinator',
+      'account_manager',
     ]);
-    expect(events[1]?.message).toContain('nova.com');
+    // It names the site the founder typed, and says the script comes from the sample site.
+    expect(events[0]?.message).toBe(
+      'Started a simulated film for nova.com. The crew works from the sample site, nova.example.com.',
+    );
+    expect(events[1]?.message).toBe('Read 6 pages on nova.example.com.');
+    // A caught number reads as the system working, and the pass agrees with the open claim.
+    expect(events[5]?.message).toContain('It never reached your script.');
+    expect(events[7]?.message).toBe(
+      'Every number is backed by a quote from nova.example.com. "Plans start at $29 per seat" needs you to confirm it.',
+    );
     expect(events.find((event) => event.kind === 'sent_back')?.agent).toBe('validator');
     expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index));
   });
@@ -94,6 +104,7 @@ describe('SimulatedPipeline', () => {
       hookId: null,
       ctaId: 'start-free',
       formats: ['16:9'],
+      confirmedClaimIds: ['pricing'],
     });
     decide({ version: 1, ...approval });
 
@@ -146,7 +157,13 @@ describe('SimulatedPipeline', () => {
   it('refuses a decision when the script is not waiting, or on an old version', async () => {
     const { clock, pipeline } = setup();
     await expect(
-      pipeline.approveScript('sim_1', { version: 1, hookId: null, ctaId: null, formats: ['16:9'] }),
+      pipeline.approveScript('sim_1', {
+        version: 1,
+        hookId: null,
+        ctaId: null,
+        formats: ['16:9'],
+        confirmedClaimIds: [],
+      }),
     ).rejects.toBeInstanceOf(PipelineConflictError);
 
     clock.advance(31);

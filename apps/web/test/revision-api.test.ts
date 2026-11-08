@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getDb } from '../src/db/client.ts';
 import { deliverables, films } from '../src/db/schema.ts';
@@ -7,6 +8,7 @@ import {
   createFilm,
   downloadDeliverable,
   getFilmDetail,
+  MAX_FILMS_IN_PROGRESS,
   MAX_REVISIONS_PER_FILM,
   parseByteRange,
   requestRevision,
@@ -43,6 +45,8 @@ async function expectApiError(promise: Promise<unknown>, status: number, code: s
 
 const approve = (version: number, formats: ('16:9' | '9:16' | '1:1')[] = ['16:9', '1:1']) => ({
   decision: 'approve' as const,
+  // The sample's price is cited but nobody has confirmed it: approving vouches for it.
+  confirmedClaimIds: ['pricing'],
   version,
   hookId: null,
   ctaId: 'start-free',
@@ -136,6 +140,47 @@ describe('revisions', () => {
       409,
       'too_many_revisions',
     );
+  });
+
+  it('holds the films-in-the-works cap when revisions arrive at once', async () => {
+    const clock = testClock();
+    const ctx = await contextFor(newUser(), proxy.env, clock.now);
+    const done: string[] = [];
+    for (let i = 0; i < 3; i++) done.push((await createFilm(ctx, { url: `done${i}.com` })).film.id);
+    clock.advance(31);
+    for (const id of done) await reviewScript(ctx, id, approve(1));
+    clock.advance(41);
+    for (const id of done) expect((await getFilmDetail(ctx, id)).film.status).toBe('done');
+    // Four in the works leaves room for one more.
+    for (let i = 0; i < MAX_FILMS_IN_PROGRESS - 1; i++) {
+      await createFilm(ctx, { url: `busy${i}.com` });
+    }
+    const results = await Promise.allSettled(
+      done.map((id) => requestRevision(ctx, id, { version: 1, note: 'Bigger logo' })),
+    );
+    const refused = results.filter((result) => result.status === 'rejected');
+    expect(results.length - refused.length).toBe(1);
+    for (const result of refused) {
+      expect(result.reason).toMatchObject({ status: 429, code: 'too_many_films' });
+    }
+    const statuses = await Promise.all(
+      done.map(async (id) => (await getFilmDetail(ctx, id)).film.status),
+    );
+    expect(statuses.filter((status) => status === 'done')).toHaveLength(2);
+  });
+
+  it('puts the film back and keeps no request when the pipeline refuses a revision', async () => {
+    const { clock, ctx, id } = await deliveredFilm();
+    const naive = await contextFor(ctx.principal, proxy.env, clock.now, 'naive');
+    // A simulated film is always made by the simulator, so make this one look like a Naive film.
+    await getDb(proxy.env.DB).update(films).set({ pipeline: 'naive' }).where(eq(films.id, id));
+    await expect(requestRevision(naive, id, { version: 1, note: 'Bigger logo' })).rejects.toThrow(
+      'not connected',
+    );
+    await getDb(proxy.env.DB).update(films).set({ pipeline: 'simulated' }).where(eq(films.id, id));
+    const detail = await getFilmDetail(ctx, id);
+    expect(detail.film.status).toBe('done');
+    expect(detail.revisions).toEqual([]);
   });
 
   it("refuses someone else's film", async () => {

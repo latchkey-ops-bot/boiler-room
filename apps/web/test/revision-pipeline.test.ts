@@ -86,7 +86,7 @@ describe('SimulatedPipeline revisions', () => {
       'account_manager',
       'director',
       'validator',
-      'coordinator',
+      'account_manager',
     ]);
     expect(after[0]?.message).toContain('Bigger logo at the end');
     expect(after[2]?.message).toContain('version 2');

@@ -62,11 +62,46 @@ export function readEnvFile(path = ENV_FILE) {
 /**
  * A value for one environment. `STAGING_CLERK_SECRET_KEY` wins over `CLERK_SECRET_KEY` for staging,
  * so staging and production can use different Clerk instances. Empty counts as missing.
+ *
+ * Production takes only `PRODUCTION_<NAME>`, with no fallback: the unscoped keys are the
+ * development instance's, and falling back to them would quietly put production on it.
  */
 export function valueFor(vars, name, env) {
+  if (env === 'production') {
+    const value = vars.get(`PRODUCTION_${name}`) || process.env[`PRODUCTION_${name}`] || '';
+    return value === '' ? null : value;
+  }
   const scoped = env ? vars.get(`${env.toUpperCase()}_${name}`) : undefined;
   const value = scoped || vars.get(name) || process.env[name] || '';
   return value === '' ? null : value;
+}
+
+/** Clerk development-instance keys start with these. Production must never get one. */
+const CLERK_TEST_PREFIXES = ['sk_test_', 'pk_test_'];
+
+/**
+ * Names of production values that are Clerk development keys. Only the prefix is read; the value
+ * is never printed.
+ */
+export function developmentKeysIn(values) {
+  return values
+    .filter(
+      ([, value]) =>
+        typeof value === 'string' && CLERK_TEST_PREFIXES.some((p) => value.startsWith(p)),
+    )
+    .map(([name]) => name);
+}
+
+/** Stops a production build or secret sync that would use a Clerk development key. */
+export function refuseDevelopmentKeys(env, values) {
+  if (env !== 'production') return;
+  const names = developmentKeysIn(values);
+  if (names.length > 0) {
+    fail(
+      `${names.map((name) => `PRODUCTION_${name}`).join(', ')} ${names.length === 1 ? 'is a' : 'are'} ` +
+        "Clerk development key (sk_test_ or pk_test_). Production needs the production instance's keys.",
+    );
+  }
 }
 
 /** The Cloudflare token and account, or null when the founder has not added them yet. */

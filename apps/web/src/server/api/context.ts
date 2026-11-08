@@ -17,6 +17,8 @@ export interface Bindings {
   FILMS: R2Bucket;
   PIPELINE?: string;
   APP_ENV?: string;
+  /** Boiler Room's own account: its film leads the showcase. Empty until the founder sets it. */
+  BR_HOUSE_ACCOUNT_ID?: string;
 }
 
 export interface ApiContext {

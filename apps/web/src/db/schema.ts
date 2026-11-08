@@ -122,6 +122,11 @@ export const approvals = sqliteTable(
     chosenHook: text('chosen_hook'),
     chosenCta: text('chosen_cta'),
     formatsJson: text('formats_json'),
+    /**
+     * Claims the crew found but nobody had confirmed, which the customer confirmed as right when
+     * they approved, as a JSON array of claim ids. Null on a send-back and on older rows.
+     */
+    confirmedClaimsJson: text('confirmed_claims_json'),
     /** The Clerk user who decided. */
     decidedBy: text('decided_by').notNull(),
     decidedAt: timestamp('decided_at').notNull(),

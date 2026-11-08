@@ -47,6 +47,8 @@ async function expectApiError(promise: Promise<unknown>, status: number, code: s
 
 const approve = {
   decision: 'approve' as const,
+  // The sample's price is cited but nobody has confirmed it: approving vouches for it.
+  confirmedClaimIds: ['pricing'],
   version: 1,
   hookId: null,
   ctaId: 'start-free',
@@ -68,7 +70,7 @@ describe('films API', () => {
       scriptVersion: 0,
     });
     expect(detail.film.id).toMatch(/^flm_[0-9a-z]{20}$/);
-    expect(detail.events.map((event) => event.agent)).toEqual(['coordinator']);
+    expect(detail.events.map((event) => event.agent)).toEqual(['account_manager']);
   });
 
   it('refuses a URL that is not a public website', async () => {
@@ -82,6 +84,34 @@ describe('films API', () => {
     const ctx = await contextFor(newUser(), proxy.env, testClock().now);
     for (let i = 0; i < MAX_FILMS_IN_PROGRESS; i++) await createFilm(ctx, { url: `site${i}.com` });
     await expectApiError(createFilm(ctx, { url: 'one-more.com' }), 429, 'too_many_films');
+  });
+
+  it('holds the cap when many requests arrive at once', async () => {
+    const ctx = await contextFor(newUser(), proxy.env, testClock().now);
+    const results = await Promise.allSettled(
+      Array.from({ length: 12 }, (_, i) => createFilm(ctx, { url: `race${i}.com` })),
+    );
+    const refused = results.filter((result) => result.status === 'rejected');
+    expect(results.length - refused.length).toBe(MAX_FILMS_IN_PROGRESS);
+    for (const result of refused) {
+      expect(result.reason).toMatchObject({ status: 429, code: 'too_many_films' });
+    }
+    expect((await listFilms(ctx)).films).toHaveLength(MAX_FILMS_IN_PROGRESS);
+  });
+
+  it("counts a founder's films in every organisation they work in", async () => {
+    const me = newUser();
+    const personal = await contextFor(me, proxy.env, testClock().now);
+    const inOrg = await contextFor(
+      { ...me, orgId: `org_cap_${users}` },
+      proxy.env,
+      testClock().now,
+    );
+    for (let i = 0; i < MAX_FILMS_IN_PROGRESS - 1; i++) {
+      await createFilm(personal, { url: `mine${i}.com` });
+    }
+    await createFilm(inOrg, { url: 'org-one.com' });
+    await expectApiError(createFilm(inOrg, { url: 'org-two.com' }), 429, 'too_many_films');
   });
 
   it('answers 503 and stores nothing when the Naive pipeline is not wired', async () => {
@@ -135,7 +165,8 @@ describe('films API', () => {
     clock.advance(31);
     let detail = await getFilmDetail(ctx, film.id);
     expect(detail.film).toMatchObject({ status: 'needs_you', stage: 'approval', scriptVersion: 1 });
-    expect(detail.film.title).toBe('Nova launch');
+    // The film keeps the name the founder typed, before and after the script.
+    expect(detail.film.title).toBe('nova.com');
     expect(detail.campaign?.brand.name).toBe('Nova');
     expect(detail.events).toHaveLength(9);
     expect(detail.events.map((event) => event.seq)).toEqual([0, 1, 2, 3, 4, 5, 6, 7, 8]);

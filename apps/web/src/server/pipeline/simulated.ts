@@ -7,6 +7,7 @@ import {
   type FilmStatus,
   type Format,
   type ScriptDecisionKind,
+  SIMULATED_SECONDS,
   type Stage,
 } from '../../lib/film.ts';
 import {
@@ -154,13 +155,23 @@ export class SimulatedPipeline implements PipelineClient {
   }
 
   async requestRevision(runId: string, input: { version: number; note: string }): Promise<void> {
-    const status = await this.status(runId);
-    if (status.status !== 'done') {
+    // The app records the request in the ledger before it calls here, so that a request over the
+    // cap never reaches a real pipeline. Judge the run as it stood without that request.
+    const run = await this.requireRun(runId);
+    const before = {
+      ...run,
+      revisions: (run.revisions ?? []).filter((item) => item.version !== input.version),
+    };
+    const now = this.clock().getTime();
+    const last = timeline(runId, before, this.pace)
+      .filter((event) => event.at.getTime() <= now)
+      .at(-1);
+    if (last?.status !== 'done') {
       throw new PipelineConflictError('The film is not delivered yet.');
     }
-    if (status.scriptVersion !== input.version) {
+    if (last.scriptVersion !== input.version) {
       throw new PipelineConflictError(
-        `Version ${input.version} is not the delivered film. Version ${status.scriptVersion} is.`,
+        `Version ${input.version} is not the delivered film. Version ${last.scriptVersion} is.`,
       );
     }
   }
@@ -247,26 +258,53 @@ export function timeline(runId: string, run: SimulatedRun, pace = 1): TimedEvent
   return events;
 }
 
+/** The site every simulated film's script comes from, whatever URL the founder typed. */
+export const SAMPLE_HOST = displayHost(SAMPLE_CAMPAIGN.sourceUrl);
+
+/** The Validator's pass, which says plainly when a number still needs the founder. */
+function validatorPass(prefix: string): string {
+  const open = SAMPLE_CAMPAIGN.claims.filter(
+    (claim) =>
+      claim.status !== 'approved' &&
+      SAMPLE_CAMPAIGN.scenes.some((scene) =>
+        [
+          ...scene.text.flatMap((item) => item.claimIds),
+          ...(scene.voiceover?.claimIds ?? []),
+        ].includes(claim.id),
+      ),
+  );
+  const backed = `${prefix}Every number is backed by a quote from ${SAMPLE_HOST}.`;
+  if (open.length === 0) return backed;
+  if (open.length === 1) return `${backed} "${open[0]?.text}" needs you to confirm it.`;
+  return `${backed} ${open.length} of them need you to confirm them.`;
+}
+
 function firstScript(host: string): Planned[] {
   const v = 0;
+  const brand = SAMPLE_CAMPAIGN.brand;
+  const fonts = new Set([brand.fonts.display.family, brand.fonts.body.family]).size;
+  const colours = Object.values(brand.colors).filter(Boolean).length;
+  const extras = SAMPLE_CAMPAIGN.variants.hooks.length;
   return [
     step(
       0,
-      'coordinator',
+      'account_manager',
       'started',
       'research',
       'working',
-      `Started a film for ${host}. The Researcher is reading the site.`,
+      host === SAMPLE_HOST
+        ? `Started a simulated film for ${host}. The Researcher is reading the site.`
+        : `Started a simulated film for ${host}. The crew works from the sample site, ${SAMPLE_HOST}.`,
       v,
     ),
-    step(4, 'researcher', 'decision', 'research', 'working', `Read 6 pages on ${host}.`, v),
+    step(4, 'researcher', 'decision', 'research', 'working', `Read 6 pages on ${SAMPLE_HOST}.`, v),
     step(
       9,
       'researcher',
       'decision',
       'research',
       'working',
-      'Copied 4 claims word for word, each with the page it came from.',
+      `Copied ${SAMPLE_CAMPAIGN.claims.length} claims word for word, each with the page it came from.`,
       v,
     ),
     step(
@@ -275,7 +313,7 @@ function firstScript(host: string): Planned[] {
       'decision',
       'script',
       'working',
-      'Saved the brand: 2 fonts, 5 colours and the logo.',
+      `Saved the brand: ${fonts} fonts, ${colours} colours and the logo.`,
       v,
     ),
     step(
@@ -284,7 +322,7 @@ function firstScript(host: string): Planned[] {
       'decision',
       'checks',
       'working',
-      'Wrote 4 scenes and 1 alternate opening, 20 seconds long.',
+      `Wrote ${SAMPLE_CAMPAIGN.scenes.length} scenes${extras > 0 ? ` and ${extras} alternate opening${extras === 1 ? '' : 's'}` : ''}, ${SAMPLE_CAMPAIGN.durationSeconds} seconds long.`,
       v,
     ),
     step(
@@ -293,7 +331,7 @@ function firstScript(host: string): Planned[] {
       'sent_back',
       'script',
       'working',
-      '"Builds 73% faster" has no source. Cite a claim that states it, or remove it.',
+      'Caught a number with no source ("73% faster") and sent the line back. It never reached your script.',
       v,
     ),
     step(
@@ -302,25 +340,17 @@ function firstScript(host: string): Planned[] {
       'decision',
       'checks',
       'working',
-      'Rewrote scene 2 from the build-times quote: 40% faster builds.',
+      "Fixed scene 2 with the site's own figure: 40% faster builds.",
       v,
     ),
+    step(29, 'validator', 'passed', 'approval', 'working', validatorPass(''), v),
     step(
-      29,
-      'validator',
-      'passed',
-      'approval',
-      'working',
-      'No issues. Every number is backed by a quote.',
-      v,
-    ),
-    step(
-      30,
-      'coordinator',
+      SIMULATED_SECONDS.script,
+      'account_manager',
       'needs_you',
       'approval',
       'needs_you',
-      'Paused the run until you approve the script.',
+      'Your script is ready. The crew paused until you approve it.',
       1,
     ),
   ];
@@ -354,16 +384,16 @@ function rewrite(version: number, note: string): Planned[] {
       'passed',
       'approval',
       'working',
-      `Checked version ${next}. Every number is backed by a quote.`,
+      validatorPass(`Checked version ${next}. `),
       version,
     ),
     step(
       8,
-      'coordinator',
+      'account_manager',
       'needs_you',
       'approval',
       'needs_you',
-      `Version ${next} is ready. Paused until you approve it.`,
+      `Version ${next} is ready. The crew paused until you approve it.`,
       next,
     ),
   ];
@@ -405,16 +435,16 @@ function revise(version: number, note: string): Planned[] {
       'passed',
       'approval',
       'working',
-      `Checked version ${next}. Every number is backed by a quote.`,
+      validatorPass(`Checked version ${next}. `),
       version,
     ),
     step(
       11,
-      'coordinator',
+      'account_manager',
       'needs_you',
       'approval',
       'needs_you',
-      `Version ${next} is ready. Paused until you approve it.`,
+      `Version ${next} is ready. The crew paused until you approve it.`,
       next,
     ),
   ];
@@ -475,7 +505,7 @@ function production(version: number, formats: Format[]): Planned[] {
       version,
     ),
     step(
-      40,
+      SIMULATED_SECONDS.delivery,
       'account_manager',
       'delivered',
       'delivery',

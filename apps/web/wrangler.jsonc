@@ -14,7 +14,9 @@
   "workers_dev": true,
   "preview_urls": false,
   "upload_source_maps": true,
-  "vars": { "APP_ENV": "development", "PIPELINE": "simulated" },
+  // BR_HOUSE_ACCOUNT_ID is Boiler Room's own account id (acc_…): its newest film on the showcase
+  // goes first, marked "Our own". It is chosen by owner, never by URL. Empty: nothing is pinned.
+  "vars": { "APP_ENV": "development", "PIPELINE": "simulated", "BR_HOUSE_ACCOUNT_ID": "" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web" }],
   "d1_databases": [
     {
@@ -28,7 +30,7 @@
   "env": {
     "staging": {
       "name": "boiler-room-web-staging",
-      "vars": { "APP_ENV": "staging", "PIPELINE": "simulated" },
+      "vars": { "APP_ENV": "staging", "PIPELINE": "simulated", "BR_HOUSE_ACCOUNT_ID": "" },
       "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-staging" }],
       "d1_databases": [
         {
@@ -45,7 +47,7 @@
       "name": "boiler-room-web-production",
       // Production makes no simulated films. Until the Naive pipeline is wired, starting a film
       // there answers 503.
-      "vars": { "APP_ENV": "production", "PIPELINE": "naive" },
+      "vars": { "APP_ENV": "production", "PIPELINE": "naive", "BR_HOUSE_ACCOUNT_ID": "" },
       "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-production" }],
       "d1_databases": [
         {

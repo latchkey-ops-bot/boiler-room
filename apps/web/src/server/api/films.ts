@@ -1,5 +1,6 @@
 import { type Campaign, campaignSchema } from '@boiler-room/schema';
-import { and, asc, desc, eq, inArray, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, notInArray, type SQL, sql } from 'drizzle-orm';
+import { SQLiteAsyncDialect } from 'drizzle-orm/sqlite-core';
 import { z } from 'zod';
 import {
   approvals,
@@ -25,7 +26,6 @@ export const MAX_FILMS_IN_PROGRESS = 5;
 /** A delivered film can be revised this many times. Each one costs a new render. */
 export const MAX_REVISIONS_PER_FILM = 3;
 
-const IN_PROGRESS = ['queued', 'working', 'needs_you'] as const;
 const FINISHED = ['done', 'failed'] as const;
 
 // ---------- Inputs: routes validate bodies against these with readJson ----------
@@ -41,6 +41,8 @@ export const reviewScriptInput = z.discriminatedUnion('decision', [
     hookId: z.string().max(64).nullable(),
     ctaId: z.string().max(64).nullable(),
     formats: z.array(z.enum(FORMATS)).min(1).max(FORMATS.length),
+    /** Claims nobody had confirmed, which the customer says are right. */
+    confirmedClaimIds: z.array(z.string().max(64)).max(64).default([]),
   }),
   z.strictObject({
     decision: z.literal('send_back'),
@@ -118,6 +120,8 @@ export interface ApprovalView {
   scriptVersion: number;
   decision: 'approved' | 'changes_requested';
   note: string | null;
+  /** Claims the customer confirmed when they approved this version. */
+  confirmedClaimIds: string[];
   decidedAt: string;
 }
 
@@ -139,13 +143,13 @@ export interface FilmDetail {
 }
 
 export function filmView(film: Film): FilmView {
-  const campaign = parseCampaign(film.campaignJson);
   const host = displayHost(film.url);
   return {
     id: film.id,
     url: film.url,
     host,
-    title: campaign ? `${campaign.brand.name} launch` : host,
+    // The site the founder typed, from start to finish. The film never changes name mid-way.
+    title: host,
     status: film.status,
     stage: film.stage,
     pipeline: film.pipeline,
@@ -225,12 +229,18 @@ export async function createFilm(ctx: ApiContext, input: CreateFilmInput): Promi
     ]);
   }
 
-  const inProgress = await ctx.db
-    .select({ id: films.id })
-    .from(films)
-    .where(and(eq(films.accountId, ctx.account.id), inArray(films.status, [...IN_PROGRESS])))
-    .limit(MAX_FILMS_IN_PROGRESS);
-  if (inProgress.length >= MAX_FILMS_IN_PROGRESS) {
+  // Reserve the film's row first, in one statement that also checks the cap, so parallel requests
+  // cannot all pass the check. Only then start the run: a request over the cap never reaches the
+  // pipeline, where a real run costs money.
+  const id = newId('flm');
+  const kind = ctx.pipelineKind;
+  const now = ctx.now();
+  const reserved = await ctx.db.run(sql`
+    insert into films (id, account_id, created_by, url, status, stage, pipeline, created_at, updated_at)
+    select ${id}, ${ctx.account.id}, ${ctx.principal.userId}, ${parsed.url}, 'queued', 'research',
+      ${kind}, ${now.getTime()}, ${now.getTime()}
+    where ${inProgressCount(ctx, now)} < ${MAX_FILMS_IN_PROGRESS}`);
+  if (reserved.meta.changes !== 1) {
     throw new ApiError(
       429,
       'too_many_films',
@@ -238,23 +248,15 @@ export async function createFilm(ctx: ApiContext, input: CreateFilmInput): Promi
     );
   }
 
-  // Start the run first, so a pipeline that is down leaves no film behind.
-  const id = newId('flm');
-  const kind = ctx.pipelineKind;
-  const { runId } = await ctx.pipelineFor(kind).start({ filmId: id, url: parsed.url });
-  const now = ctx.now();
-  await ctx.db.insert(films).values({
-    id,
-    accountId: ctx.account.id,
-    createdBy: ctx.principal.userId,
-    url: parsed.url,
-    status: 'queued',
-    stage: 'research',
-    pipeline: kind,
-    pipelineRunId: runId,
-    createdAt: now,
-    updatedAt: now,
-  });
+  let runId: string;
+  try {
+    ({ runId } = await ctx.pipelineFor(kind).start({ filmId: id, url: parsed.url }));
+  } catch (error) {
+    // A pipeline that is down leaves no film behind.
+    await ctx.db.delete(films).where(eq(films.id, id));
+    throw error;
+  }
+  await ctx.db.update(films).set({ pipelineRunId: runId }).where(eq(films.id, id));
   return getFilmDetail(ctx, id);
 }
 
@@ -286,6 +288,7 @@ export async function getFilmDetail(ctx: ApiContext, id: string): Promise<FilmDe
       scriptVersion: row.scriptVersion,
       decision: row.decision,
       note: row.note,
+      confirmedClaimIds: parseIds(row.confirmedClaimsJson),
       decidedAt: row.decidedAt.toISOString(),
     })),
     deliverables: files.map(deliverableView),
@@ -330,6 +333,7 @@ export async function reviewScript(
         chosenHook: choice.hookId,
         chosenCta: choice.ctaId,
         formatsJson,
+        confirmedClaimsJson: JSON.stringify(choice.confirmedClaimIds),
         decidedBy: ctx.principal.userId,
         decidedAt: now,
       }),
@@ -506,12 +510,41 @@ export async function requestRevision(
       `This film has had ${MAX_REVISIONS_PER_FILM} revisions, the most one film can have. Start a new video for a fresh take.`,
     );
   }
-  const inProgress = await ctx.db
-    .select({ id: films.id })
-    .from(films)
-    .where(and(eq(films.accountId, ctx.account.id), inArray(films.status, [...IN_PROGRESS])))
-    .limit(MAX_FILMS_IN_PROGRESS);
-  if (inProgress.length >= MAX_FILMS_IN_PROGRESS) {
+  // Reserve first, in one transaction: put the film back in the works only while the account is
+  // under the cap, and record the request only if that happened. Then tell the pipeline, and undo
+  // the reservation if it refuses. A request over the cap never reaches the pipeline.
+  const now = ctx.now();
+  const revisionId = newId('rev');
+  let changed: number;
+  try {
+    // D1's own batch: Drizzle cannot batch raw SQL, and a D1 batch is one transaction.
+    const [update] = await ctx.db.$client.batch([
+      d1Statement(
+        ctx,
+        sql`update films set status = 'working', stage = 'script', updated_at = ${now.getTime()}
+          where id = ${id} and account_id = ${ctx.account.id} and status = 'done'
+            and ${inProgressCount(ctx, now)} < ${MAX_FILMS_IN_PROGRESS}`,
+      ),
+      d1Statement(
+        ctx,
+        sql`insert into revisions (id, film_id, script_version, note, requested_by, requested_at)
+          select ${revisionId}, ${id}, ${input.version}, ${input.note}, ${ctx.principal.userId},
+            ${now.getTime()}
+          where (select status from films where id = ${id}) = 'working'`,
+      ),
+    ]);
+    changed = update?.meta.changes ?? 0;
+  } catch (error) {
+    if (String(error).includes('UNIQUE')) {
+      throw new ApiError(409, 'already_asked', 'You already asked for changes to this version.');
+    }
+    throw error;
+  }
+  if (changed !== 1) {
+    const current = await ownFilm(ctx, id);
+    if (current.status !== 'done') {
+      throw new ApiError(409, 'already_asked', 'You already asked for changes to this version.');
+    }
     throw new ApiError(
       429,
       'too_many_films',
@@ -519,37 +552,48 @@ export async function requestRevision(
     );
   }
 
-  await ctx.pipelineFor(film.pipeline).requestRevision(film.pipelineRunId, {
-    version: input.version,
-    note: input.note,
-  });
-  const now = ctx.now();
   try {
+    await ctx.pipelineFor(film.pipeline).requestRevision(film.pipelineRunId, {
+      version: input.version,
+      note: input.note,
+    });
+  } catch (error) {
     await ctx.db.batch([
-      ctx.db.insert(revisions).values({
-        id: newId('rev'),
-        filmId: id,
-        scriptVersion: input.version,
-        note: input.note,
-        requestedBy: ctx.principal.userId,
-        requestedAt: now,
-      }),
-      // A finished film is not synced, so put it back in the works for the crew's events to land.
+      ctx.db.delete(revisions).where(eq(revisions.id, revisionId)),
       ctx.db
         .update(films)
-        .set({ status: 'working', stage: 'script', updatedAt: now })
-        .where(and(eq(films.id, id), eq(films.status, 'done'))),
+        .set({ status: 'done', stage: film.stage, updatedAt: film.updatedAt })
+        .where(and(eq(films.id, id), eq(films.status, 'working'))),
     ]);
-  } catch (error) {
-    if (String(error).includes('UNIQUE')) {
-      throw new ApiError(409, 'already_asked', 'You already asked for changes to this version.');
-    }
     throw error;
   }
   return getFilmDetail(ctx, id);
 }
 
 // ---------- Internals ----------
+
+/**
+ * Films in the works for this account, as SQL, for the cap. A founder's films in every account
+ * count, so a new Clerk organisation does not bring 5 more. A row whose run never started (its
+ * request died between reserving the row and starting the run) stops counting after 5 minutes.
+ */
+function inProgressCount(ctx: ApiContext, now: Date) {
+  return sql`(select count(*) from films
+    where status in ('queued', 'working', 'needs_you')
+      and (account_id = ${ctx.account.id} or created_by = ${ctx.principal.userId})
+      and (pipeline_run_id is not null or created_at > ${now.getTime() - STALE_RESERVATION_MS}))`;
+}
+
+/** How long a reserved film may wait for its run to start before the cap ignores it. */
+const STALE_RESERVATION_MS = 5 * 60_000;
+
+const dialect = new SQLiteAsyncDialect();
+
+/** A Drizzle `sql` template as a D1 statement, for `$client.batch`. */
+function d1Statement(ctx: ApiContext, query: SQL): D1PreparedStatement {
+  const { sql: text, params } = dialect.sqlToQuery(query);
+  return ctx.db.$client.prepare(text).bind(...params);
+}
 
 /** The film, if it belongs to the caller's account. Someone else's film is a 404, not a 403. */
 export async function ownFilm(ctx: ApiContext, id: string): Promise<Film> {
@@ -641,7 +685,7 @@ export async function syncFilm(ctx: ApiContext, film: Film): Promise<Film> {
 function checkChoice(
   campaign: Campaign | null,
   review: Extract<ReviewScriptInput, { decision: 'approve' }>,
-): { hookId: string | null; ctaId: string | null; formats: Format[] } {
+): { hookId: string | null; ctaId: string | null; formats: Format[]; confirmedClaimIds: string[] } {
   if (!campaign) throw new ApiError(409, 'no_script', 'There is no script to approve yet.');
   const issues: { path: string; message: string }[] = [];
   const hooks = campaign.variants.hooks.map((hook) => hook.id);
@@ -656,10 +700,60 @@ function checkChoice(
   if (formats.some((format) => !campaign.variants.formats.includes(format))) {
     issues.push({ path: 'formats', message: 'Pick shapes this script is cut for.' });
   }
+  const claimIds = new Set(campaign.claims.map((claim) => claim.id));
+  if (review.confirmedClaimIds.some((id) => !claimIds.has(id))) {
+    issues.push({ path: 'confirmedClaimIds', message: 'Confirm only claims in this script.' });
+  }
   if (issues.length > 0) {
     throw new ApiError(400, 'invalid_choice', 'Some choices are not in this script.', issues);
   }
-  return { hookId: review.hookId, ctaId: review.ctaId, formats };
+  // Every number in the film must be one the crew checked or the customer confirmed.
+  const confirmed = new Set(review.confirmedClaimIds);
+  const pending = unconfirmedClaims(campaign, review.hookId);
+  const open = pending.filter((claim) => !confirmed.has(claim.id));
+  if (open.length > 0) {
+    throw new ApiError(
+      409,
+      'unconfirmed_claims',
+      open.length === 1
+        ? `Confirm "${open[0]?.text}" or ask for it to be removed before you approve.`
+        : `Confirm ${open.length} claims or ask for them to be removed before you approve.`,
+      open.map((claim) => ({ path: 'confirmedClaimIds', message: claim.text })),
+    );
+  }
+  return {
+    hookId: review.hookId,
+    ctaId: review.ctaId,
+    formats,
+    // Only the claims that needed it: the ones in this cut that nobody had confirmed.
+    confirmedClaimIds: pending.map((claim) => claim.id),
+  };
+}
+
+/**
+ * Claims the film would show or say that nobody has confirmed yet: cited by any scene of the film
+ * as it would be cut with opening `hookId`, and not `approved` in the campaign.
+ */
+export function unconfirmedClaims(campaign: Campaign, hookId: string | null): Campaign['claims'] {
+  const hook = hookId ? campaign.variants.hooks.find((item) => item.id === hookId) : undefined;
+  const scenes = hook ? [hook, ...campaign.scenes.slice(1)] : campaign.scenes;
+  const cited = new Set(
+    scenes.flatMap((scene) => [
+      ...scene.text.flatMap((item) => item.claimIds),
+      ...(scene.voiceover?.claimIds ?? []),
+    ]),
+  );
+  return campaign.claims.filter((claim) => claim.status !== 'approved' && cited.has(claim.id));
+}
+
+function parseIds(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
 }
 
 type Statement = Parameters<ApiContext['db']['batch']>[0][number];
