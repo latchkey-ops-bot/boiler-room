@@ -574,6 +574,14 @@ each stage the same function its own command runs.
    copy.
 6. **Quality Check** on the render folder: `film.mp4`, its manifest and `film.quality/`.
 
+**A scene motion refuses to draw.** Neither `validateCampaign` nor `validateFilm` measures type,
+so copy that does not fit its line at its cap height passes the gate and stops the render on the
+computers: a type card throws `TYPE_CARD_LAYOUT` and a stat-counter `LAYOUT_UNFIT` (the first
+live film of linear.app stopped on "Product development system" in its name card). The fix is
+shorter copy, so each such error becomes one blocker issue for the Director and routes back like
+a Quality Check failure, below. A failed render is counted at what its computers cost, which
+`renderCampaign` now attaches to its error.
+
 **Route-back.** A failed review's issues are sorted by `routable()` (no minor issue and no
 expected placeholder failure ever sends a film back). The Director's go back to the Director,
 which revises the campaign the film was rendered from (`directorRevisionTask`: that campaign, the
@@ -642,6 +650,27 @@ gate, route-backs, budget pauses, the cap, the delivery).
 Exit codes: 0 the film passed Quality Check, 3 a film was made and did not pass, 1 no film, 2 a
 usage error. Ctrl-C or SIGTERM stops the render, which destroys its computers, closes every
 session the crew started, and marks the film.
+
+### Measured: an outreach sample of linear.app
+
+`pnpm film https://linear.app --sample --max-usd 4.5`, run on 8 November
+(`out/films/linear.app/20261108-073414-fa79/`):
+
+| Round | Step          | Outcome                                                                                                    | Time  | Cost    |
+| ----- | ------------- | ---------------------------------------------------------------------------------------------------------- | ----- | ------- |
+| 1     | Researcher    | 19 claims on 9 pages, gate passed on submission 1                                                          | 503 s | $0.0503 |
+| 1     | Director      | Short, passed on submission 1                                                                              | 87 s  | $0.4167 |
+| 1     | Art Director  | 2 of 4 reviews done and 1 field generated; 2 paused on the agent's day cap, cancelled, code picks kept     | 39 s  | $0.0714 |
+| 1     | Gate          | `validateCampaign` and `validateFilm` passed                                                               | 0 s   | $0      |
+| 1     | Render        | `TYPE_CARD_LAYOUT`: "Product development system" does not fit the name card at 78 px; sent to the Director | 110 s | $0.3685 |
+| 2     | Director      | Revised the name card to "Teams and agents", passed on submission 1                                        | 37 s  | $0.1867 |
+| 2     | Art Director  | 2 of 5 reviews done; 3 paused on the day cap (one a smaller retry), cancelled, code picks kept             | 49 s  | $0.0909 |
+| 2     | Render        | 750 frames, 5.0 MiB                                                                                        | 38 s  | $0.0840 |
+| 2     | Quality Check | Fail: `lines`, `ground` and `inside-frame`, all motion's, so nothing was sent back                         | 112 s | $0.2504 |
+
+$1.52 in all of the $4.50 cap, 1 route-back, exit 3: a film, without a Quality Check pass. No
+session was left running or parked, and no computer was left. The Researcher's computer time
+books late, so its line shows the session alone.
 
 ## FilmOrder
 
