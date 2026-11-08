@@ -26,10 +26,9 @@ import {
 } from '../components/scene-runtime.tsx';
 import {
   baselineOffset,
-  fontMetrics,
   lineBox,
   type SpecFit,
-  specFit,
+  specFitAtCap,
   specPx,
   widthAt,
 } from '../components/type.tsx';
@@ -214,31 +213,21 @@ export const typeCardBox = (layout: Pick<TypeCardLayout, 'block' | 'centre'>, f:
 
 const weight = typography.weight.display;
 
-/**
- * Copy fitted at a cap height of at least `cap` spec px. `specFit` sets the largest whole size at
- * or under the size it is asked for, so it is asked for the whole size just over `cap`: a 78 px cap
- * is never drawn at 77.7. A fit at a smaller size than that did not fit.
- */
-function fitAtCap(
+/** Copy fitted in the line box at a cap height of at least `cap` spec px, fit or fail. */
+const fitAtCap = (
   value: string,
   cap: number,
   maxLines: number,
   stage: Stage,
   fonts: { display: string; body: string },
-): { fit: SpecFit; size: number; fits: boolean } {
-  const metrics = fontMetrics(fonts.display, weight);
-  const size = Math.ceil(specPx(stage, cap) / metrics.cap - 1e-9);
-  const asked = ((size + 1e-6) * metrics.cap * 1080) / Math.min(stage.width, stage.height);
-  const fit = specFit(
+): { fit: SpecFit; size: number; fits: boolean } =>
+  specFitAtCap(
     value,
-    { font: 'display', weight, cap: asked },
+    { font: 'display', weight, cap },
     stage,
     { width: lineBox(stage), maxLines },
     fonts,
   );
-  const fits = fit.fontSize >= size && fit.lines.length > 0 && fit.lines.length <= maxLines;
-  return { fit, size, fits };
-}
 
 const layoutCache = new Map<string, TypeCardLayout>();
 

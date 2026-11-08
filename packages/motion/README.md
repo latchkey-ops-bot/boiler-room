@@ -124,9 +124,14 @@ arrives on the seam, at rest from frame 14, and a long CTA can then be the last 
 cut being rendered, and names the longest URL that fits and the length that fits this one.
 
 `feature-card` draws no corner mark, as its scene file has none: in 9:16 the mark sat just above
-the headline. Its headline drifts larger to the scene's last frame, so it is set narrower than the
-line box wherever that drift would otherwise carry it out of the safe area, which is every card in
-9:16 and a long one in 1:1. Stacked in 9:16, its connector starts under the cause's label.
+the headline. Its headline is set at the sentence cap height on at most two lines, fit or fail:
+copy that needs a smaller size or a third line stops the render with `LAYOUT_UNFIT`, naming the
+scene and text id. It drifts larger to the scene's last frame, so its lines are set in the line box
+divided by that drift, and no line is wider than the line box, 0.65 W in 16:9, or outside the safe
+area on any frame. The panel moves down, keeping its size, until it clears two lines of headline at
+their last-frame drift, so it sits in one place across a group. On a T1 the headline enters on the
+seam with the panel, never on the anchor carry, and it is drawn above the panel. Stacked in 9:16,
+its connector starts under the cause's label.
 
 `stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
 no quote states. The count-up is built to its scene file and tested, so approving it means removing
