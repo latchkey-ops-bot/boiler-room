@@ -17,7 +17,10 @@ One `ENG` card is one branch and one pull request into `dev` of
    no clone, no branch, no `git config`. Never print the file.
 3. Get the code: if `~/boiler-room` exists, `git -C ~/boiler-room fetch origin`; otherwise
    `git clone https://github.com/latchkey-ops-bot/boiler-room ~/boiler-room`. Then
-   `git -C ~/boiler-room checkout -B feat/<slug>-<n> origin/dev`. Set your identity once:
+   `git -C ~/boiler-room checkout -B feat/<slug>-<n> origin/dev`. A fix card (`ENG: <slug> fix <n>`)
+   whose body names an open pull request's branch goes on that branch instead:
+   `git -C ~/boiler-room checkout -B <branch> origin/<branch>`, and your push updates that pull
+   request; its note names it. Set your identity once:
    `git config --global user.name "<your agent name>"` and
    `git config --global user.email "<your agent name>@agents.boiler-room.invalid"`.
 4. Read `CLAUDE.md` and the files the card names. If the card builds on another card's pull
@@ -51,7 +54,8 @@ One `ENG` card is one branch and one pull request into `dev` of
    Naive-Session: <ses_ id of this session>
    ```
 
-7. Push over HTTPS: `git -C ~/boiler-room push -u origin feat/<slug>-<n>`. Git reads the token from
+7. Push over HTTPS: `git -C ~/boiler-room push -u origin feat/<slug>-<n>` (or the fix card's
+   branch, which updates its open pull request, so open no new one). Git reads the token from
    `~/.netrc`. Open the pull request with `curl --netrc -s -X POST
    https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls` and a JSON body with `title`,
    `head` (`feat/<slug>-<n>`), `base` (`dev`) and `body`. Write the JSON to a file first and pass it

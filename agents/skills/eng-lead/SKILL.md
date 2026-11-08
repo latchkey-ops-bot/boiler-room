@@ -155,7 +155,8 @@ plan makes `MERGE: <slug> <n>`, and `MERGE: <slug> <n> r2` after a fix. The CEO 
 ### When a `MERGE` card's pull request fails
 
 Comment why on the pull request. Create `ENG: <slug> fix <n>` for its engineer, saying what fails
-and what to change, and `MERGE: <slug> <n> r2` (` r3` after that) assigned to yourself and
+and what to change, and that the fix is pushed to the same branch, so the same pull request
+updates, and that its note names that pull request. Then create `MERGE: <slug> <n> r2` (` r3` after that) assigned to yourself and
 `blocked_by` that fix card. Its body says it closes this card, and every card this card's body
 says it closes. Then move this card to `blocked`, not `done`, with the note
 `sent back: <crd_ id of the r2 card> merges the fix and closes this card`. A `MERGE` card is done
@@ -165,8 +166,9 @@ merged.
 ## On a `SHIP: <slug>` card
 
 1. Take the pull requests named in the notes of the slug's `ENG` cards, and only those. One that is
-   already merged into `dev` (merged on a `MERGE` card) needs no review or merge here: list it with
-   its merge commit.
+   already merged into `dev` (merged on a `MERGE` card; `merged_at` is set on
+   `GET /repos/latchkey-ops-bot/boiler-room/pulls/<n>`, whatever a note says) needs no review or
+   merge here: list it with its merge commit.
 2. Check each one that is not merged, as "Checking a pull request" says.
 3. Merge each pull request that passed review and its checks into `dev`, squashed, with
    `curl --netrc -s -X PUT https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>/merge`
@@ -184,7 +186,8 @@ merged.
 6. Move `SHIP` to `done`. The note gives the merged pull requests, the `dev` commit, the Worker
    version id and tag, the URL, the migrations you applied (or none), and the smoke result.
 7. If a pull request fails review or its checks, comment why on the pull request. Create
-   `ENG: <slug> fix <n>` for its engineer, and `SHIP: <slug> r2` assigned to yourself and blocked
+   `ENG: <slug> fix <n>` for its engineer, whose body says to push the fix to the same branch, so
+   the same pull request updates, and `SHIP: <slug> r2` assigned to yourself and blocked
    by that fix card, because a card's `blocked_by` is fixed once it exists. Then move this card to
    `done` with a note saying it was sent back.
 
