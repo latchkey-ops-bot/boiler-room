@@ -8,44 +8,44 @@ Engineering turns specs into merged code on `dev` and a working staging deploy. 
 **Purpose.** Plan each `BUILD` card into engineer tasks. Review and merge the engineers' pull requests
 into `dev`. Deploy staging and report the result.
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | Member of `br-ceo`'s roster, so it is seated on the board |
-| Started by | Board cards: `BUILD: <slug>` and `SHIP: <slug>` |
-| Budget | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"` |
+| Setting    | Value                                                                           |
+| ---------- | ------------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                   |
+| Harness    | `pi`                                                                            |
+| Team       | Member of `br-ceo`'s roster, so it is seated on the board                       |
+| Started by | Board cards: `BUILD: <slug>` and `SHIP: <slug>`                                 |
+| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`   |
 | Credential | The `br-engineering` GitHub token in `~/.netrc`. It reaches `boiler-room` only. |
 
 ## Engineer: `br-engineer-1`, and later `br-engineer-2`
 
 **Purpose.** One `ENG` card is one branch and one pull request into `dev`.
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | Member of `br-ceo`'s roster |
-| Started by | Board cards: `ENG: <slug> <n>/<total> <task>` |
-| Budget | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"` |
-| Credential | The same `br-engineering` token, written to its own computer |
+| Setting    | Value                                                                         |
+| ---------- | ----------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                 |
+| Harness    | `pi`                                                                          |
+| Team       | Member of `br-ceo`'s roster                                                   |
+| Started by | Board cards: `ENG: <slug> <n>/<total> <task>`                                 |
+| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"` |
+| Credential | The same `br-engineering` token, written to its own computer                  |
 
 A second engineer is the only way to run two `ENG` cards at once, because the board starts one card
 at a time per agent.
 
 ## Tools
 
-| Tool | Lead | Engineer | Note |
-| --- | --- | --- | --- |
-| `bash`, `read`, `write`, `edit`, `ls`, `find` | allow | allow | Git, pnpm and tests run on the agent's own computer |
-| `board_read`, `board_write`, `submit_output`, `session_spend` | allow | allow | |
-| `publish_file` | allow | allow | For logs and screenshots too big for a card |
-| `apps`, with `config.allowed_apps: [<staging app id>]` | allow | off, with the same explicit `allowed_apps` | Deploy, `db_migrate` and `db_query`, on staging only |
-| Every app tool (`br-app.*`), including `send_email`, `leads_upsert` and `request_sample` | off, each one named | off, each one named | Base policy. Without it, every app's tools are offered. |
-| `browser`, `web_fetch`, `web_search` | off | off | Engineers read only the repos and their cards |
-| `generate_image`, `data_run`, social, email, connections | off | off | |
-| GitHub or Clerk MCP servers, the GitHub connection | none | none | Any external MCP call stops `bash` for the rest of the chat (verified) |
-| `send_to_agent`, `wait_for_agents`, `list_agents`, `ask_operator`, `request_tools`, `propose_plan`, `vetta.tools_search`, `vetta.tools_execute` | off | off | Base policy |
+| Tool                                                                                                                                            | Lead                | Engineer                                   | Note                                                                   |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
+| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                                                                   | allow               | allow                                      | Git, pnpm and tests run on the agent's own computer                    |
+| `board_read`, `board_write`, `submit_output`, `session_spend`                                                                                   | allow               | allow                                      |                                                                        |
+| `publish_file`                                                                                                                                  | allow               | allow                                      | For logs and screenshots too big for a card                            |
+| `apps`, with `config.allowed_apps: [<staging app id>]`                                                                                          | allow               | off, with the same explicit `allowed_apps` | Deploy, `db_migrate` and `db_query`, on staging only                   |
+| Every app tool (`br-app.*`), including `send_email`, `leads_upsert` and `request_sample`                                                        | off, each one named | off, each one named                        | Base policy. Without it, every app's tools are offered.                |
+| `browser`, `web_fetch`, `web_search`                                                                                                            | off                 | off                                        | Engineers read only the repos and their cards                          |
+| `generate_image`, `data_run`, social, email, connections                                                                                        | off                 | off                                        |                                                                        |
+| GitHub or Clerk MCP servers, the GitHub connection                                                                                              | none                | none                                       | Any external MCP call stops `bash` for the rest of the chat (verified) |
+| `send_to_agent`, `wait_for_agents`, `list_agents`, `ask_operator`, `request_tools`, `propose_plan`, `vetta.tools_search`, `vetta.tools_execute` | off                 | off                                        | Base policy                                                            |
 
 No identity. No vault credentials.
 
@@ -118,12 +118,12 @@ runs as the service role and bypasses row-level security, and deleting the app d
 
 ## Reports
 
-| What | To whom | How |
-| --- | --- | --- |
-| The PR, and whether its tests pass | The lead and the CEO | `ENG` card note, and the digest |
-| The plan for a slug | The CEO | `BUILD` card note |
-| What shipped to staging | The CEO | `SHIP` card note |
-| Blockers | The CEO | Card moved to `blocked`, with the reason |
+| What                               | To whom              | How                                      |
+| ---------------------------------- | -------------------- | ---------------------------------------- |
+| The PR, and whether its tests pass | The lead and the CEO | `ENG` card note, and the digest          |
+| The plan for a slug                | The CEO              | `BUILD` card note                        |
+| What shipped to staging            | The CEO              | `SHIP` card note                         |
+| Blockers                           | The CEO              | Card moved to `blocked`, with the reason |
 
 ## Measured and unverified
 

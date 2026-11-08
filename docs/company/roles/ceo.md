@@ -5,29 +5,29 @@ decides what gets worked on next. It never does the work itself.
 
 ## Configuration
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | `multiagent: { type: "coordinator", board: true }`, with every company agent on the roster (up to 20). The production crew is not on it. |
-| Started by | 1. Deployment `br-ceo-sweep`: cron `0 */2 * * *`, timezone `America/New_York`, `budget_micro_usd: 1_000_000`. 2. Board digests, which Naive starts by itself when cards reach `done` (verified) or `blocked` (docs only, see [README section 2](../README.md#2-how-the-hierarchy-works-on-naive)). |
-| Handoffs | `false` |
-| Budget | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"` |
-| Platform CEO binding | None. No `Orchestrator control plane` vault. See [README section 2](../README.md#2-how-the-hierarchy-works-on-naive). |
+| Setting              | Value                                                                                                                                                                                                                                                                                              |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model                | `anthropic/claude-sonnet-5.5`                                                                                                                                                                                                                                                                      |
+| Harness              | `pi`                                                                                                                                                                                                                                                                                               |
+| Team                 | `multiagent: { type: "coordinator", board: true }`, with every company agent on the roster (up to 20). The production crew is not on it.                                                                                                                                                           |
+| Started by           | 1. Deployment `br-ceo-sweep`: cron `0 */2 * * *`, timezone `America/New_York`, `budget_micro_usd: 1_000_000`. 2. Board digests, which Naive starts by itself when cards reach `done` (verified) or `blocked` (docs only, see [README section 2](../README.md#2-how-the-hierarchy-works-on-naive)). |
+| Handoffs             | `false`                                                                                                                                                                                                                                                                                            |
+| Budget               | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"`                                                                                                                                                                                                                       |
+| Platform CEO binding | None. No `Orchestrator control plane` vault. See [README section 2](../README.md#2-how-the-hierarchy-works-on-naive).                                                                                                                                                                              |
 
 ## Tools
 
-| Tool | Access | Note |
-| --- | --- | --- |
-| `board_read`, `board_write` | allow | Its only way to act |
-| `submit_output`, `session_spend` | allow | |
-| `br-app.company_metrics` (the app's own MCP tool, read only) | allow | Planned. Films made, leads, emails, replies, and spend per agent. |
-| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named | `allowed_apps` names only the app that serves `company_metrics` |
-| `send_to_agent`, `wait_for_agents`, `list_agents` | off | Work goes by card. The CEO never waits on a teammate. |
-| `bash`, `read`, `write`, `edit`, `ls`, `find` | off | With no sandbox tools, no computer is provisioned (verified) |
-| `browser`, `web_fetch`, `web_search`, `generate_image`, `data_run` | off | |
-| `ask_operator`, `request_tools`, `propose_plan` | off | Escalation goes on the board |
-| `vetta.tools_search`, `vetta.tools_execute` | off | |
+| Tool                                                                                                   | Access              | Note                                                              |
+| ------------------------------------------------------------------------------------------------------ | ------------------- | ----------------------------------------------------------------- |
+| `board_read`, `board_write`                                                                            | allow               | Its only way to act                                               |
+| `submit_output`, `session_spend`                                                                       | allow               |                                                                   |
+| `br-app.company_metrics` (the app's own MCP tool, read only)                                           | allow               | Planned. Films made, leads, emails, replies, and spend per agent. |
+| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named | `allowed_apps` names only the app that serves `company_metrics`   |
+| `send_to_agent`, `wait_for_agents`, `list_agents`                                                      | off                 | Work goes by card. The CEO never waits on a teammate.             |
+| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                          | off                 | With no sandbox tools, no computer is provisioned (verified)      |
+| `browser`, `web_fetch`, `web_search`, `generate_image`, `data_run`                                     | off                 |                                                                   |
+| `ask_operator`, `request_tools`, `propose_plan`                                                        | off                 | Escalation goes on the board                                      |
+| `vetta.tools_search`, `vetta.tools_execute`                                                            | off                 |                                                                   |
 
 No identity, no vault credentials, no external MCP servers.
 
@@ -80,12 +80,12 @@ what is `blocked`, or on what a note asks for. Create no new work from a digest.
 
 ## Reports
 
-| What | To whom | How |
-| --- | --- | --- |
-| The sweep report, every 2 hours | Founder | Note on `Recurring: Company sweep` |
-| Things only a person can do | Founder | `FOUNDER:` cards |
-| Delivered or not, per slug | Founder and every team | Comment on the `DIR` card |
-| Receives | From every agent | Board digests of each `done` card (verified) and each `blocked` card (docs). The sweep catches what no digest reports. |
+| What                            | To whom                | How                                                                                                                    |
+| ------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| The sweep report, every 2 hours | Founder                | Note on `Recurring: Company sweep`                                                                                     |
+| Things only a person can do     | Founder                | `FOUNDER:` cards                                                                                                       |
+| Delivered or not, per slug      | Founder and every team | Comment on the `DIR` card                                                                                              |
+| Receives                        | From every agent       | Board digests of each `done` card (verified) and each `blocked` card (docs). The sweep catches what no digest reports. |
 
 ## Cost
 

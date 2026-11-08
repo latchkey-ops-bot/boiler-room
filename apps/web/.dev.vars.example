@@ -1,0 +1,5 @@
+# The shape of .dev.vars, which `pnpm web:dev` writes from ~/.boiler-room.env. Do not copy real
+# values here: this file is committed, and .dev.vars is not.
+NEXTJS_ENV=development
+CLERK_SECRET_KEY=
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=

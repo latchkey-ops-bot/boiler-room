@@ -7,13 +7,13 @@ own the design repo, `latchkey-ops-bot/boiler-room-design`, and they never write
 
 **Purpose.** Turn a `DIR` card into a testable spec, then hand it to design and engineering.
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | Member of `br-ceo`'s roster |
-| Started by | Board cards: `DIR: <slug>` |
-| Budget | `cap_micro_usd: 4_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"` |
+| Setting    | Value                                                                             |
+| ---------- | --------------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                     |
+| Harness    | `pi`                                                                              |
+| Team       | Member of `br-ceo`'s roster                                                       |
+| Started by | Board cards: `DIR: <slug>`                                                        |
+| Budget     | `cap_micro_usd: 4_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"`      |
 | Credential | The `br-design` GitHub token in `~/.netrc`. It reaches `boiler-room-design` only. |
 
 ## Design: `br-design`
@@ -21,31 +21,31 @@ own the design repo, `latchkey-ops-bot/boiler-room-design`, and they never write
 **Purpose.** Design the screens, states and visuals that a spec needs, check the staging app
 against them, and look after the brand's visual system.
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | Member of `br-ceo`'s roster |
-| Started by | Board cards: `DESIGN: <slug>` |
-| Budget | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"`. At most 4 image renders per card. |
-| Credential | The same `br-design` token, written to its own computer |
+| Setting    | Value                                                                                                           |
+| ---------- | --------------------------------------------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                                                   |
+| Harness    | `pi`                                                                                                            |
+| Team       | Member of `br-ceo`'s roster                                                                                     |
+| Started by | Board cards: `DESIGN: <slug>`                                                                                   |
+| Budget     | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"`. At most 4 image renders per card. |
+| Credential | The same `br-design` token, written to its own computer                                                         |
 
 ## Tools
 
-| Tool | Product | Design | Note |
-| --- | --- | --- | --- |
-| `bash`, `read`, `write`, `edit`, `ls`, `find` | allow | allow | To commit to the design repo, and for Playwright screenshots |
-| `board_read`, `board_write`, `submit_output`, `session_spend` | allow | allow | |
-| `publish_file` | allow | allow | |
-| `web_search` | off | off | It returns untrusted pages to an agent with a token and open egress, and it does not set the read flag (docs) |
-| `browser` | off | allow, limited to the staging app's domain | Requests to any other domain are refused (verified) |
-| `generate_image` | off | allow | It asks by default, so it must be named |
-| `find_stock_photo`, `view_image` | off | allow | `view_image` is for critiquing its own screenshots |
-| `br-app.feedback_summaries` (the app's own MCP tool, read only) | allow | allow | Planned. Fixed-field summaries from the inbox reader, never raw email. The summary is still model-written from untrusted email ([README section 6](../README.md#6-guard-rails)). |
-| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named | off, each one named | `allowed_apps` names only the app that serves `feedback_summaries` |
-| `company.set_brand`, `company.set_logo` | off | off | They always need owner approval |
-| `web_fetch`, `apps`, `data_run`, social, email, connections | off | off | |
-| Base policy tools | as in [README section 3](../README.md#3-roles) | | |
+| Tool                                                                                                   | Product                                        | Design                                     | Note                                                                                                                                                                             |
+| ------------------------------------------------------------------------------------------------------ | ---------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                          | allow                                          | allow                                      | To commit to the design repo, and for Playwright screenshots                                                                                                                     |
+| `board_read`, `board_write`, `submit_output`, `session_spend`                                          | allow                                          | allow                                      |                                                                                                                                                                                  |
+| `publish_file`                                                                                         | allow                                          | allow                                      |                                                                                                                                                                                  |
+| `web_search`                                                                                           | off                                            | off                                        | It returns untrusted pages to an agent with a token and open egress, and it does not set the read flag (docs)                                                                    |
+| `browser`                                                                                              | off                                            | allow, limited to the staging app's domain | Requests to any other domain are refused (verified)                                                                                                                              |
+| `generate_image`                                                                                       | off                                            | allow                                      | It asks by default, so it must be named                                                                                                                                          |
+| `find_stock_photo`, `view_image`                                                                       | off                                            | allow                                      | `view_image` is for critiquing its own screenshots                                                                                                                               |
+| `br-app.feedback_summaries` (the app's own MCP tool, read only)                                        | allow                                          | allow                                      | Planned. Fixed-field summaries from the inbox reader, never raw email. The summary is still model-written from untrusted email ([README section 6](../README.md#6-guard-rails)). |
+| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named                            | off, each one named                        | `allowed_apps` names only the app that serves `feedback_summaries`                                                                                                               |
+| `company.set_brand`, `company.set_logo`                                                                | off                                            | off                                        | They always need owner approval                                                                                                                                                  |
+| `web_fetch`, `apps`, `data_run`, social, email, connections                                            | off                                            | off                                        |                                                                                                                                                                                  |
+| Base policy tools                                                                                      | as in [README section 3](../README.md#3-roles) |                                            |                                                                                                                                                                                  |
 
 No identity. No vault credentials. No external MCP servers.
 
@@ -103,11 +103,11 @@ Open questions: each one is also a comment on the DIR card.
 
 ## Reports
 
-| What | To whom | How |
-| --- | --- | --- |
-| A spec, ready to build | The CEO and the lead | `DIR` note, and the `BUILD` card |
-| A design, ready to build | The lead | `DESIGN` done, which clears `BUILD` |
-| Open questions | The CEO | Comments on the `DIR` card |
+| What                     | To whom              | How                                 |
+| ------------------------ | -------------------- | ----------------------------------- |
+| A spec, ready to build   | The CEO and the lead | `DIR` note, and the `BUILD` card    |
+| A design, ready to build | The lead             | `DESIGN` done, which clears `BUILD` |
+| Open questions           | The CEO              | Comments on the `DIR` card          |
 
 ## Measured and unverified
 
