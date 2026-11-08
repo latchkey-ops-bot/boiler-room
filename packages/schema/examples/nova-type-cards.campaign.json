@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-type-cards",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 15.7,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": { "family": "Sora", "source": "font-display" },
+      "body": { "family": "Inter", "source": "font-body" }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [
+    {
+      "id": "build-times",
+      "text": "Nova cuts build times by 40%",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Teams on Nova cut build times by 40% in their first month.",
+      "status": "approved"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "problem",
+      "type": "type-card",
+      "start": 0,
+      "end": 1.8,
+      "props": {},
+      "text": [
+        {
+          "id": "problem-line",
+          "role": "headline",
+          "value": "Every build waits in one line.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "value",
+      "type": "type-card",
+      "start": 1.8,
+      "end": 3.6,
+      "props": {},
+      "text": [
+        {
+          "id": "value-line",
+          "role": "headline",
+          "value": "Ship sooner.",
+          "claimIds": ["build-times"]
+        },
+        { "id": "value-more", "role": "subhead", "value": "Every push.", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "proof",
+      "type": "type-card",
+      "start": 3.6,
+      "end": 5.3,
+      "props": { "accent": { "textId": "proof-line", "from": 0, "to": 1 } },
+      "text": [
+        {
+          "id": "proof-line",
+          "role": "headline",
+          "value": "40% faster builds.",
+          "claimIds": ["build-times"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "feature",
+      "type": "feature-card",
+      "start": 5.3,
+      "end": 7.7,
+      "props": { "demo": "chips" },
+      "text": [
+        {
+          "id": "feature-line",
+          "role": "headline",
+          "value": "Builds finish sooner",
+          "claimIds": ["build-times"]
+        },
+        { "id": "feature-cause", "role": "label", "value": "Every commit", "claimIds": [] },
+        {
+          "id": "feature-effect",
+          "role": "label",
+          "value": "Built sooner",
+          "claimIds": ["build-times"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "pivot",
+      "type": "type-card",
+      "start": 7.7,
+      "end": 9.5,
+      "props": { "variant": "pivot" },
+      "text": [{ "id": "pivot-line", "role": "headline", "value": "No waiting.", "claimIds": [] }],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "callback",
+      "type": "type-card",
+      "start": 9.5,
+      "end": 11.1,
+      "props": {},
+      "text": [
+        { "id": "callback-line", "role": "headline", "value": "Your builds, done.", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "name",
+      "type": "type-card",
+      "start": 11.1,
+      "end": 12.533333,
+      "props": { "variant": "name" },
+      "text": [
+        { "id": "name-line", "role": "headline", "value": "Nova", "claimIds": [] },
+        {
+          "id": "name-descriptor",
+          "role": "subhead",
+          "value": "Faster CI.",
+          "claimIds": ["build-times"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 12.533333,
+      "end": 15.7,
+      "props": {},
+      "text": [
+        { "id": "close-cta", "role": "cta", "value": "Start free", "claimIds": [] },
+        { "id": "close-address", "role": "label", "value": "nova.example.com", "claimIds": [] }
+      ],
+      "assetIds": ["logo"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      { "id": "start-free", "label": "Start free", "href": "https://nova.example.com/signup" }
+    ]
+  }
+}

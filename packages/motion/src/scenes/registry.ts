@@ -3,6 +3,7 @@ import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
 import { siteHero } from './site-hero.tsx';
+import { typeCard } from './type-card.tsx';
 import { wordSlam } from './word-slam.tsx';
 
 /**
@@ -14,6 +15,7 @@ import { wordSlam } from './word-slam.tsx';
 export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> = {
   'word-slam': wordSlam,
   'site-hero': siteHero,
+  'type-card': typeCard,
   'feature-card': featureCard,
   'end-card': endCard,
 };

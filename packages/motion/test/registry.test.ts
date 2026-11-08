@@ -10,8 +10,14 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw four of the scene types in the schema registry, under its names', () => {
-    expect(IMPLEMENTED_SCENE_TYPES).toEqual(['word-slam', 'site-hero', 'feature-card', 'end-card']);
+  it('draw five of the scene types in the schema registry, under its names', () => {
+    expect(IMPLEMENTED_SCENE_TYPES).toEqual([
+      'word-slam',
+      'site-hero',
+      'type-card',
+      'feature-card',
+      'end-card',
+    ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
       expect(Object.hasOwn(sceneRegistry, type)).toBe(true);
   });
@@ -61,6 +67,17 @@ describe('scene templates', () => {
           },
         ],
       },
+      'type-card': {
+        kind: 'type',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
       'feature-card': {
         kind: 'product',
         ground: 'base plate',
@@ -106,14 +123,14 @@ describe('validateForRender', () => {
         path: 'scenes[1].type',
         message:
           'Scene type "proof-bars" is in the scene library, but motion has no template for it yet, so it cannot be rendered.',
-        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
+        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, type-card, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
       },
     ]);
   });
 
   it('refuses a hook of a type with no template', async () => {
     const campaign = novaCopy();
-    at(campaign.variants.hooks, 0).type = 'type-card';
+    at(campaign.variants.hooks, 0).type = 'proof-bars';
     const { issues } = await validateForRender(campaign);
     expect(issues).toEqual([
       expect.objectContaining({ code: 'SCENE_TYPE_UNBUILT', path: 'variants.hooks[0].type' }),
@@ -125,7 +142,7 @@ describe('validateForRender', () => {
     at(campaign.scenes, 1).type = 'carousel';
     const { issues } = await validateForRender(campaign);
     expect(issues.map(({ code }) => code)).toEqual(['SCENE_TYPE_UNKNOWN']);
-    expect(issues[0]?.fix).toContain('word-slam, site-hero, feature-card, end-card');
+    expect(issues[0]?.fix).toContain('word-slam, site-hero, type-card, feature-card, end-card');
   });
 
   it('applies the limits the schema gives each type', async () => {
