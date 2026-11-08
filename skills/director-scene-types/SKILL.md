@@ -16,6 +16,11 @@ engineers who build the scenes.
 - **Director limits** are yours to keep. The validator does not check words, lines, slot counts or
   layout.
 - Every number in any slot needs a cited claim.
+- **A `type-card` line** is set at the sentence cap height, never smaller. One line holds at most
+  26 characters at 16:9, 19 at 9:16 and 18 at 1:1 (`CARD_FIT`), and about 22 at 16:9 in a face as
+  wide as Inter. A headline over a subhead, a subhead and the pivot each take one line. motion
+  measures the brand font before rendering, and a line that does not fit sends the film back to
+  you.
 
 | `type`         | Kind     | Job                                             | `text` limits                              | Director limits                                                                                                                                                                                                                                                                                                                                                      | Assets                                                                                                                        | Props                                                                                                                                                                                                   |
 | -------------- | -------- | ----------------------------------------------- | ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

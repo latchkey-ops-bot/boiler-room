@@ -485,6 +485,50 @@ function checkVariants(
   }
 }
 
+/**
+ * The most characters one line of a type-card can hold at the sentence cap height (78 spec px) in
+ * each format: the line box is 1248 px at 16:9, 929 at 9:16 and 864 at 1:1. Measured by motion's
+ * own gate in Inter, a 16:9 line held 22 and 23 characters and refused 25, 26, 28, 29 and 30, the
+ * last three on real films. These limits leave a face 10% narrower than Inter room, so copy over
+ * them does not fit in any usual brand font. motion measures the real font before rendering, so
+ * copy under them can still come back as `type-card-layout`.
+ */
+export const CARD_LINE_CHARS: Record<'16:9' | '9:16' | '1:1', number> = {
+  '16:9': 26,
+  '9:16': 19,
+  '1:1': 18,
+};
+
+/**
+ * Type-card copy too long for its lines in every format the film is made in. A headline takes one
+ * line when a subhead follows it or the card is the pivot, two otherwise; a subhead takes one. The
+ * name card's headline is the brand name, which the Director does not choose.
+ */
+function checkCardFit(campaign: Campaign, scene: Scene, path: string, push: Push): void {
+  const formats = campaign.variants.formats.filter(
+    (format): format is keyof typeof CARD_LINE_CHARS => format in CARD_LINE_CHARS,
+  );
+  if (formats.length === 0) return;
+  const perLine = Math.min(...formats.map((format) => CARD_LINE_CHARS[format]));
+  const narrowest = formats.find((format) => CARD_LINE_CHARS[format] === perLine);
+  const variant = scene.props.variant;
+  const oneLine = variant === 'pivot' || scene.text.some((item) => item.role === 'subhead');
+  for (const [index, item] of scene.text.entries()) {
+    if (item.role !== 'headline' && item.role !== 'subhead') continue;
+    if (variant === 'name' && item.role === 'headline') continue;
+    const lines = item.role === 'subhead' || oneLine ? 1 : 2;
+    const limit = perLine * lines;
+    const length = [...item.value].length;
+    if (length <= limit) continue;
+    push(
+      'CARD_FIT',
+      `${path}.text[${index}].value`,
+      `This type-card ${item.role} "${item.value}" is ${length} characters on ${lines === 1 ? 'one line' : `${lines} lines`}, and one line at ${narrowest} holds at most ${perLine} at the sentence cap height. motion never sets type smaller to make copy fit, so it would refuse the film.`,
+      `Write it in ${limit} characters or fewer${lines === 1 && item.role === 'headline' && variant !== 'pivot' ? ', or drop the subhead so the headline can take two lines' : ''}. In a face as wide as Inter, aim for ${Math.floor(perLine * 0.85) * lines} or fewer.`,
+    );
+  }
+}
+
 function checkText(campaign: Campaign, template: Template, push: Push): void {
   const scenes = [
     ...campaign.scenes.map((scene, index) => ({ scene, path: `scenes[${index}]` })),
@@ -558,6 +602,7 @@ function checkText(campaign: Campaign, template: Template, push: Push): void {
       const variant = scene.props.variant;
       const subhead = scene.text.find((item) => item.role === 'subhead');
       const headline = scene.text.find((item) => item.role === 'headline');
+      checkCardFit(campaign, scene, path, push);
       if (variant === 'name') {
         if (headline && headline.value !== campaign.brand.name) {
           push(

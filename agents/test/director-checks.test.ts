@@ -277,6 +277,14 @@ describe('checkSubmission', () => {
       expected: 'CARD_TIME campaign.scenes[3].text',
     },
     {
+      // linear.app, 8 November: a 30-character value line over a subhead, which motion refused.
+      name: 'a one-line type-card line too long for its line',
+      edit: (s: ReturnType<typeof exampleSubmission>) => {
+        text(s.campaign, 'name-descriptor').value = 'The product development system';
+      },
+      expected: 'CARD_FIT campaign.scenes[9].text[1].value',
+    },
+    {
       name: 'invented capture data',
       edit: (s: ReturnType<typeof exampleSubmission>) => {
         const hero = s.campaign.scenes[2];

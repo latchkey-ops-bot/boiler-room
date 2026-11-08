@@ -576,7 +576,7 @@ Short template's: 0, 90, 150, 234, 285, 357, 429, 525, 564, 612, 655, ending at 
         {
           "id": "name-descriptor",
           "role": "subhead",
-          "value": "Previews for pull requests",
+          "value": "Pull request previews",
           "claimIds": ["preview-speed"]
         }
       ],
