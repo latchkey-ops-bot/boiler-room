@@ -1,4 +1,5 @@
 import { cap } from './caps.ts';
+import { EMAIL_FORCED_DRY_RUN } from './config.ts';
 import { templatesHash } from './copy.ts';
 import type { EmailSender, FilmOrder, SocialPoster } from './ports.ts';
 import type { StoreData, XLane } from './store.ts';
@@ -57,6 +58,11 @@ export interface LaneInput {
   sender: EmailSender;
   /** The mailbox the inbox phase reads for reply opt-outs, if one is wired. */
   replyInbox: { account: string } | null;
+  /**
+   * `EMAIL_FORCED_DRY_RUN`, the founder's no-email ruling, unless a test of the email lane's own
+   * machinery passes false. The CLI never passes it, and no store flag reaches it.
+   */
+  emailForcedDryRun?: boolean;
 }
 
 export function resolveLanes(input: LaneInput): LaneState {
@@ -85,7 +91,7 @@ export function resolveLanes(input: LaneInput): LaneState {
   if (input.film.kind !== 'app') film.push('no app film pipeline is configured');
   if (input.lockdownOk !== true) {
     film.push(
-      'company:verify --lockdown does not pass: an agent that reads untrusted sites could write company cards',
+      'company:verify --lockdown does not pass: an agent is offered a board tool its definition does not give it, so an agent that reads untrusted sites could write company cards',
     );
   }
   if (!flags.rulings.film_canary_cost_reported)
@@ -99,15 +105,20 @@ export function resolveLanes(input: LaneInput): LaneState {
   else if (xFlag === 'dry_run') x.push('x_lane is dry_run');
   else if (xFlag === 'consent')
     x.push('consent mode needs the film page consent button (web job), not built');
-  if (input.social.kind !== 'naive' || !input.socialReady)
-    x.push('no X account is connected through Naive social');
-  if (!flags.rulings.x_policy_accepted)
-    x.push("the founder has not accepted posting other companies' films");
-  if (!flags.rulings.x_bio_set) x.push('the X bio is not set');
-  if (flags.rulings.x_templates_approved !== templatesHash())
-    x.push('the caption templates are not the approved set');
-  if (!flags.rulings.bundle_tier_known) x.push('the bundle.social tier is not known');
-  if (!flags.rulings.x_canary_done) x.push('the canary post has not been made and deleted');
+  // In pack mode the founder posts by hand from the FOUNDER: gtm pack card, reading each caption
+  // first, so nothing about posting by code applies: no Naive social account, no approved template
+  // hash, no bundle.social tier, no canary post. Only the film lane and the base checks above.
+  if (xFlag !== 'pack') {
+    if (input.social.kind !== 'naive' || !input.socialReady)
+      x.push('no X account is connected through Naive social');
+    if (!flags.rulings.x_policy_accepted)
+      x.push("the founder has not accepted posting other companies' films");
+    if (!flags.rulings.x_bio_set) x.push('the X bio is not set');
+    if (flags.rulings.x_templates_approved !== templatesHash())
+      x.push('the caption templates are not the approved set');
+    if (!flags.rulings.bundle_tier_known) x.push('the bundle.social tier is not known');
+    if (!flags.rulings.x_canary_done) x.push('the canary post has not been made and deleted');
+  }
   const xState: XState =
     xFlag === 'off'
       ? 'off'
@@ -118,6 +129,10 @@ export function resolveLanes(input: LaneInput): LaneState {
         : 'dry_run';
 
   const email: string[] = [...base];
+  if (input.emailForcedDryRun ?? EMAIL_FORCED_DRY_RUN)
+    email.push(
+      "email is dry run in code for the hackathon (EMAIL_FORCED_DRY_RUN), whatever the store's flags say",
+    );
   if (!filmLive) email.push('the film lane is not live');
   if (flags.email_lane !== 'live') email.push(`email_lane is ${flags.email_lane}`);
   if (input.sender.kind === 'dry-run') email.push('no cold sender is chosen');

@@ -15,15 +15,23 @@ import {
   SOCIAL_AGENT,
   SONNET,
 } from './common.ts';
+import { onBoard } from './gtm.ts';
 
 /**
  * br-ceo's roster: the agents its cards go to. As the organization's CEO, br-ceo owns the company
- * board, which seats every agent of the company, roster or not. The GTM agents are not on it: the
- * GTM executor, which is code, starts them, and a card assigned to one would start a session the
- * executor did not brief. The GTM agents and the production crew name both board tools off, so only
- * the builders and the CEO write cards.
+ * board, which seats every agent of the company, roster or not. The GTM lead is on it only while it
+ * is on `GTM_ON_BOARD` (today it is not): then br-ceo gives it `OUTREACH:` cards. Otherwise the GTM
+ * executor, which is code, is the only thing that starts the GTM agents, and a card assigned to one
+ * would start a session the executor did not brief. The GTM agents off `GTM_ON_BOARD` and the
+ * production crew name both board tools off.
  */
-export const CEO_ROSTER = [ENGINEERING_LEAD, ENGINEER, PRODUCT, DESIGN] as const;
+export const CEO_ROSTER: readonly string[] = [
+  ENGINEERING_LEAD,
+  ENGINEER,
+  PRODUCT,
+  DESIGN,
+  ...(onBoard(GTM_LEAD) ? [GTM_LEAD] : []),
+];
 
 /**
  * The founder's priorities, in order. They seed the CEO's priority list, which it then keeps on its
@@ -43,12 +51,18 @@ export const OUT_OF_SCOPE = [
   'the pipeline that connects them',
 ] as const;
 
+/** What br-ceo's prompt says about the GTM agents: on its team only while on `GTM_ON_BOARD`. */
+const GTM_TEAM = onBoard(GTM_LEAD)
+  ? `- ${GTM_LEAD}: go-to-market. Give it OUTREACH: <slug> cards: for a delivered slug, what Boiler Room should say about it on X and who it is for. It answers in the card's note, and may hand ${SCOUT} a LEADS: <slug> card and ${SOCIAL_AGENT} a POST: <slug> card. Nothing it writes is posted: the founder posts by hand.
+GTM cards you never create: LEADS: and POST: (the GTM lead's), and GTM:, REMOVE: and FOUNDER: gtm ... (the GTM executor's, which is code). Never move, assign or comment on the executor's cards, except a HOLD comment on a GTM: card. Never assign a card to ${SCOUT}, ${SOCIAL_AGENT} or ${INBOX_READER}.`
+  : `Not your team: ${GTM_LEAD}, ${SCOUT}, ${SOCIAL_AGENT} and ${INBOX_READER} are go-to-market agents that the GTM executor, which is code, starts with its own briefs. Never assign them a card, and never create an OUTREACH:, LEADS: or POST: card. Cards titled GTM:, REMOVE: and FOUNDER: gtm ... are the executor's: never create, move, assign or comment on them, except a HOLD comment on a GTM: card.`;
+
 const MORE = `Your team, by name. Assign each card to one of them:
 - ${PRODUCT}: turns a DIR card into a spec, then hands it to design and engineering.
 - ${DESIGN}: designs the screens and states a spec needs.
 - ${ENGINEERING_LEAD}: plans a BUILD card into ENG cards, reviews and merges the pull requests into dev, and deploys staging. It never merges into main or deploys production.
 - ${ENGINEER}: one ENG card is one branch and one pull request.
-Not your team: ${GTM_LEAD}, ${SCOUT}, ${SOCIAL_AGENT} and ${INBOX_READER} are go-to-market agents that the GTM executor, which is code, starts with its own briefs. Never assign them a card. Cards titled GTM:, REMOVE: and FOUNDER: gtm ... are the executor's: never create, move, assign or comment on them, except a HOLD comment.
+${GTM_TEAM}
 
 The founder's priorities, in this order. They seed your priority list:
 ${PRIORITIES.map((item, index) => `${index + 1}. ${item}`).join('\n')}

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
-// pnpm web:runner:keys:staging mint [--runner-key]
+// pnpm web:runner:keys:staging mint [--runner-key] [--gtm-token]
 // pnpm web:runner:keys:staging probe [--runner-key]
 //
 // mint: with the admin NAIVE_API_KEY in the env file, mints the website's own Naive key (exactly
 // computers:write and billing:read) into STAGING_NAIVE_WEB_KEY, and makes a signing secret in
 // STAGING_RUNNER_SIGNING_SECRET. With --runner-key, also the runner's key (exactly the seven
 // scopes of RUNNER_KEY_SCOPES in lib/runner-secrets.mjs) into STAGING_NAIVE_RUNNER_KEY. It never
-// replaces a key that is already there, and prints only key ids.
+// replaces a key that is already there, and prints only key ids. With --gtm-token, also a GTM
+// service token into STAGING_GTM_SERVICE_TOKEN (the website's copy) and, when it is not set yet,
+// the same value into GTM_SERVICE_TOKEN (the GTM executor's copy), so the two always match.
 //
 // probe: runs every Naive call the website makes for a film (`HttpNaiveApi`, the real class) once
 // with STAGING_NAIVE_WEB_KEY, on a throwaway 1 vCPU computer, then destroys it and its snapshot.
@@ -24,6 +26,7 @@ import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { HttpNaiveApi, NaiveApiError } from '../src/server/runner/naive-api.ts';
 import { ENV_FILE, fail, readEnvFile } from './lib/env.mjs';
 import {
+  GTM_EXECUTOR_TOKEN,
   MINTED,
   newSigningSecret,
   PROBE_CALLS,
@@ -87,6 +90,21 @@ if (command === 'mint') {
   } else {
     writeEnv(MINTED.signing, newSigningSecret());
     console.log(`Wrote a new 64-character ${MINTED.signing}.`);
+  }
+  if (process.argv.includes('--gtm-token')) {
+    if (vars.get(MINTED.gtm)) {
+      console.log(`${MINTED.gtm} is already set; left as it is.`);
+    } else {
+      const token = newSigningSecret();
+      writeEnv(MINTED.gtm, token);
+      console.log(`Wrote a new 64-character ${MINTED.gtm}.`);
+      if (vars.get(GTM_EXECUTOR_TOKEN)) {
+        console.log(`${GTM_EXECUTOR_TOKEN} is already set; left as it is. Make it match.`);
+      } else {
+        writeEnv(GTM_EXECUTOR_TOKEN, token);
+        console.log(`Wrote the same value into ${GTM_EXECUTOR_TOKEN} for the GTM executor.`);
+      }
+    }
   }
   process.exit(0);
 }

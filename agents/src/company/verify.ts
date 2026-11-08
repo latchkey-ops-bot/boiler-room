@@ -1,4 +1,5 @@
 import { GTM_LEAD, INBOX_READER, SCOUT, SOCIAL_AGENT } from '../definitions/company/common.ts';
+import { onBoard } from '../definitions/company/gtm.ts';
 import { company, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
 import { liveCatalogue, unnamedOn } from './control-plane.ts';
@@ -291,15 +292,23 @@ export async function verifyCeoTools(
 /**
  * What a GTM agent may be offered: its skill, its spend, and the always-offered `submit_output`.
  * Nothing that sends, posts, spends, writes or reads the board, or runs code, because each one
- * reads text from outside the company.
+ * reads text from outside the company. Only an agent on `GTM_ON_BOARD` would also hold the two
+ * board tools, and that list is empty.
  */
 export const GTM_OFFERED = ['read_skill', 'session_spend', 'submit_output'] as const;
 const GTM_NAMES = [GTM_LEAD, SCOUT, SOCIAL_AGENT, INBOX_READER] as const;
 
+/** What a stored GTM agent may allow, by name (`submit_output` cannot be named). */
+export function gtmAllowed(name: string): string[] {
+  const base = GTM_OFFERED.filter((tool) => tool !== 'submit_output');
+  const board = onBoard(name) ? ['board_read', 'board_write'] : [];
+  return [...board, ...base].sort();
+}
+
 /**
  * Judges the four GTM agents as Naive stores them: each allows only `read_skill` and
- * `session_spend` (`submit_output` cannot be named), and connects no MCP server. An agent that is
- * not synced yet is not judged.
+ * `session_spend`, plus the board tools for the agents on `GTM_ON_BOARD`, and connects no MCP
+ * server. An agent that is not synced yet is not judged.
  */
 export function judgeGtmStored(
   stored: readonly {
@@ -309,8 +318,8 @@ export function judgeGtmStored(
   }[],
 ): string[] {
   const failures: string[] = [];
-  const allowed = GTM_OFFERED.filter((name) => name !== 'submit_output').join(',');
   for (const name of GTM_NAMES) {
+    const allowed = gtmAllowed(name).join(',');
     const agent = stored.find((item) => item.name === name);
     if (!agent) continue;
     const tools = allowedTools({

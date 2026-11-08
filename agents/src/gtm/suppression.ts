@@ -2,6 +2,7 @@ import { DEDUPE } from './config.ts';
 import { emailDomain, normalise, registrableDomain, sha256 } from './domain.ts';
 import type {
   Channel,
+  ContactRow,
   StoreData,
   SuppressionKind,
   SuppressionReason,
@@ -103,10 +104,12 @@ export function contactedWithin(
 export function recordContact(
   store: StoreData,
   input: { domain: string; channel: Channel; at: string; lead_id: string },
-): void {
+): ContactRow | null {
   const domain = registrableDomain(input.domain);
-  if (!domain) return;
-  store.contacts.push({ ...input, domain });
+  if (!domain) return null;
+  const row: ContactRow = { ...input, domain };
+  store.contacts.push(row);
+  return row;
 }
 
 /**

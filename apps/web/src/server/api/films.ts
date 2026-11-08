@@ -381,6 +381,10 @@ export async function setShowcase(
   { optIn }: ShowcaseInput,
 ): Promise<FilmView> {
   const film = await syncFilm(ctx, await ownFilm(ctx, id));
+  // A GTM sample is another company's film: it is never shown on the wall.
+  if (optIn && film.sample) {
+    throw new ApiError(409, 'sample', 'A free sample made for another company is never shown.');
+  }
   if (optIn && film.status !== 'done') {
     throw new ApiError(409, 'not_delivered', 'You can show a film once it is delivered.');
   }
@@ -590,9 +594,14 @@ export async function requestRevision(
  * request died between reserving the row and starting the run) stops counting after 5 minutes.
  */
 function inProgressCount(ctx: ApiContext, now: Date) {
+  return filmsInProgress({ accountId: ctx.account.id, userId: ctx.principal.userId }, now);
+}
+
+/** `inProgressCount` for any account and creator, such as the GTM executor's samples. */
+export function filmsInProgress(scope: { accountId: string; userId: string }, now: Date) {
   return sql`(select count(*) from films
     where status in ('queued', 'working', 'needs_you')
-      and (account_id = ${ctx.account.id} or created_by = ${ctx.principal.userId})
+      and (account_id = ${scope.accountId} or created_by = ${scope.userId})
       and (pipeline_run_id is not null or created_at > ${now.getTime() - STALE_RESERVATION_MS}))`;
 }
 

@@ -58,6 +58,7 @@ export class NaivePipeline implements PipelineClient {
     filmId: string;
     url: string;
     mode?: 'customer' | 'sample';
+    costCapMicroUsd?: number;
   }): Promise<{ runId: string }> {
     const deps = this.#ready();
     const naive = deps.naive as NonNullable<RunnerDeps['naive']>;
@@ -78,7 +79,11 @@ export class NaivePipeline implements PipelineClient {
         computerState: 'creating',
         runningSince: now,
         baseSnapshotId: config.snapshotId as string,
-        costCapMicroUsd: config.filmCapMicroUsd,
+        // A caller's own cap (a GTM sample's budget) may lower the website's, never raise it.
+        costCapMicroUsd: Math.min(
+          config.filmCapMicroUsd,
+          input.costCapMicroUsd ?? config.filmCapMicroUsd,
+        ),
         createdAt: now,
         updatedAt: now,
       }),

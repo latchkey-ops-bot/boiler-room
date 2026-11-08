@@ -104,7 +104,7 @@ export function scoutBrief(
   });
   return [
     header('qualify', date, nonce),
-    'Qualify each candidate below with your skill "scout", then call submit_output with one verdict per candidate_id. Quotes are copied character for character from the fenced page they cite.',
+    'Qualify each candidate below with your skill "scout", then call submit_output with one verdict per candidate_id. Quotes are copied character for character from the fenced page they cite; a line comes from the homepage or the about page only.',
     ...blocks,
   ].join('\n\n');
 }

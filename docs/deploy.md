@@ -224,15 +224,17 @@ trips it again on the next tick, because the old baseline is kept for 24 hours.
 
 **Settings.**
 
-| Name                                                        | Kind   | From the env file                    | Notes                                                                                                                                                                                |
-| ----------------------------------------------------------- | ------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `NAIVE_WEB_KEY`                                             | secret | `STAGING_NAIVE_WEB_KEY` only         | A key with exactly `computers:write` and `billing:read`. The sync checks it with Naive, and refuses the admin key                                                                    |
-| `RUNNER_SIGNING_SECRET`                                     | secret | `STAGING_RUNNER_SIGNING_SECRET` only | At least 32 random characters                                                                                                                                                        |
-| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | The film command's key, sent in each launch's bootstrap; the snapshot holds none. Exactly the seven scopes below; the sync refuses any other set, the admin key or the website's key |
-| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. `false` on staging, whose snapshot runs the real film command                             |
-| `REAL_FILM_USERS`                                           | secret | `STAGING_REAL_FILM_USERS`            | Comma-separated Clerk user ids. A secret, so no id is committed to the public repo                                                                                                   |
-| `RUNNER_SNAPSHOT_ID`, `RUNNER_COMMIT`, `RUNNER_FILM_COMMIT` | vars   | `wrangler.jsonc`                     | The base snapshot and the two commits it holds, committed by pull request after a build                                                                                              |
-| `RUNNER_PUBLIC_URL`                                         | var    | `wrangler.jsonc`                     | The callback base. The cron has no request to read it from                                                                                                                           |
+| Name                                                        | Kind   | From the env file                    | Notes                                                                                                                                                                                                        |
+| ----------------------------------------------------------- | ------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NAIVE_WEB_KEY`                                             | secret | `STAGING_NAIVE_WEB_KEY` only         | A key with exactly `computers:write` and `billing:read`. The sync checks it with Naive, and refuses the admin key                                                                                            |
+| `RUNNER_SIGNING_SECRET`                                     | secret | `STAGING_RUNNER_SIGNING_SECRET` only | At least 32 random characters                                                                                                                                                                                |
+| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | The film command's key, sent in each launch's bootstrap; the snapshot holds none. Exactly the seven scopes below; the sync refuses any other set, the admin key or the website's key                         |
+| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. `false` on staging, whose snapshot runs the real film command                                                     |
+| `REAL_FILM_USERS`                                           | secret | `STAGING_REAL_FILM_USERS`            | Comma-separated Clerk user ids. A secret, so no id is committed to the public repo                                                                                                                           |
+| `RUNNER_SNAPSHOT_ID`, `RUNNER_COMMIT`, `RUNNER_FILM_COMMIT` | vars   | `wrangler.jsonc`                     | The base snapshot and the two commits it holds, committed by pull request after a build                                                                                                                      |
+| `RUNNER_PUBLIC_URL`                                         | var    | `wrangler.jsonc`                     | The callback base. The cron has no request to read it from                                                                                                                                                   |
+| `GTM_SERVICE_TOKEN`                                         | secret | `STAGING_GTM_SERVICE_TOKEN` only     | Optional. The GTM executor's bearer token for `/api/gtm/v1/`, at least 32 characters and no other secret's value. Unset, the GTM routes answer 503. The executor holds the same value as `GTM_SERVICE_TOKEN` |
+| `BR_HOUSE_ACCOUNT_ID`                                       | var    | `wrangler.jsonc`                     | Boiler Room's own account (`acc_…`). Every GTM sample film belongs to it; empty, no sample can be ordered                                                                                                    |
 
 Missing any of the three secrets or the snapshot id, nobody gets a real film. Production has none
 of them and keeps answering 503.
@@ -284,6 +286,17 @@ so the key never creates a computer.
    refused at its hello.
 4. Add your Clerk user id (from `accounts.clerk_user_id` after you sign in to staging once) to
    `STAGING_REAL_FILM_USERS`, and run `pnpm web:secrets:sync:staging` again.
+
+**GTM sample films.** The GTM executor orders free sample films of startups' sites through
+`/api/gtm/v1/` (`apps/web/src/server/gtm/`), served by `worker.ts` before OpenNext and outside
+Clerk. A sample is a real film of `BR_HOUSE_ACCOUNT_ID` in the runner's `sample` mode: no approval
+pause, every real-film cap above, and a cap of the executor's budget or the film cap, whichever is
+lower. Once delivered it gets an unlisted, `noindex` film page at `/f/<share_id>`, labelled a free
+sample, which answers 410 once withdrawn and lets anyone remove the film. To turn it on:
+`pnpm web:runner:keys:staging mint --gtm-token` writes `STAGING_GTM_SERVICE_TOKEN` and, when unset,
+the same value as `GTM_SERVICE_TOKEN` for the executor; set `BR_HOUSE_ACCOUNT_ID` in
+`env.staging.vars` by pull request; migrate, sync the secrets and deploy as above; and put the
+staging URL in the env file as `GTM_APP_URL`.
 
 Naive keys have no resource binding: the website's `computers:write` reaches every computer and
 snapshot in the organization, the company's agent computers included, and so does the runner's,

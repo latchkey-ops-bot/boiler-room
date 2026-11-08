@@ -6,6 +6,7 @@ import {
   parseCommand,
   planRemoval,
   readCommands,
+  readPackPosts,
   scanText,
   stopMatch,
 } from '../src/gtm/removal.ts';
@@ -212,6 +213,49 @@ describe('commands on the day card', () => {
     expect(parseCommand('HOLD quillbox.example')).toBeNull();
     expect(parseCommand('REMOVE everything now')).toBeNull();
     expect(parseCommand('please HOLD')).toBeNull();
+  });
+
+  it('reads POSTED with a lead id and our post, and nothing looser', () => {
+    const url = 'https://x.com/boilerroomstudi/status/1000000000000000001';
+    expect(parseCommand(`POSTED ld-7k2m9q ${url}`)).toEqual({
+      kind: 'posted',
+      lead_id: 'ld-7k2m9q',
+      url,
+    });
+    expect(parseCommand(`POSTED ${url}`)).toEqual({ kind: 'posted', lead_id: null, url });
+    expect(parseCommand(`POSTED quillbox.example ${url}`)).toBeNull();
+    expect(parseCommand('POSTED ld-7k2m9q https://quillbox.example/')).toBeNull();
+    expect(parseCommand(`POSTED ld-7k2m9q ${url} too`)).toBeNull();
+    // What the executor writes on a pack card never reads as a command.
+    expect(parseCommand('REMOVAL · ld-7k2m9q · do not post')).toBeNull();
+    expect(parseCommand('PACK · 2026-11-08 · posted')).toBeNull();
+  });
+
+  it("counts a pack's posts only from the founder's own POSTED comments", () => {
+    const url = 'https://x.com/boilerroomstudi/status/1000000000000000001';
+    const later = 'https://x.com/boilerroomstudi/status/1000000000000000002';
+    const by = (id: string, author: string, body: string, when = at): BoardComment => ({
+      id,
+      author,
+      body,
+      created_at: when,
+    });
+    const posted = readPackPosts(
+      [
+        by('cmt_1', 'usr_founder', `POSTED ld-7k2m9q ${url}`),
+        by('cmt_2', 'usr_founder', `POSTED ld-7k2m9q ${later}`, '2026-11-09T00:00:00Z'),
+        by('cmt_3', 'agt_ceo', `POSTED ld-8a8a8a ${url}`),
+        by('cmt_4', 'usr_founder', `POSTED ld-9b9b9b ${url}`),
+        by('cmt_5', 'usr_founder', `POSTED ${url}`),
+      ],
+      'usr_founder',
+      // A comment the executor wrote may carry the key owner's id: it never counts.
+      new Set(['cmt_4']),
+    );
+    expect([...posted]).toEqual([['ld-7k2m9q', url]]);
+    expect(
+      readPackPosts([by('cmt_1', 'usr_founder', `POSTED ld-7k2m9q ${url}`)], null, new Set()),
+    ).toEqual(new Map());
   });
 
   it('takes a stop from anyone, and a release only from the founder in a comment the executor did not write', () => {

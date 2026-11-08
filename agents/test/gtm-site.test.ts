@@ -4,7 +4,9 @@ import {
   finderAddresses,
   hnName,
   jurisdictionOverride,
+  namesHost,
   noSolicitationNotice,
+  phCoreName,
   phMatches,
   productName,
   publishedAddresses,
@@ -255,19 +257,82 @@ describe('what code reads from a site', () => {
     ).toBeNull();
   });
 
-  it('matches a Product Hunt entry only to a site that carries its tagline or links to Product Hunt', () => {
+  it('matches a Product Hunt entry only to a site that carries its name, and its tagline or a Product Hunt link', () => {
+    const entry = {
+      name: 'Sequence Tool',
+      tagline: 'Edit with words: long recordings into polished stories',
+    };
     const right = page(
-      '<html><body><p>Edit with words: long recordings into polished stories.</p></body></html>',
+      '<html><head><title>Sequence Tool</title></head><body><p>Edit with words: long recordings into polished stories.</p></body></html>',
     );
     const wrong = page(
-      '<html><body><p>Sequence Tool, industrial sequencing since 1998.</p></body></html>',
+      '<html><head><title>Sequence Tool</title></head><body><p>Industrial sequencing since the sixties.</p></body></html>',
     );
     const linked = page(
-      '<html><body><a href="https://www.producthunt.com/products/x">PH</a></body></html>',
+      '<html><head><title>Sequence Tool</title></head><body><a href="https://www.producthunt.com/products/x">PH</a></body></html>',
     );
-    expect(phMatches(right, 'Edit with words: long recordings into polished stories')).toBe(true);
-    expect(phMatches(wrong, 'Edit with words: long recordings into polished stories')).toBe(false);
-    expect(phMatches(linked, 'anything')).toBe(true);
+    expect(phMatches(right, entry)).toBe(true);
+    expect(phMatches(wrong, entry)).toBe(false);
+    expect(phMatches(linked, { ...entry, tagline: 'anything' })).toBe(true);
+  });
+
+  it('drops a news site or a rival that has the tagline or a Product Hunt link but not the name', () => {
+    // Seen live on 2026-11-08: "Zigzag Browser" resolved to a news aggregator that links to Product
+    // Hunt, and "NotchX" to a rival notch app whose page has the tagline's words.
+    const aggregator = page(
+      '<html><head><title>freshnews - fresh tech news from around the web</title></head><body><a href="https://www.producthunt.com/">PH</a><p>Zigzag Browser: The polished, native Mac browser for life after Arc</p></body></html>',
+    );
+    expect(
+      phMatches(aggregator, {
+        name: 'Zigzag Browser',
+        tagline: 'The polished, native Mac browser for life after Arc',
+      }),
+    ).toBe(false);
+    const rival = page(
+      '<html><head><title>Dynamic Island for Mac | seam</title><meta property="og:site_name" content="Seam"></head><body><p>Turn your MacBook notch into a hub for music and calls.</p></body></html>',
+    );
+    expect(
+      phMatches(rival, {
+        name: 'NotchX',
+        tagline: "Turn your MacBook's notch into a hub for music and calls",
+      }),
+    ).toBe(false);
+    // The host alone can carry the name: zigzag's own site need not repeat "Browser".
+    const own: SitePage = {
+      ...page(
+        '<html><head><title>Zigzag</title></head><body><p>The polished, native Mac browser for life after Arc.</p></body></html>',
+      ),
+      final_url: 'https://zigzag.example/',
+    };
+    expect(
+      phMatches(own, {
+        name: 'Zigzag Browser',
+        tagline: 'The polished, native Mac browser for life after Arc',
+      }),
+    ).toBe(true);
+  });
+
+  it('reads a Product Hunt name without its maker or edition', () => {
+    expect(phCoreName('Sage2 by Levanto Labs')).toBe('Sage2');
+    expect(phCoreName('Rex (Beta)')).toBe('Rex');
+    expect(phCoreName('DocsAlot for customer support')).toBe('DocsAlot');
+    expect(phCoreName('Agent Clan')).toBe('Agent Clan');
+  });
+
+  it('takes a name from the title or heading only when it names the host', () => {
+    expect(namesHost('Where Were We', 'https://wherewerewe.app/')).toBe(true);
+    expect(namesHost('Seam', 'https://getseam.app/')).toBe(true);
+    expect(namesHost('VidTier', 'https://vidtier.eamag.me/')).toBe(true);
+    expect(namesHost('Board', 'https://zenmemes.com/')).toBe(false);
+    expect(namesHost('freshnews', 'https://www.freshnews.org/')).toBe(true);
+    const forum = (url: string): SitePage => ({
+      ...page('<html><head><title>Board</title></head><body><p>A garage.</p></body></html>'),
+      final_url: url,
+    });
+    expect(productName(forum('https://zenmemes.com/'), null)).toBeNull();
+    expect(productName(forum('https://board.example/'), null)).toBe('Board');
+    // A name the source gives, or the site's own og:site_name, needs no match with the host.
+    expect(productName(forum('https://zenmemes.com/'), 'Board')).toBe('Board');
   });
 
   it('needs a state of incorporation or a US address for us, and a UK registration for uk_ltd', () => {

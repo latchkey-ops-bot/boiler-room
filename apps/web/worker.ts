@@ -1,5 +1,6 @@
-// The Worker's entry: the runner's signed routes, then OpenNext's generated fetch handler for
-// everything else, plus a cron for the real-film watchdog.
+// The Worker's entry: the runner's signed routes, the GTM executor's routes and sample film pages,
+// then OpenNext's generated fetch handler for everything else, plus a cron for the real-film
+// watchdog.
 //
 // The runner's routes are served here, before OpenNext, because OpenNext's converter reads every
 // non-GET body whole into memory before routing: an upload must stream into R2 instead
@@ -8,11 +9,12 @@
 // biome-ignore lint/suspicious/noTsIgnore: the file exists after a build and not before, so expect-error would fail one of the two
 // @ts-ignore `.open-next/worker.js` is generated at build time
 import { default as handler } from './.open-next/worker.js';
+import { type GtmEnv, gtmFetch, isGtmPath } from './src/server/gtm/routes.ts';
 import { RUNNER_BASE_PATH, signWatchdog } from './src/server/runner/contract.ts';
 import type { RunnerEnv } from './src/server/runner/deps.ts';
 import { boundAppRequest, isRunnerPath, runnerFetch } from './src/server/runner/worker-routes.ts';
 
-interface Env extends RunnerEnv {
+interface Env extends RunnerEnv, GtmEnv {
   WORKER_SELF_REFERENCE: { fetch(input: string, init: RequestInit): Promise<Response> };
   RUNNER_SIGNING_SECRET?: string;
   RUNNER_PUBLIC_URL?: string;
@@ -24,7 +26,11 @@ interface Ctx {
 
 export default {
   fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> | Response {
-    if (isRunnerPath(new URL(request.url).pathname)) return runnerFetch(request, env, ctx);
+    const { pathname } = new URL(request.url);
+    if (isRunnerPath(pathname)) return runnerFetch(request, env, ctx);
+    // The GTM executor has no Clerk session, and a sample's film page answers 410 once withdrawn,
+    // which a Next page cannot (src/server/gtm/routes.ts).
+    if (isGtmPath(pathname)) return gtmFetch(request, env, ctx);
     const bounded = boundAppRequest(request);
     if (bounded instanceof Response) return bounded;
     return handler.fetch(bounded, env, ctx);

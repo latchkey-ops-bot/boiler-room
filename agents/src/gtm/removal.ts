@@ -113,9 +113,24 @@ export interface RemovalPlan {
   posts: { key: string; provider_id: string }[];
   /** Film orders to withdraw. */
   films: { key: string; provider_id: string }[];
+  /**
+   * The startup's posts in a pack, which the founder posts by hand and only the founder can delete:
+   * one `FOUNDER: gtm hand-removal` card names them, and a waiting pack's card is told never to
+   * post them. An entry a removal already reached is not listed again.
+   */
+  hand: HandEntry[];
   suppressed: number;
   /** True when no lead, film or post of ours matches: the request is counted and nothing else. */
   unmatched: boolean;
+}
+
+export interface HandEntry {
+  lead_id: string;
+  pack_date: string;
+  /** The founder said POSTED for it on the pack card. */
+  posted: boolean;
+  /** Its pack card is still open, so the founder may still post from it. */
+  waiting: boolean;
 }
 
 /**
@@ -168,7 +183,28 @@ export function planRemoval(store: StoreData, request: RemovalRequest): RemovalP
       .map((row) => ({ key: row.key, provider_id: row.provider_id as string }));
   const posts = request.kind === 'removal' ? live('x-post') : [];
   const films = request.kind === 'removal' ? live('film') : [];
-  const unmatched = leads.length === 0 && posts.length === 0 && films.length === 0;
+  const hand: HandEntry[] =
+    request.kind === 'removal'
+      ? (store.packs ?? []).flatMap((pack) =>
+          pack.entries
+            .filter(
+              (entry) =>
+                !entry.removed_at &&
+                (leadIds.has(entry.lead_id) ||
+                  (domain !== null && entry.domain === domain) ||
+                  (request.share_id !== null &&
+                    entry.film_page.endsWith(`/f/${request.share_id}`))),
+            )
+            .map((entry) => ({
+              lead_id: entry.lead_id,
+              pack_date: pack.date,
+              posted: Boolean(entry.posted_at),
+              waiting: pack.status === 'waiting',
+            })),
+        )
+      : [];
+  const unmatched =
+    leads.length === 0 && posts.length === 0 && films.length === 0 && hand.length === 0;
   return {
     id: opaqueId('rm'),
     request,
@@ -176,6 +212,7 @@ export function planRemoval(store: StoreData, request: RemovalRequest): RemovalP
     leads,
     posts,
     films,
+    hand,
     suppressed,
     unmatched,
   };
@@ -200,29 +237,31 @@ export type Command =
   | { kind: 'unhold'; lead_id: string | null }
   | { kind: 'resume_email' }
   | { kind: 'remove'; lead_id: string }
-  | { kind: 'posted'; url: string };
+  /** A hand post the founder made from a pack. Without a lead id (the older form) it counts nothing. */
+  | { kind: 'posted'; lead_id: string | null; url: string };
 
 const LEAD_ID = /^ld-[a-z0-9]{4,12}$/;
+const X_STATUS = /^https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d+$/;
 
 /** Reads one comment's first line as a command, or null. Anything else is not a command. */
 export function parseCommand(body: string): Command | null {
   const line = (body.split('\n')[0] ?? '').trim();
-  const [word = '', arg, ...rest] = line.split(/\s+/);
+  const [word = '', arg, third, ...rest] = line.split(/\s+/);
   if (rest.length) return null;
   const upper = word.toUpperCase();
+  if (upper === 'POSTED') {
+    const [lead, url] = third === undefined ? [null, arg] : [arg, third];
+    if (lead !== null && (lead === undefined || !LEAD_ID.test(lead))) return null;
+    if (!url || !X_STATUS.test(url)) return null;
+    return { kind: 'posted', lead_id: lead, url };
+  }
+  if (third !== undefined) return null;
   if (upper === 'HOLD' || upper === 'UNHOLD') {
     if (arg !== undefined && !LEAD_ID.test(arg)) return null;
     return { kind: upper === 'HOLD' ? 'hold' : 'unhold', lead_id: arg ?? null };
   }
   if (upper === 'RESUME' && arg?.toLowerCase() === 'email') return { kind: 'resume_email' };
   if (upper === 'REMOVE' && arg && LEAD_ID.test(arg)) return { kind: 'remove', lead_id: arg };
-  if (
-    upper === 'POSTED' &&
-    arg &&
-    /^https:\/\/(?:x|twitter)\.com\/[A-Za-z0-9_]{1,15}\/status\/\d+$/.test(arg)
-  ) {
-    return { kind: 'posted', url: arg };
-  }
   return null;
 }
 
@@ -295,4 +334,27 @@ export function readCommands(
     else if (command.kind === 'posted') holds.posted.push(command.url);
   }
   return holds;
+}
+
+/**
+ * The hand posts the founder reported on a pack card, by lead: each `POSTED <lead id> <url>`
+ * comment that `commandAllowed` accepts, which is only the founder's own and never one the executor
+ * wrote. The first one for a lead counts. Whoever moved the card, and whatever anyone else wrote,
+ * counts nothing.
+ */
+export function readPackPosts(
+  comments: readonly BoardComment[],
+  founderUserId: string | null,
+  ownCommentIds: ReadonlySet<string>,
+): Map<string, string> {
+  const posted = new Map<string, string>();
+  const sorted = [...comments].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  for (const comment of sorted) {
+    if (ownCommentIds.has(comment.id)) continue;
+    const command = parseCommand(comment.body);
+    if (command?.kind !== 'posted' || !command.lead_id) continue;
+    if (!commandAllowed(command, comment, founderUserId, ownCommentIds)) continue;
+    if (!posted.has(command.lead_id)) posted.set(command.lead_id, command.url);
+  }
+  return posted;
 }
