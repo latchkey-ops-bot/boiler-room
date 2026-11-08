@@ -262,6 +262,25 @@ describe('syncAgents', () => {
   });
 });
 
+describe('the roster', () => {
+  it('syncs the Researcher and the whole production crew, each name once', () => {
+    expect(agents.map((agent) => agent.name)).toEqual([
+      'br-researcher',
+      'br-director',
+      'br-art-director',
+      'br-quality-check',
+    ]);
+  });
+
+  it('exports every definition from the package entry', async () => {
+    const entry = await import('../src/index.ts');
+    expect(entry.agents).toBe(agents);
+    for (const name of ['researcher', 'director', 'artDirector', 'qualityCheck'] as const) {
+      expect(agents).toContain(entry[name]);
+    }
+  });
+});
+
 describe('the agents package', () => {
   function files(dir: string): string[] {
     return readdirSync(dir).flatMap((name) => {
