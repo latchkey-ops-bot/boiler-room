@@ -250,6 +250,28 @@ const TOKEN = new RegExp(
   'giu',
 );
 
+const SCALE_WORDS = [...SCALES.keys()].sort((a, b) => b.length - a.length).join('|');
+const UNIT_OR_CURRENCY_WORDS = [...UNIT_WORDS, ...CURRENCY_WORDS]
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+
+/**
+ * Text that, right after a number, changes what the number states: a percent sign, a multiplier,
+ * a scale, a unit or a currency. "Nova 9" names a product, and "Nova 9%" or "Nova 9 times" does not.
+ */
+const STATES_MORE = new RegExp(
+  `^[\\s-]*(?:%|per[\\s-]?cent\\b|percent\\b|pct\\b|[x×](?![\\p{L}\\p{N}])|times\\b|fold\\b|` +
+    `(?:${SCALE_WORDS})(?![\\p{L}\\p{N}])|(?:${UNIT_OR_CURRENCY_WORDS})(?!\\p{L})|[$€£¥₹₩])`,
+  'iu',
+);
+/** A sign before a number that makes it money or a rank, such as the "$" of "$3M". */
+const MONEY_OR_RANK_BEFORE = /(?:[$€£¥₹₩#]|\bno\.)\s?$/iu;
+
+/** True when the text after a number, `after`, or before it, `before`, would make it a statistic. */
+export function changesNumber(before: string, after: string): boolean {
+  return STATES_MORE.test(spelledToDigits(after, 'strict')) || MONEY_OR_RANK_BEFORE.test(before);
+}
+
 /** What may sit between the bounds of a range. */
 const RANGE_GAP = /^\s*(?:-|–|—|to)\s*$/i;
 

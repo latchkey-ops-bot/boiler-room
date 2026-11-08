@@ -8,7 +8,13 @@ import {
 } from './campaign.ts';
 import { contrastRatio, readableOn } from './contrast.ts';
 import { toFrame } from './frames.ts';
-import { extractNumericTokens, isBacked, isWholeNumber, type NumericToken } from './numbers.ts';
+import {
+  changesNumber,
+  extractNumericTokens,
+  isBacked,
+  isWholeNumber,
+  type NumericToken,
+} from './numbers.ts';
 
 export const ISSUE_CODES = [
   'SCHEMA_INVALID',
@@ -501,7 +507,15 @@ function checkClaims(campaign: Campaign): Issue[] {
   const brandName = brandReadsAsClaim(campaign.brand.name)
     ? undefined
     : wholePhrase(campaign.brand.name);
-  const withoutBrand = (text: string) => (brandName ? text.replace(brandName, ' ') : text);
+  // The name is dropped from copy before numbers are read, so a number in it is not taken for a
+  // statistic. Not where what follows or precedes it would make its number one: "Nova 9" is a name,
+  // and "Nova 9% cheaper", "Nova 9 times faster" and "$3M" are not.
+  const withoutBrand = (text: string) =>
+    brandName
+      ? text.replace(brandName, (match, offset: number) =>
+          changesNumber(text.slice(0, offset), text.slice(offset + match.length)) ? match : ' ',
+        )
+      : text;
   const quotes = new Map(
     campaign.claims.map((claim): [string, Quote] => {
       const text = withoutBrand(claim.quote);

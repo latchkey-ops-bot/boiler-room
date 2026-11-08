@@ -419,6 +419,16 @@ describe('validateCampaign', () => {
         },
       );
 
+      it.each(['Meet Nova 9.', 'Nova 9 is here', 'Try Nova 9 today', 'Nova 9 users love it'])(
+        'still reads a name that ends in a number as a name in "%s"',
+        async (value) => {
+          const campaign = novaCopy();
+          campaign.brand.name = 'Nova 9';
+          at(at(campaign.scenes, 0).text, 0).value = value;
+          expect(await codes(campaign)).toEqual([]);
+        },
+      );
+
       it('does not read a name with digits in a quote', async () => {
         const campaign = novaCopy();
         campaign.brand.name = 'Nova 2';

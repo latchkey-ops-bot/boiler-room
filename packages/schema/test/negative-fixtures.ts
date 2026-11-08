@@ -769,6 +769,78 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a percentage that ends a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9% cheaper';
+    },
+  },
+  {
+    name: 'a multiplier that ends a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 times faster';
+    },
+  },
+  {
+    name: 'a multiplier sign after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9x faster builds';
+    },
+  },
+  {
+    name: 'a scale word after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 million users';
+    },
+  },
+  {
+    name: 'a unit after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 minutes to deploy';
+    },
+  },
+  {
+    name: 'a currency word after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 dollars a seat';
+    },
+  },
+  {
+    name: 'a spelled number ending a brand name, before a multiplier',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova Nine';
+      at(at(c.scenes, 0).text, 0).value = 'Nova Nine times faster';
+    },
+  },
+  {
+    name: 'a currency sign before a brand name that is a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = '3M';
+      at(at(c.scenes, 0).text, 0).value = '$3M in revenue';
+    },
+  },
+  {
     name: 'copy with a number smuggled into scene props',
     code: 'CLAIM_UNBACKED',
     path: 'scenes[0].props.stat',
