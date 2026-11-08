@@ -89,6 +89,26 @@ export interface ImageView {
   zoom: number;
 }
 
+/**
+ * Thrown by `imageView` when an image cannot be shown in this format, such as a page too short for
+ * a scroll. `message` says why and `fix` what to supply instead, and the render gate lists it with
+ * every other image's issue, so one pass names all the captures a film needs. `PROPS_INVALID` is
+ * for a problem in the scene's props, at `propsPath` inside them, rather than in the image.
+ */
+export class ImageUnfit extends Error {
+  readonly code: 'IMAGE_TOO_SMALL' | 'PROPS_INVALID';
+  readonly fix: string;
+  readonly propsPath: string | undefined;
+
+  constructor(code: ImageUnfit['code'], message: string, fix: string, propsPath?: string) {
+    super(message);
+    this.name = 'ImageUnfit';
+    this.code = code;
+    this.fix = fix;
+    this.propsPath = propsPath;
+  }
+}
+
 export interface RoleCount {
   min: number;
   max: number;
@@ -114,6 +134,12 @@ export interface SceneDefinition<Props> {
   /** True when these props need an image that `image: 'optional'` would not, such as a crop. */
   imageNeeded?: (props: Props) => boolean;
   imageView?: (request: ImageViewRequest<Props>) => ImageView;
+  /**
+   * True when the template scrolls each image through a window rather than showing it whole, as
+   * `site-scroll` does. Such an image is a page captured long, cropped from its top to the gate's
+   * aspect limit, and never to one screen, which the gate's advice says.
+   */
+  scrollsImages?: boolean;
   markAnchor: (stage: Stage) => MarkPlacement;
   kind: SceneKind;
   /** The ground the `Stage` draws under the scene, in each skin. */

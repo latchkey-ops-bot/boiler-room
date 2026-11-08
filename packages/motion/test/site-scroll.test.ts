@@ -2,7 +2,7 @@ import type { Campaign } from '@boiler-room/schema';
 import tour from '@boiler-room/schema/examples/nova-tour.campaign.json' with { type: 'json' };
 import { describe, expect, it } from 'vitest';
 import { prepareFilm } from '../src/film/prepare.ts';
-import { filmSeams } from '../src/film/seams.ts';
+import { filmSeams, seamScene } from '../src/film/seams.ts';
 import { validateFilm } from '../src/film/validate-film.ts';
 import { validateForRender } from '../src/film/validate-render.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../src/layout/stage.ts';
@@ -300,20 +300,65 @@ describe('the nova-tour example', () => {
     await expect(rejection).rejects.toThrow(/site-scroll page 2 \(assetIds\[1\], 2880×7000\)/);
   });
 
-  it('refuses a CTA too near the top of page 2 to scroll onto', async () => {
+  it('refuses a CTA too near the top of page 2 to scroll onto, at the props that place it', async () => {
     const campaign = tourCopy();
     at(campaign.scenes, 1).props = { pages: [{}, { ctaBox: { x: 900, y: 300, w: 400, h: 120 } }] };
-    await expect(prepareFilm({ campaign, format: '16:9' }, tourProbe())).rejects.toThrow(
-      /too near the top of the page/,
+    const rejection = prepareFilm({ campaign, format: '16:9' }, tourProbe());
+    await expect(rejection).rejects.toThrow(/PROPS_INVALID at scenes\[1\]\.props\.pages\.1/);
+    await expect(rejection).rejects.toThrow(/too near the top of the page/);
+  });
+
+  it('names both one-screen captures in one refusal, with the length to capture', async () => {
+    // The first real film's tour: one screen of each page, where the fling needs far more.
+    const rejection = prepareFilm(
+      { campaign: tourCopy(), format: '16:9' },
+      tourProbe([2880, 1620], [2880, 1620]),
+    );
+    await expect(rejection).rejects.toThrow(/sizing the scene images found 2 error\(s\)/);
+    await expect(rejection).rejects.toThrow(
+      /IMAGE_TOO_SMALL at assets\.docs-page\.src: site-scroll page 1 .* Capture at least 3124 px of the page, from its top, at 2880 px wide\./,
+    );
+    await expect(rejection).rejects.toThrow(
+      /IMAGE_TOO_SMALL at assets\.integrations-page\.src: site-scroll page 2 /,
     );
   });
 
-  it('refuses a full-page capture past 1:3, as the image gate does for any scene', async () => {
+  it('refuses a full-page capture past 1:3, and says to crop it from the top, not to one screen', async () => {
     const rejection = prepareFilm(
       { campaign: tourCopy(), format: '16:9' },
       tourProbe(undefined, [2880, 9000]),
     );
     await expect(rejection).rejects.toThrow(/IMAGE_WRONG_SHAPE at assets\.integrations-page\.src/);
+    await expect(rejection).rejects.toThrow(
+      /Crop it from the top of the page to at most 8640 px tall, keeping the CTA it lands on inside the crop/,
+    );
+    await expect(rejection).rejects.not.toThrow(/such as one screen of a full-page capture/);
+  });
+
+  it('holds the fling in every format with a page cropped to 1:3', async () => {
+    for (const format of FORMATS) {
+      const plan = await prepareFilm(
+        { campaign: tourCopy(), format },
+        tourProbe([2880, 8640], [2880, 8640]),
+      );
+      expect(at(plan.scenes, 1).images).toHaveLength(2);
+    }
+  });
+
+  it('says what pages to supply when they are missing, and reports no seam beside them', () => {
+    // A dark brand: the scene's ground is the plate whether or not its props parse.
+    const campaign = tourCopy();
+    at(campaign.scenes, 1).props = {};
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({
+        code: 'PROPS_INVALID',
+        path: 'scenes[1].props.pages',
+        message: expect.stringMatching(
+          /needs pages, one entry per page asset, copied from the Researcher's capture data: page 2 with the DOM box of the CTA it lands on in ctaBox, or a targetY/,
+        ),
+      }),
+    ]);
+    expect(seamScene(at(campaign.scenes, 1), campaign).ground).toBe('plate');
   });
 
   it('refuses a page with no landing data before anything renders', () => {

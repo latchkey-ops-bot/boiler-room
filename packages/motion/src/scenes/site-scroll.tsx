@@ -17,7 +17,7 @@ import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
 import { anchorVelocity, arrival, departure, drift } from '../tokens.ts';
 import { SeamLayer } from '../transitions/seam-layer.tsx';
-import { defineScene, type SceneImage } from './definition.ts';
+import { defineScene, ImageUnfit, type SceneImage } from './definition.ts';
 import { heroLayout } from './site-hero.tsx';
 
 /** The motion of the scene file, in spec px and spec frames. */
@@ -68,7 +68,12 @@ const pageSchema = z.strictObject({
 
 const propsSchema = z.strictObject({
   pages: z
-    .array(pageSchema)
+    .array(pageSchema, {
+      error: (issue) =>
+        issue.input === undefined
+          ? "site-scroll needs pages, one entry per page asset, copied from the Researcher's capture data: page 2 with the DOM box of the CTA it lands on in ctaBox, or a targetY. Never invent them."
+          : undefined,
+    })
     .length(2, {
       error: 'site-scroll shows two pages: give one entry per page asset, page 1 then page 2',
     })
@@ -370,6 +375,7 @@ export const siteScroll = defineScene<SiteScrollProps>({
   roles: { label: { min: 0, max: 2 } },
   image: 'required',
   maxImages: 2,
+  scrollsImages: true,
   // Each page fills the frame's width, and only page 2 is pushed. A page too short for its part
   // of the scroll is refused here, before a frame renders: fit or fail.
   imageView: ({ props, stage, image, index, durationInFrames, fps }) => {
@@ -378,26 +384,36 @@ export const siteScroll = defineScene<SiteScrollProps>({
     const drawn = image.height * scale;
     const where = `site-scroll page ${index + 1} (assetIds[${index}], ${sizeOf(image)})`;
     const format = `${stage.width}×${stage.height}`;
+    // One screen of a page is never enough: the fling needs more of it than the frame shows.
+    const capture = (need: number) =>
+      `Capture at least ${Math.ceil(need / scale)} px of the page, from its top, at ${image.width} px wide.`;
     if (index === 0) {
       const start = (props.pages[0]?.targetY ?? 0) * scale;
       const need = start + page1Need(stage);
       if (drawn < need) {
-        throw new Error(
-          `${where} is drawn ${Math.round(drawn)} px tall in a ${format} frame, and its fling needs ${Math.round(need)} px: the frame's height and the ramp's travel below where it starts. Capture at least ${Math.ceil(need / scale)} px of the page.`,
+        throw new ImageUnfit(
+          'IMAGE_TOO_SMALL',
+          `${where} is drawn ${Math.round(drawn)} px tall in a ${format} frame, and its fling needs ${Math.round(need)} px: the frame's height and the ramp's travel below where it starts.`,
+          capture(need),
         );
       }
       return { width: layout.frame.width, zoom: 1 };
     }
     const target = landingY(props.pages[1], scale, stage);
     if (target <= 0) {
-      throw new Error(
-        `${where} lands at ${Math.round(target)} px in a ${format} frame: its CTA is too near the top of the page to scroll onto. Land on a CTA or heading further down the page.`,
+      throw new ImageUnfit(
+        'PROPS_INVALID',
+        `${where} lands at ${Math.round(target)} px in a ${format} frame: its CTA is too near the top of the page to scroll onto.`,
+        'Land on a CTA or heading further down the page: copy its DOM box into ctaBox.',
+        'pages.1',
       );
     }
     const need = target + layout.viewportHeight;
     if (drawn < need) {
-      throw new Error(
-        `${where} is drawn ${Math.round(drawn)} px tall in a ${format} frame, and landing on its CTA shows it down to ${Math.round(need)} px. Capture at least ${Math.ceil(need / scale)} px of the page.`,
+      throw new ImageUnfit(
+        'IMAGE_TOO_SMALL',
+        `${where} is drawn ${Math.round(drawn)} px tall in a ${format} frame, and landing on its CTA shows it down to ${Math.round(need)} px.`,
+        capture(need),
       );
     }
     return { width: layout.frame.width, zoom: pushAt(specFrame(durationInFrames, fps) - 1) };

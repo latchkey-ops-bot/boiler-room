@@ -10,7 +10,7 @@ import { definitionOf } from '../scenes/registry.ts';
 import { isCatalogId, isTransition, TRANSITIONS } from '../transitions/catalog.ts';
 import type { CutSelection } from './cut.ts';
 import { screenImageId } from './media.ts';
-import { filmSeams } from './seams.ts';
+import { filmSeams, propsRefused } from './seams.ts';
 
 export const FILM_ISSUE_CODES = [
   'SCENE_TYPE_UNBUILT',
@@ -183,15 +183,21 @@ function checkTransition(scene: Scene, path: string, isLast: boolean): FilmIssue
  * Every boundary where the resolver plays something other than what was written, with both scene
  * ids, the id written and the id used. A catalog id with no build yet is reported as unbuilt. These
  * are warnings: the resolver's choice always renders.
+ *
+ * A boundary beside a scene whose props its template refuses is not reported. Its velocities and
+ * ground come from those props, so what it would play is not known until they parse, and the
+ * `PROPS_INVALID` error already stops the render.
  */
 function checkSeams(campaign: Campaign): FilmIssue[] {
   if (campaign.scenes.some(({ transitionOut }) => transitionOut && !isCatalogId(transitionOut))) {
     return [];
   }
+  const refused = campaign.scenes.map(propsRefused);
   return filmSeams(campaign).flatMap((seam) => {
     if (seam.reason === 'written' || (seam.reason === 'pinned' && seam.note === undefined)) {
       return [];
     }
+    if (refused[seam.index] || refused[seam.index + 1]) return [];
     const path = `scenes[${seam.index}].transitionOut`;
     const between = `Between "${seam.from}" and "${seam.to}"`;
     const message =

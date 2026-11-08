@@ -21,9 +21,10 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    whether either animates. An animated GIF, APNG, WebP, AVIF or SVG plays on the browser's clock,
    not the film's, so a scene image that animates, or whose bytes its host will not let be read, is
    refused, and such a logo is replaced by the wordmark. A scene image outside 1:3 to 4:1, such
-   as a full-page capture, or one the scene would enlarge more than 1.5 times by its last frame in
-   this format, is refused with the size to supply instead. A `site-hero` needs a capture at device
-   scale 2, as its scene file says;
+   as an uncropped full-page capture, or one the scene would enlarge more than 1.5 times by its
+   last frame in this format, is refused with the size to supply instead. So is a page too short
+   for a `site-scroll`. Every image is checked, so one refusal names every capture to replace. A
+   `site-hero` needs a capture at device scale 2, as its scene file says;
 6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
@@ -103,7 +104,7 @@ lists, and `validateFilm` checks the counts.
 | `logo-reveal`  | optional `subhead`, the tagline                                               | `mode`: mask, blur, tiles, iris  | none, shows the logo            |
 | `site-hero`    | optional `label`, the URL in the address bar                                  | `frame: 'browser'`, `focus`      | 1 captured page, device scale 2 |
 | `type-card`    | `headline` on up to 2 lines, optional `subhead`                               | `variant`: name, pivot; `accent` | none                            |
-| `site-scroll`  | up to 2 `label`s, each page's URL in the address bar                          | `pages`, one per page            | 2 full-page captures            |
+| `site-scroll`  | up to 2 `label`s, each page's URL in the address bar                          | `pages`, one per page            | 2 full-page crops, to 1:3       |
 | `proof-bars`   | `headline`; 1 to 3 `label`s, one number each; optional `subhead`, the verdict | `accent`                         | none                            |
 | `stat-counter` | `headline`, the cited number; `label`, what it counts                         | `countUp: false`, `accent`       | none                            |
 | `feature-card` | `headline`, up to 2 `label`s, the cause and effect                            | `demo`, `accent`                 | 0 to 2 crops, else chips        |
@@ -123,8 +124,11 @@ page in 3D, which the determinism check has shown makes a frame depend on render
 blur and light sweep are not built either.
 
 `site-scroll` is the one template that needs props: `pages` gives each page's start and page 2's
-landing, as its CTA's `ctaBox` from the capture or a `targetY`. A page too short for its part of
-the fling is refused in `calculateMetadata`. The gate checks one image, not two, so a
+landing, as its CTA's `ctaBox` from the capture or a `targetY`. They are capture data, so a scene
+without them is refused, saying what the Researcher must supply. Each page is a full-page capture
+cropped from its top to at most three times as tall as it is wide, which holds page 1's fling in
+every format, and never cropped to one screen. A page too short for its part of the fling is refused in
+`calculateMetadata`, with the length to capture. The gate checks one image, not two, so a
 `site-scroll` with one page stops at render time. It checks that a `tile-wall` has one captured
 tile, not six: the Director writes the row as a `feature-card` when the site gives fewer.
 
@@ -156,7 +160,9 @@ resolver's fallbacks. The resolver in `src/transitions/resolve.ts` picks each bo
 first (into a pivot `type-card` is the T5 chapter blink), then the written id if it is legal for
 the boundary and built, else T1 where both anchors move on one axis and sign within 1.5x, else
 T3. `validateFilm` reports every boundary where the id played is not the one written, with both
-scene ids, as a `TRANSITION_RESOLVED` or `TRANSITION_UNBUILT` warning. T6 and T7, the optional
+scene ids, as a `TRANSITION_RESOLVED` or `TRANSITION_UNBUILT` warning. It reports no boundary
+beside a scene whose props its template refuses: what plays there depends on those props, and the
+`PROPS_INVALID` error already stops the render. T6 and T7, the optional
 showpieces into `colour-event`, are not built, so those boundaries are resolved to T3.
 
 ## Building a scene
