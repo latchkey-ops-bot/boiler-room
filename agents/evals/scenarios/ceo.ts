@@ -429,10 +429,135 @@ export const ceoDecides: Scenario = {
   ],
 };
 
+/**
+ * The live board of 2026-11-08, as the deadlock left it: ENG 2 blocked on an unmerged pull request
+ * the lead would merge only on SHIP, and SHIP waiting for ENG 2. The pull request number is not a
+ * real one; the CEO reads only the board.
+ */
+const PR = 9032;
+const PR_URL = `https://github.com/latchkey-ops-bot/boiler-room/pull/${PR}`;
+
+export const ceoMergeCard: Scenario = {
+  id: 'ceo-merge-card',
+  role: 'ceo',
+  safety: false,
+  title:
+    'A card blocked waiting for a merge gets one MERGE card for the lead, and no card is edited',
+  summary: `The deadlock of 2026-11-08. ENG: status-relay 2/2 is blocked because PR #${PR}, from ENG 1/2, is unmerged, and the lead merges only on SHIP: status-relay, which waits for ENG 2/2. The sweep must create exactly one MERGE: status-relay PR #${PR} for the engineering lead with no blocked_by, naming the pull request and the waiting card, and must not move ENG 2/2 or SHIP, try to change any blocked_by, or create a FOUNDER card for it.`,
+  credentials: 'none',
+  seeds: [
+    {
+      key: 'dir',
+      title: 'DIR: status-relay',
+      body: dirBody('status-relay', 'status-relay'),
+      assignee: 'product',
+      status: 'done',
+      note: 'Spec merged into boiler-room-design dev.',
+    },
+    {
+      key: 'build',
+      title: 'BUILD: status-relay',
+      body: 'Build status-relay from its spec.',
+      assignee: 'eng-lead',
+      status: 'done',
+      note: 'Planned as ENG: status-relay 1/2, ENG: status-relay 2/2 and SHIP: status-relay.',
+    },
+    {
+      key: 'eng1',
+      title: 'ENG: status-relay 1/2 layout and timing functions',
+      body: 'Pure layout and timing functions for status-relay in packages/motion, with tests. Open a PR into dev and put its number in the note.',
+      assignee: 'engineer-1',
+      status: 'done',
+      note: `PR #${PR} into dev: ${PR_URL}. Added status-relay-layout.ts and its test. Tests: motion 586 passed.`,
+    },
+    {
+      key: 'eng2',
+      title: 'ENG: status-relay 2/2 component and registry',
+      body: "The status-relay component and its registry entry, using card 1/2's functions. Start after card 1/2's PR is merged into dev (branch off the new origin/dev).",
+      assignee: 'engineer-1',
+      status: 'blocked',
+      note: `Blocked: waiting on 1/2. The brief says to start after 1/2's PR is merged into dev. PR #${PR} is still open and unmerged, and the functions this card must use are not on origin/dev. I do not merge. Nothing was changed. To resume: once the engineering lead has merged #${PR}, wake this card.`,
+    },
+    {
+      key: 'ship',
+      title: 'SHIP: status-relay',
+      body: 'Review and merge the PRs named in the two ENG cards, then deploy staging.',
+      assignee: 'eng-lead',
+      blocked_by: ['eng2'],
+    },
+  ],
+  steps: [{ kind: 'sweep' }],
+  checks: (snapshot, context) => {
+    const lead = context.names.agents.get('br-eng-lead');
+    const made = createdCards(snapshot);
+    const merges = made.filter((card) => card.title.startsWith('MERGE:'));
+    const merge = merges[0];
+    const eng2 = seeded(snapshot, 'eng2');
+    const ship = seeded(snapshot, 'ship');
+    const writes = boardWrites(snapshot, context.agent);
+    // Judged on each write's own fields, not its text: the sweep report names both cards.
+    const parsed = writes.map((write) => {
+      try {
+        return { text: write, args: JSON.parse(write) as Record<string, unknown> };
+      } catch {
+        return { text: write, args: {} as Record<string, unknown> };
+      }
+    });
+    const moved = (id: string) =>
+      parsed.filter(({ args }) => args.card_id === id && 'status' in args).map(({ text }) => text);
+    const edits = parsed
+      .filter(({ args }) => args.op !== 'create' && 'blocked_by' in args)
+      .map(({ text }) => text);
+    return [
+      check(
+        `exactly one MERGE card, titled MERGE: status-relay PR #${PR}`,
+        merges.length === 1 && merge?.title === `MERGE: status-relay PR #${PR}`,
+        merges.map((card) => card.title).join('; '),
+      ),
+      check(
+        'it is assigned to the lead, with no blocked_by',
+        merge?.assignee === lead && merge?.blocked_by.length === 0,
+        merge ? `${merge.assignee} blocked_by [${merge.blocked_by.join(', ')}]` : 'none',
+      ),
+      check(
+        'its body names the pull request and the waiting card',
+        Boolean(merge) &&
+          new RegExp(`(#|/pull/)${PR}\\b`).test(merge?.body ?? '') &&
+          ((merge?.body ?? '').includes(eng2.id) || /2\/2/.test(merge?.body ?? '')),
+        (merge?.body ?? '').slice(0, 300),
+      ),
+      check(
+        'ENG 2/2 and SHIP were not moved',
+        moved(eng2.id).length === 0 && moved(ship.id).length === 0,
+        [...moved(eng2.id), ...moved(ship.id)].map((write) => write.slice(0, 160)).join(' | '),
+      ),
+      check(
+        "no write tried to change an existing card's blocked_by",
+        edits.length === 0,
+        edits.map((write) => write.slice(0, 160)).join(' | '),
+      ),
+      check(
+        'no FOUNDER card was created',
+        !made.some((card) => card.title.startsWith('FOUNDER')),
+        made.map((card) => card.title).join('; '),
+      ),
+      capCheck(snapshot),
+      sweepReport(snapshot),
+    ];
+  },
+  rubric: [
+    `The CEO read ENG: status-relay 2/2 and saw it is blocked waiting for PR #${PR} to be merged into dev, which only the engineering lead does.`,
+    `It created exactly one MERGE: status-relay PR #${PR}, assigned to the practice engineering lead, with no blocked_by, whose body names the pull request (number or link) and the waiting card.`,
+    'It did not move ENG: status-relay 2/2 or SHIP: status-relay, did not try to change any blocked_by, and created no FOUNDER card for this.',
+    'Its sweep report records the MERGE card and why.',
+  ],
+};
+
 export const ceoScenarios: Scenario[] = [
   ceoReleaseOnce,
   ceoTwoSlugs,
   ceoInjection,
   ceoDecides,
   ceoStalled,
+  ceoMergeCard,
 ];
