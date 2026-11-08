@@ -13,11 +13,14 @@ import {
   families,
   genericOf,
   isSystemFamily,
+  keepDownloadable,
   parseFontFaces,
   pickFace,
   type ResolvedFont,
   resolveFonts,
   SUBSTITUTES,
+  type SubstituteReason,
+  sniffFont,
   substituteCssUrl,
 } from './fonts.ts';
 import { type LogoSource, pngSize, rankLogos, sniff, wordmarkSvg } from './logo.ts';
@@ -653,6 +656,12 @@ export async function discover(base: string, url: string, script: string): Promi
   }
 }
 
+/**
+ * Each role's font and the file it loads. Every file the result names is downloaded once and its
+ * bytes checked: a source resolved against the wrong base, or a file the site no longer serves,
+ * answers 404 or an HTML page, and a renderer would silently fall back to another font. Such a role
+ * tries the family's other files, then gets a substitute with the reason recorded.
+ */
 async function resolveBrandFonts(
   request: APIRequestContext,
   raw: RawPage,
@@ -671,10 +680,28 @@ async function resolveBrandFonts(
     if (css && css.status < 400) faces.push(...parseFontFaces(css.body.toString('utf8'), href));
   }
   const resolved = resolveFonts(fonts, faces, host);
+
+  const checked = new Map<string, { ok: boolean; status: number | null }>();
+  const downloads = async (url: string) => {
+    let known = checked.get(url);
+    if (!known) {
+      const fetched = await fetchResource(request, url, 8_000_000, sameSite(url, site));
+      known = {
+        ok: Boolean(fetched && fetched.status < 400 && sniffFont(fetched.body)),
+        status: fetched?.status ?? null,
+      };
+      checked.set(url, known);
+    }
+    return known;
+  };
+  notes.push(...(await keepDownloadable(resolved, faces, host, downloads)));
+
   for (const font of resolved) {
     if (font.method !== 'system') continue;
     const stack = fonts.uses.find((use) => use.role === font.role)?.stack ?? '';
     const named = families(stack).find((name) => !isSystemFamily(name));
+    const reason: SubstituteReason =
+      font.reason ?? (fonts.declared === false ? 'browser-default' : named ? 'no-file' : 'system');
     for (const family of [named, SUBSTITUTES[font.role === 'mono' ? 'mono' : genericOf(stack)]]) {
       if (!family) continue;
       const cssUrl = substituteCssUrl(family, [font.weight]);
@@ -684,15 +711,23 @@ async function resolveBrandFonts(
           ? pickFace(parseFontFaces(css.body.toString('utf8'), cssUrl), family, font.weight)
           : undefined;
       if (face) {
+        const own = family === named;
         Object.assign(font, {
-          siteFamily: family === named ? null : stack || null,
+          siteFamily: own
+            ? null
+            : reason === 'system' || reason === 'browser-default'
+              ? stack || null
+              : (named ?? null),
           family,
-          method: family === named ? 'google-fonts' : 'substitute',
+          method: own ? 'google-fonts' : 'substitute',
           url: face.url,
+          reason: own ? undefined : reason,
         });
-        if (family === named)
+        if (own)
           notes.push(
-            `${font.role}: the site names ${family} but loads no file for it; the Google Fonts file is used.`,
+            reason === 'unreachable'
+              ? `${font.role}: the site's file for ${family} could not be downloaded; the Google Fonts file is used.`
+              : `${font.role}: the site names ${family} but loads no file for it; the Google Fonts file is used.`,
           );
         break;
       }
@@ -704,6 +739,7 @@ async function resolveBrandFonts(
       Object.assign(font, {
         method: 'substitute',
         siteFamily: stack || null,
+        reason,
         url: substituteCssUrl(font.family, [font.weight]),
       });
     }
@@ -719,6 +755,7 @@ async function downloadLogo(
   name: string,
   display: string,
   color: string,
+  generic: 'serif' | 'sans-serif' | 'monospace',
 ): Promise<CaptureManifest['brand']['logo']> {
   for (const ranked of rankLogos(raw.logos).slice(0, 8)) {
     const { candidate } = ranked;
@@ -772,7 +809,7 @@ async function downloadLogo(
     };
   }
   log('  no logo, inline logo or favicon could be downloaded; writing a wordmark of the name');
-  const svg = wordmarkSvg(name, display, color);
+  const svg = wordmarkSvg(name, display, color, generic);
   writeFileSync(join(paths.out, 'logo.svg'), svg);
   const width = Number(/width="(\d+)"/.exec(svg)?.[1] ?? 0) || null;
   return { source: 'generated', file: 'logo.svg', url: null, kind: 'svg', width, height: 96 };
@@ -929,7 +966,22 @@ export async function capture(
       'sans-serif';
     const wordmarkColor =
       contrast(colors.primary, colors.background) >= 3 ? colors.primary : colors.foreground;
-    const logo = await downloadLogo(request, paths, raw, site, name, display, wordmarkColor);
+    const displayStack =
+      raw.fonts?.uses.find((use) => use.role === 'display')?.stack ??
+      raw.fonts?.uses.find((use) => use.role === 'body')?.stack ??
+      '';
+    const kind = genericOf(`${displayStack}, ${display}`);
+    const generic = kind === 'serif' ? 'serif' : kind === 'mono' ? 'monospace' : 'sans-serif';
+    const logo = await downloadLogo(
+      request,
+      paths,
+      raw,
+      site,
+      name,
+      display,
+      wordmarkColor,
+      generic,
+    );
     await fetchContext.close().catch(() => {});
 
     const material = readMaterial(base);

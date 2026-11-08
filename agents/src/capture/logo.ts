@@ -100,11 +100,17 @@ const escapeXml = (text: string) =>
  * A wordmark set in the brand's own font and colour, used only when the site has no logo at all.
  * It is not a logo design: it is the product's name as text, and the output says it was generated.
  */
-export function wordmarkSvg(name: string, family: string, color: string): string {
+export function wordmarkSvg(
+  name: string,
+  family: string,
+  color: string,
+  generic: 'serif' | 'sans-serif' | 'monospace' = 'sans-serif',
+): string {
   const width = Math.max(120, Math.round(name.length * 34 + 40));
+  // A viewer without the font falls back to the same kind of face, so a serif brand stays serif.
   return [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="96" viewBox="0 0 ${width} 96">`,
-    `<text x="20" y="64" font-family="${escapeXml(family)}, sans-serif" font-size="56" font-weight="700" fill="${color}">${escapeXml(name)}</text>`,
+    `<text x="20" y="64" font-family="${escapeXml(family)}, ${generic}" font-size="56" font-weight="700" fill="${color}">${escapeXml(name)}</text>`,
     '</svg>',
   ].join('');
 }

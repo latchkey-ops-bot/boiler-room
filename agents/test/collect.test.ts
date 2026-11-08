@@ -190,4 +190,39 @@ describe('collectPage in Chromium', () => {
     expect(colors).toMatchObject({ primary: '#242424', radius: 999 });
     await page.close();
   });
+
+  it('records the stylesheet each font face is in, and whether the site sets any font', async (context) => {
+    if (!browser) return context.skip();
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    const css = `${ORIGIN}/_site/_next/static/css/app.css`;
+    await page.route(`${ORIGIN}/**`, (route) => {
+      const url = route.request().url();
+      if (url === css)
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/css',
+          body: '@font-face { font-family: Brand Sans; src: url("../media/brand.woff2") format("woff2"); } body { font-family: Brand Sans, sans-serif; }',
+        });
+      if (url.endsWith('/plain'))
+        return route.fulfill({
+          status: 200,
+          contentType: 'text/html',
+          body: '<p>Plain text, no styles at all, long enough to count as a paragraph.</p>',
+        });
+      if (url.endsWith('.woff2')) return route.fulfill({ status: 404, body: '' });
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/html',
+        body: `<link rel="stylesheet" href="${css}"><h1>Hello</h1><p>Body text that is long enough to be the paragraph we measure.</p>`,
+      });
+    });
+    await page.goto(`${ORIGIN}/`);
+    const styled = await page.evaluate(collectPage, { withStyles: true, withLogos: false });
+    expect(styled.fonts?.faces[0]).toMatchObject({ family: 'Brand Sans', base: css });
+    expect(styled.fonts?.declared).toBe(true);
+    await page.goto(`${ORIGIN}/plain`);
+    const plain = await page.evaluate(collectPage, { withStyles: true, withLogos: false });
+    expect(plain.fonts?.declared).toBe(false);
+    await page.close();
+  });
 });

@@ -595,30 +595,37 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     const bodyStyle = styleOf(paragraph ?? body);
     const faces: RawFontFace[] = [];
     const unreadable: string[] = [];
-    const readRules = (rules: CSSRuleList) => {
+    let declared = document.querySelector('[style*="font"]') !== null;
+    // A relative url() in a stylesheet is relative to that stylesheet, so each face keeps it.
+    const readRules = (rules: CSSRuleList, base: string) => {
       for (const rule of Array.from(rules)) {
         if (rule instanceof CSSFontFaceRule) {
           faces.push({
             family: rule.style.getPropertyValue('font-family').replace(/^["']|["']$/g, ''),
             src: rule.style.getPropertyValue('src'),
+            base,
             weight: rule.style.getPropertyValue('font-weight') || '400',
             style: rule.style.getPropertyValue('font-style') || 'normal',
             unicodeRange: rule.style.getPropertyValue('unicode-range'),
           });
         } else if (rule instanceof CSSImportRule && rule.styleSheet) {
           try {
-            readRules(rule.styleSheet.cssRules);
+            readRules(rule.styleSheet.cssRules, rule.styleSheet.href ?? base);
           } catch {
             if (rule.styleSheet.href) unreadable.push(rule.styleSheet.href);
           }
+        } else if (rule instanceof CSSStyleRule) {
+          if (rule.style.getPropertyValue('font-family') || rule.style.getPropertyValue('font'))
+            declared = true;
+          if (rule.cssRules?.length) readRules(rule.cssRules, base);
         } else if ('cssRules' in rule) {
-          readRules((rule as CSSGroupingRule).cssRules);
+          readRules((rule as CSSGroupingRule).cssRules, base);
         }
       }
     };
     for (const sheet of Array.from(document.styleSheets)) {
       try {
-        readRules(sheet.cssRules);
+        readRules(sheet.cssRules, sheet.href ?? location.href);
       } catch {
         if (sheet.href) unreadable.push(sheet.href);
       }
@@ -649,6 +656,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         .filter(Boolean),
       faces: faces.slice(0, 200),
       unreadable: [...new Set(unreadable)].slice(0, 20),
+      declared: declared || unreadable.length > 0,
     };
   }
 

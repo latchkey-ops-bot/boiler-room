@@ -114,4 +114,11 @@ describe('wordmarkSvg', () => {
     expect(svg).toContain('Ben &amp; Jo’s &lt;Lab&gt;');
     expect(sniff(bytes(svg))).toBe('svg');
   });
+
+  // A serif site's wordmark fell back to a sans face wherever its font was missing.
+  it('falls back to the same kind of face as the brand font', () => {
+    expect(wordmarkSvg('notes', 'Source Serif 4', '#000000', 'serif')).toContain(
+      'font-family="Source Serif 4, serif"',
+    );
+  });
 });

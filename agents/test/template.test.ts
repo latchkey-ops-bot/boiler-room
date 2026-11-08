@@ -192,6 +192,51 @@ describe('buildTemplate', () => {
     ]);
   });
 
+  // Only code text was a stand-in, and the request claimed the whole site used device fonts.
+  it('asks for fonts only when headings or body text use a stand-in, and says why', () => {
+    const monoOnly = manifest();
+    monoOnly.brand.fonts = [
+      {
+        role: 'display',
+        family: 'Brand Sans',
+        weight: 700,
+        method: 'self-hosted',
+        url: 'https://orbitly.example.org/_next/static/media/brand.woff2',
+        siteFamily: null,
+      },
+      {
+        role: 'mono',
+        family: 'JetBrains Mono',
+        weight: 400,
+        method: 'substitute',
+        url: 'https://fonts.gstatic.com/s/jbm.woff2',
+        siteFamily: 'ui-monospace, Menlo, monospace',
+        reason: 'system',
+      },
+    ];
+    expect(buildTemplate(monoOnly).needs_upload.map((need) => need.id)).not.toContain(
+      'brand-fonts',
+    );
+
+    const broken = manifest();
+    broken.brand.fonts = [
+      {
+        role: 'display',
+        family: 'Inter',
+        weight: 700,
+        method: 'substitute',
+        url: 'https://fonts.gstatic.com/s/inter/v20/a.woff2',
+        siteFamily: 'Brand Sans',
+        reason: 'unreachable',
+        failed: { url: 'https://orbitly.example.org/media/brand.woff2', status: 404 },
+      },
+    ];
+    const need = buildTemplate(broken).needs_upload.find((item) => item.id === 'brand-fonts');
+    expect(need?.what).toContain('could not be downloaded (HTTP 404)');
+    expect(need?.what).not.toContain('device');
+    expect(need?.request).toContain('font files');
+  });
+
   it('asks for product UI behind a login as a blocking request', () => {
     const noUi = manifest();
     const home = noUi.pages[0];

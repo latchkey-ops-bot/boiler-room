@@ -54,6 +54,8 @@ export interface RawFontUse {
 export interface RawFontFace {
   family: string;
   src: string;
+  /** The stylesheet the rule is in. Its relative `url()`s resolve against this, not the page. */
+  base?: string;
   weight: string;
   style: string;
   unicodeRange: string;
@@ -66,6 +68,11 @@ export interface RawFonts {
   faces: RawFontFace[];
   /** Stylesheets whose rules the page may not read, fetched by the tool instead. */
   unreadable: string[];
+  /**
+   * Whether any style the page could read sets a font. False means the text is in the browser's
+   * default font, which is no choice of the site's.
+   */
+  declared?: boolean;
 }
 
 export interface RawLogoCandidate {

@@ -1,6 +1,6 @@
 import type { NeedUpload, ResearchOutput } from '../researcher/output.ts';
 import { NAIVE_FILE_PREFIX } from '../researcher/output.ts';
-import type { ResolvedFont } from './fonts.ts';
+import { describeSubstitute, type ResolvedFont } from './fonts.ts';
 import type { LogoSource } from './logo.ts';
 import type { LinkKind, ProbeResult } from './pages.ts';
 import type { DerivedColors } from './tokens.ts';
@@ -112,13 +112,22 @@ function needs(manifest: CaptureManifest, status: string): NeedUpload[] {
       evidence_url: manifest.site,
     });
   }
-  if (manifest.brand.fonts.some((font) => font.method === 'substitute')) {
+  // Only the fonts a film sets its words in. A stand-in for code text alone is not worth a request.
+  const standIns = manifest.brand.fonts.filter(
+    (font) => font.method === 'substitute' && font.role !== 'mono',
+  );
+  if (standIns.length > 0) {
+    const files = standIns.some(
+      (font) => font.reason === 'unreachable' || font.reason === 'no-file',
+    );
     list.push({
       id: 'brand-fonts',
       kind: 'font',
-      what: 'The brand typefaces. The site uses fonts built into the visitor’s device, so an open font stands in.',
+      what: `The brand typefaces. ${standIns.map(describeSubstitute).join(' ')}`,
       why: 'The film will use the stand-in font, which may not match how the brand is set elsewhere.',
-      request: 'If you have brand fonts, please send the font files or tell us their names.',
+      request: files
+        ? 'Please send the font files the site uses (woff2, woff, ttf or otf), or tell us where to download them.'
+        : 'If you have brand fonts, please send the font files or tell us their names.',
       blocking: false,
       evidence_url: manifest.site,
     });
@@ -245,12 +254,7 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
       css_variables: colors.cssVariables,
       notes: [
         ...colors.notes,
-        ...brand.fonts
-          .filter((item) => item.method === 'substitute')
-          .map(
-            (item) =>
-              `${item.role} text uses ${item.siteFamily ?? 'system fonts'} on the site, which loads no font file, so ${item.family} stands in.`,
-          ),
+        ...brand.fonts.filter((item) => item.method === 'substitute').map(describeSubstitute),
         ...(display ? [] : ['No heading was found, so the display font is the body font.']),
       ],
     },
