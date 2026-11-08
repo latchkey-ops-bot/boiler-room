@@ -25,10 +25,10 @@ import {
 } from './fonts.ts';
 import { type LogoSource, pngSize, rankLogos, sniff, wordmarkSvg } from './logo.ts';
 import {
+  brandNameGuess,
   buildTemplate,
   type CapturedPage,
   type CaptureManifest,
-  guessBrandName,
   type MaterialEntry,
   PEOPLE_PAGES,
   type PublishItem,
@@ -1105,7 +1105,18 @@ export async function capture(
     const { fonts, notes: fontNotes } = await resolveBrandFonts(request, raw, site);
     colors.notes.push(...fontNotes);
     const logoAlt = raw.logos.find((logo) => logo.alt)?.alt ?? '';
-    const name = guessBrandName(raw.meta, raw.title, new URL(site).hostname, logoAlt);
+    const guess = brandNameGuess(
+      raw.meta,
+      raw.title,
+      new URL(site).hostname,
+      logoAlt,
+      raw.text.rendered,
+    );
+    const name = guess.name;
+    if (guess.source === 'domain')
+      colors.notes.push(
+        `The site never writes its name, and has no title or site name: "${name}" is the domain's name, as the domain writes it.`,
+      );
     const display =
       fonts.find((font) => font.role === 'display')?.family ??
       fonts.find((font) => font.role === 'body')?.family ??

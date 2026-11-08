@@ -341,18 +341,24 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
   };
 }
 
+export type BrandNameSource = 'declared' | 'title' | 'logo' | 'text' | 'domain';
+
 /**
- * A first guess at the product's name: the site name the page declares, else the part of the title
- * that matches the domain, else the shortest part of the title, else the domain itself.
+ * A first guess at the product's name, and where it came from: the site name the page declares,
+ * else the part of the title that matches the domain, else the logo's alt text, else the shortest
+ * part of the title, else the domain's name as the page text writes it, else the domain's name as
+ * the domain writes it. A name is never recased: a site that only ever writes its name in lower
+ * case keeps it.
  */
-export function guessBrandName(
+export function brandNameGuess(
   meta: Record<string, string>,
   title: string,
   host: string,
   logoAlt = '',
-): string {
+  text = '',
+): { name: string; source: BrandNameSource } {
   const declared = (meta['og:site_name'] ?? meta['application-name'] ?? '').trim();
-  if (declared && declared.length <= 40) return declared;
+  if (declared && declared.length <= 40) return { name: declared, source: 'declared' };
   const label = host.replace(/^www\./, '').split('.')[0] ?? host;
   const segments = title
     .split(/\s+[|–—·:-]\s+/)
@@ -361,10 +367,26 @@ export function guessBrandName(
   const matching = segments.find((part) =>
     part.toLowerCase().replace(/\s+/g, '').includes(label.toLowerCase()),
   );
-  if (matching) return matching;
+  if (matching) return { name: matching, source: 'title' };
   const alt = logoAlt.replace(/\blogo\b/gi, '').trim();
-  if (alt && alt.length <= 40) return alt;
+  if (alt && alt.length <= 40) return { name: alt, source: 'logo' };
   const shortest = [...segments].sort((a, b) => a.length - b.length)[0];
-  if (shortest && shortest.length <= 30) return shortest;
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  if (shortest && shortest.length <= 30) return { name: shortest, source: 'title' };
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const written = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').exec(
+    text,
+  )?.[0];
+  if (written) return { name: written, source: 'text' };
+  return { name: label, source: 'domain' };
+}
+
+/** The name `brandNameGuess` gives. */
+export function guessBrandName(
+  meta: Record<string, string>,
+  title: string,
+  host: string,
+  logoAlt = '',
+  text = '',
+): string {
+  return brandNameGuess(meta, title, host, logoAlt, text).name;
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { buildTemplate, type CaptureManifest, guessBrandName } from '../src/capture/manifest.ts';
+import {
+  brandNameGuess,
+  buildTemplate,
+  type CaptureManifest,
+  guessBrandName,
+} from '../src/capture/manifest.ts';
 import { checkResearch } from '../src/researcher/gate.ts';
 import { bundle, SITE } from './fixtures.ts';
 
@@ -347,8 +352,18 @@ describe('guessBrandName', () => {
       'Acme logo',
       'Acme',
     ],
-    [{}, '', 'zq.example', '', 'Zq'],
   ])('%j %s %s', (meta, title, host, alt, expected) => {
     expect(guessBrandName(meta, title, host, alt)).toBe(expected);
+  });
+
+  // A site with no title and no site name was called "Danluu"-style, capitalised from its domain,
+  // although it only ever writes its name in lower case.
+  it('never recases a name taken from the domain, and says where it came from', () => {
+    expect(brandNameGuess({}, '', 'zq.example')).toEqual({ name: 'zq', source: 'domain' });
+    expect(brandNameGuess({}, '', 'www.zq.example', '', 'Posts by ZQ, since 2013.')).toEqual({
+      name: 'ZQ',
+      source: 'text',
+    });
+    expect(brandNameGuess({}, '', 'zq.example', '', 'The zqx project').source).toBe('domain');
   });
 });

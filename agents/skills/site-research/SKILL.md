@@ -26,6 +26,10 @@ It refuses more than 15 page loads per site, never loads sign-in pages, honours 
 never clicks or types. If a job fails, read the error, fix the cause (usually a wrong address) and
 start it again. Do not loop on the same failing command more than twice.
 
+If the capture summary lists pages that failed or read no text, run the capture command it gives
+for them once: each may be loaded once more. A page it reports as the same page as another is
+already captured under the other address; cite that one.
+
 ## Choosing pages (at most 15 in total, home included)
 
 Take the home page, then one each of pricing, the main product or features page, the docs landing
@@ -47,7 +51,10 @@ A claim is a statement the film may make. Extract 12 to 40, the ones a launch fi
 Each claim has:
 
 - `id`: a short lowercase slug, unique, such as `home-headline` or `price-team-plan`
-- `text`: the claim in your own plain words, with no number the quote does not state
+- `text`: the claim in your own plain words, saying what the quote says and nothing more: no
+  number the quote does not state, and no meaning it does not state either. A link in a list is
+  not a "featured" item, and a link named "Archive" is not "an archive of older posts" unless the
+  page says so.
 - `sourceUrl`: the captured page the quote is on, exactly as listed in the capture summary, or a
   customer material URL
 - `quote`: copied from the page text file, character for character. Copy a whole sentence or a
@@ -71,15 +78,20 @@ appear inside a mockup.
   write must be stated by a cited claim's quote.
 - `pricing`: plans with prices as written on the site, each citing its claim; `null` when the site
   publishes no pricing.
-- `ctas`: calls to action, with the label exactly as on the page and the page it is on. The
-  template lists the ones the tool saw; keep the real ones, drop cookie buttons and duplicates.
+- `ctas`: calls to action, with the label exactly as on the page and the page it is on: buttons
+  that ask the viewer to do something (sign up, start, book a demo, contact sales). Menus, tabs,
+  search boxes and documentation links are navigation, not calls to action. The template lists the
+  drawn buttons the tool saw; keep the real ones, drop cookie buttons and duplicates.
 - `headline_claim_id`: the claim quoting the home page headline.
 - `positioning_note`: how the live site differs from any description you were given, else `null`.
 - `conflicts`: places where the site contradicts itself, such as two different prices for one plan.
-- `pages`: every page you read, with its kind and screenshot asset.
+- `pages`: every page you read, with its kind and screenshot asset, and its title exactly as the
+  template has it. An empty title means the page has none; never make one up.
 - `product_ui`: `public` when a real product screen or a live demo is public, `mock-only` when the
   site only shows illustrated mockups, `login-required` when the product sits behind sign-in, else
-  `none`. Say in `notes` what was seen.
+  `none`. Say in `notes` what was seen. `asset_ids` lists only shots that show the product: look at
+  the template's list with `view_image` and drop any shot of a person, another company's logo, a
+  form, a video player or a decoration.
 
 ## needs_upload
 
@@ -92,13 +104,17 @@ act on it without context. The template proposes some; check them against what y
 - A product video that is only embedded: ask for the source file.
 - Figures that need a source before a film repeats them.
 
-Set `blocking: true` only when the film cannot be made well without the item.
+Never ask the customer for text or pages the site shows publicly: if a page failed to capture,
+capture it again. Name only pages the capture summary lists. Set `blocking: true` only when the
+film cannot be made well without the item.
 
 ## Brand
 
 The template's brand comes from computed styles on the home page and is already valid. Keep it
 unless a summary note says the measurement is doubtful. Fix the brand name if the guess is wrong:
-use the product's name as the site writes it. If you change a colour, it must still be a colour
+use the product's name as the site writes it, with the site's own capitalisation. When a note says
+the name came from the domain, keep it as the domain writes it unless the page text writes it
+otherwise, and say so in `brand_details.notes`. If you change a colour, it must still be a colour
 the site uses, the foreground must keep 4.5:1 contrast on the background and the primary 3:1.
 
 ## Assets and evidence
