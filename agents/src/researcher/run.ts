@@ -95,7 +95,16 @@ export class EventTracker {
   readonly foreign = new Map<string, string>();
   /** Accepted submit_output calls, so a new submission can be told from the session's last one. */
   submissions = 0;
+  /**
+   * The latest accepted submission, read from the `structured_output` of the `session.idle` event
+   * that ends its turn. `sessions.get` can still answer the previous turn's `structured_output` just
+   * after a turn ends, so the result is never read from there. The accepted call's arguments stand
+   * in only until that event arrives, for a stream that dropped before it.
+   */
+  output: unknown = undefined;
   private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
+  /** The arguments of each submit_output call, by tool call id, until it completes. */
+  private readonly submitted = new Map<string, unknown>();
   private readonly host: string;
 
   /** `site` is the address this run researches. */
@@ -110,9 +119,18 @@ export class EventTracker {
         name: String(data.name),
         args: (data.args as Record<string, unknown>) ?? {},
       });
+      if (data.name === 'submit_output') this.submitted.set(String(data.tool_call_id), data.args);
+    }
+    if (event.type === 'session.idle') {
+      if (this.submissions > 0 && data.structured_output != null)
+        this.output = data.structured_output;
+      return;
     }
     if (event.type !== 'tool.completed' || data.is_error) return;
-    if (data.name === 'submit_output') this.submissions += 1;
+    if (data.name === 'submit_output') {
+      this.submissions += 1;
+      this.output = this.submitted.get(String(data.tool_call_id)) ?? this.output;
+    }
     const output =
       typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
     for (const match of output.matchAll(CAPTURE_LINE)) {
@@ -127,6 +145,78 @@ export class EventTracker {
       const path = this.started.get(String(data.tool_call_id))?.args.path;
       if (id && typeof path === 'string') this.published.set(id, path);
     }
+  }
+}
+
+/** The part of the Naive client a turn is followed with, so a test can hand it a fake. */
+export type TurnClient = Pick<Naive, 'sessions' | 'stream'>;
+
+/** One event of a session's stream. */
+export interface StreamEvent {
+  seq: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface SettleOptions {
+  /** The last event already read. */
+  afterSeq: number;
+  /** When the session is interrupted, in milliseconds since the epoch. */
+  deadline: number;
+  /** The session's time limit, named when the deadline interrupts it. */
+  limitMinutes: number;
+  /** Every event, after the tracker has read it. */
+  onEvent?: (event: StreamEvent) => void;
+  sleep?: (ms: number) => Promise<unknown>;
+}
+
+export interface Turn {
+  /**
+   * The session as `sessions.get` answers once it has stopped working. Its `structured_output` can
+   * still be the previous turn's, so it is never read for the result.
+   */
+  state: Awaited<ReturnType<Naive['sessions']['get']>>;
+  afterSeq: number;
+  /** The latest accepted submission, from the turn's events: what the gate checks. */
+  output: unknown;
+}
+
+/**
+ * Streams a session until it has stopped working, feeding every event to the tracker. One stream
+ * ends at each idle, and a session can go straight on into another turn: a wrap-up after the
+ * iteration limit, or a message that was queued while it ran.
+ */
+export async function settleTurn(
+  client: TurnClient,
+  sessionId: string,
+  tracker: EventTracker,
+  options: SettleOptions,
+): Promise<Turn> {
+  const wait = options.sleep ?? sleep;
+  let afterSeq = options.afterSeq;
+  for (;;) {
+    const timer = setTimeout(
+      () => {
+        say(`time limit of ${options.limitMinutes} minutes reached; interrupting`);
+        client.sessions.interrupt(sessionId).catch(() => {});
+      },
+      Math.max(1000, options.deadline - Date.now()),
+    );
+    try {
+      for await (const event of client.stream(sessionId, { afterSeq })) {
+        afterSeq = event.seq;
+        const record = event as unknown as StreamEvent;
+        tracker.handle(record);
+        options.onEvent?.(record);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    const state = await client.sessions.get(sessionId);
+    const working = state.status === 'running' || state.status === 'queued';
+    if (!working || Date.now() > options.deadline)
+      return { state, afterSeq, output: tracker.output };
+    await wait(1000);
   }
 }
 
@@ -729,43 +819,26 @@ export async function research(options: ResearchOptions): Promise<number> {
     let accepted: ResearchOutput | undefined;
     let verdict: GateVerdict | undefined;
 
-    // Streams until the session has stopped working. One stream ends at each idle, and a session
-    // can go straight on into another turn: a wrap-up after the iteration limit, or a message that
-    // was queued while it ran.
-    const settle = async () => {
-      for (;;) {
-        const timer = setTimeout(
-          () => {
-            say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
-            client.sessions.interrupt(session.id).catch(() => {});
-          },
-          Math.max(1000, deadline - Date.now()),
-        );
-        try {
-          for await (const event of client.stream(session.id, { afterSeq })) {
-            afterSeq = event.seq;
-            const record = event as unknown as { type: string; data: Record<string, unknown> };
-            tracker.handle(record);
-            if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-              appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
-            const line = describe(record);
-            if (line) say(line);
-          }
-        } finally {
-          clearTimeout(timer);
-        }
-        const state = await client.sessions.get(session.id);
-        const working = state.status === 'running' || state.status === 'queued';
-        if (!working || Date.now() > deadline) return state;
-        await sleep(1000);
-      }
+    const onEvent = (event: StreamEvent) => {
+      if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+        appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
+      const line = describe(event);
+      if (line) say(line);
     };
 
     for (;;) {
-      const state = await settle();
+      const turn = await settleTurn(client, session.id, tracker, {
+        afterSeq,
+        deadline,
+        limitMinutes: definition.session.max_minutes,
+        onEvent,
+      });
+      afterSeq = turn.afterSeq;
+      const { state, output } = turn;
       // A turn can end on the iteration limit right after submitting, and a session keeps its last
-      // result, so only a submit_output seen since the last gate counts as a new submission.
-      const fresh = tracker.submissions > gated && Boolean(state.structured_output);
+      // result, so only a submit_output seen since the last gate counts as a new submission. The
+      // result is the one the turn's events carry: sessions.get can still answer the previous one.
+      const fresh = tracker.submissions > gated && output != null;
       if (!fresh) {
         // A turn that hits the iteration limit gets a wrap-up and ends as end_turn, with the work
         // unfinished. Nudge it on; stop only on a reason a nudge cannot fix.
@@ -790,7 +863,7 @@ export async function research(options: ResearchOptions): Promise<number> {
       round += 1;
       verdict = await gate(
         client,
-        state.structured_output,
+        output,
         tracker,
         materialIds,
         options.drillRepair && round === 1,
@@ -798,7 +871,7 @@ export async function research(options: ResearchOptions): Promise<number> {
       rounds.push({ round, failures: verdict.failures });
       writeFileSync(
         join(outDir, `submission-${round}.json`),
-        `${JSON.stringify(state.structured_output, null, 1)}\n`,
+        `${JSON.stringify(output, null, 1)}\n`,
       );
       if (verdict.failures.length === 0) {
         accepted =
