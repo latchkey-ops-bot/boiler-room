@@ -19,9 +19,12 @@ describe('@boiler-room/schema', () => {
         'extractNumericTokens',
         'readableOn',
         'sceneRegistry',
+        'researchPartsSchema',
         'sceneFrames',
         'toFrame',
+        'unbackedNumbers',
         'validateCampaign',
+        'validateResearchParts',
       ].sort(),
     );
   });

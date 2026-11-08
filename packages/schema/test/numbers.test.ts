@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractNumericTokens, isBacked } from '../src/numbers.ts';
+import { unbackedNumbers } from '../src/validate.ts';
 
 const backed = (text: string, quote: string) => {
   const tokens = extractNumericTokens(text);
@@ -432,5 +433,35 @@ describe('isBacked', () => {
     ['cents against dollars', '99 cents', 'only $99'],
   ])('rejects %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(false);
+  });
+});
+
+describe('unbackedNumbers', () => {
+  const raws = (copy: string, quotes: string[], brandName?: string) =>
+    unbackedNumbers(copy, quotes, { brandName }).map(({ raw }) => raw);
+
+  it('backs a figure only by a quote that states the same value and kind', () => {
+    expect(raws('Teams is $12 per user a month', ['Teams $12/user/month billed yearly'])).toEqual(
+      [],
+    );
+    expect(raws('Teams is $12 per user a month', ['Teams 12 seats'])).toEqual(['$12']);
+    expect(raws('Basic costs $10', ['Basic $110 per user/month'])).toEqual(['$10']);
+    expect(raws('A 14 day free trial', ['*14 day free trial'])).toEqual([]);
+  });
+
+  it('reads the copy strictly, so a spelled-out figure needs backing too', () => {
+    expect(raws('Cuts review time in half', ['Ship faster'])).toEqual(['50%']);
+    expect(raws('Two teams on the free plan', ['Free $0 2 teams 250 issues'])).toEqual([]);
+    expect(raws('Ten teams on the free plan', ['Free $0 2 teams'])).toEqual(['10']);
+  });
+
+  it('leaves the brand name out unless the name reads as a statistic', () => {
+    expect(raws('1Password keeps secrets', [], '1Password')).toEqual([]);
+    expect(raws('1Password keeps secrets', [])).toEqual(['1']);
+    expect(raws('100% Pure is a cosmetics brand', [], '100% Pure')).toEqual(['100%']);
+  });
+
+  it('states nothing when the copy has no figure', () => {
+    expect(raws('Linear plans and builds products', [])).toEqual([]);
   });
 });

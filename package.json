@@ -12,6 +12,8 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
+    "agents:sync": "pnpm --filter @boiler-room/agents sync",
+    "research": "pnpm --filter @boiler-room/agents research",
     "web:dev": "pnpm --filter @boiler-room/web dev",
     "web:preview": "pnpm --filter @boiler-room/web preview",
     "web:build": "pnpm --filter @boiler-room/web build:worker",
