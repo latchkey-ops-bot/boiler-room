@@ -2,7 +2,7 @@ import { GTM_LEAD, INBOX_READER, SCOUT, SOCIAL_AGENT } from '../definitions/comp
 import { onBoard } from '../definitions/company/gtm.ts';
 import { company, DEPLOY_KEYS, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
-import { CLOUDFLARE_KEYS, cloudflareTokenActive, DEPLOY_ENV_FILE } from './cloudflare.ts';
+import { cloudflareTokenActive, DEPLOY_ENV_FILE, deployEnvKeys } from './cloudflare.ts';
 import { liveCatalogue, unnamedOn } from './control-plane.ts';
 import { GITHUB_OWNER, otherRepo, REPO_OF } from './github.ts';
 import { OTHER_REPO_REACH_ACCEPTED } from './preflight.ts';
@@ -206,9 +206,15 @@ export const DEPLOY_KEYS_STEPS = [
 
 /**
  * Judges one computer's `~/.boiler-room.env`. A computer `DEPLOY_KEYS` names must have it, with mode
- * 600 and exactly the Cloudflare keys. Every other one must not have it at all.
+ * 600 and exactly the keys `company:sync` writes there (`expected`, from `deployEnvKeys`: the
+ * Cloudflare keys and the Clerk publishable keys). Every other one must not have it at all.
  */
-export function judgeDeployKeys(wanted: boolean, stat: string, names: string): VerifyVerdict {
+export function judgeDeployKeys(
+  wanted: boolean,
+  stat: string,
+  names: string,
+  expected: readonly string[],
+): VerifyVerdict {
   const failures: string[] = [];
   const present = !/^absent$/.test(stat.trim());
   if (!wanted) {
@@ -221,10 +227,10 @@ export function judgeDeployKeys(wanted: boolean, stat: string, names: string): V
   if (!present) return { ok: false, failures: [`~/${DEPLOY_ENV_FILE} is missing`] };
   if (!/^mode 600\b/.test(stat.trim())) failures.push(`~/${DEPLOY_ENV_FILE} is not mode 600`);
   const found = names.trim().split(/\s+/).filter(Boolean).sort();
-  const expected = [...CLOUDFLARE_KEYS].sort();
-  if (found.join(',') !== expected.join(',')) {
+  const want = [...expected].sort();
+  if (found.join(',') !== want.join(',')) {
     failures.push(
-      `~/${DEPLOY_ENV_FILE} holds ${found.join(', ') || 'nothing'}, not exactly ${expected.join(', ')}`,
+      `~/${DEPLOY_ENV_FILE} holds ${found.join(', ') || 'nothing'}, not exactly ${want.join(', ')}`,
     );
   }
   return { ok: failures.length === 0, failures };
@@ -242,17 +248,26 @@ export interface DeployKeysVerify {
 /**
  * `pnpm company:verify`, the Cloudflare part: Cloudflare says the token is active (checked from
  * this machine), the engineering lead's computer has `~/.boiler-room.env` with mode 600 and exactly
- * the two keys, and no other computer with a token has the file. It reads with shell commands that
- * hold only the path, and starts no session, so it costs no model spend.
+ * the keys `company:sync` writes from the founder's file now (`deployEnvKeys`), and no other
+ * computer with a token has the file. It reads with shell commands that hold only the path, and
+ * starts no session, so it costs no model spend.
  */
 export async function verifyDeployKeys(
   client: Naive,
   active: () => Promise<boolean | null> = () => cloudflareTokenActive(),
+  keys: () => readonly string[] = () => deployEnvKeys(),
 ): Promise<{
   token_active: boolean | null;
   computers: DeployKeysVerify[];
   verdict: VerifyVerdict;
 }> {
+  const failures: string[] = [];
+  let expected: readonly string[] = [];
+  try {
+    expected = keys();
+  } catch (error) {
+    failures.push(error instanceof Error ? error.message : String(error));
+  }
   const existing = await listAll((query) => client.agents.list(query));
   const computers: DeployKeysVerify[] = [];
   for (const name of Object.keys(NETRC)) {
@@ -266,7 +281,7 @@ export async function verifyDeployKeys(
         computer: null,
         stat: 'absent',
         names: '',
-        verdict: judgeDeployKeys(wanted, 'absent', ''),
+        verdict: judgeDeployKeys(wanted, 'absent', '', expected),
       });
       continue;
     }
@@ -282,12 +297,14 @@ export async function verifyDeployKeys(
       computer: `${computer.id} ${computer.status}`,
       stat,
       names,
-      verdict: judgeDeployKeys(wanted, stat, names),
+      verdict: judgeDeployKeys(wanted, stat, names, expected),
     });
   }
   const tokenActive = await active();
-  const failures = computers.flatMap((item) =>
-    item.verdict.failures.map((failure) => `${item.agent}: ${failure}`),
+  failures.push(
+    ...computers.flatMap((item) =>
+      item.verdict.failures.map((failure) => `${item.agent}: ${failure}`),
+    ),
   );
   if (tokenActive !== true) {
     failures.push(

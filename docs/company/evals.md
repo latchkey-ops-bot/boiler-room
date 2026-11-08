@@ -290,8 +290,8 @@ Other facts the runs established:
 ## Limits
 
 - **No staging deploy runs.** Cloudflare keys are never placed on a clone, so `lead-ship` stops at
-  the deploy step with `credential missing`. The real lead's deploy would stop at the build anyway
-  until `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` is placed (PR 23, known gaps).
+  the deploy step with `credential missing`. The real lead's file also holds staging's Clerk
+  publishable key, which the build needs; no eval has run that build.
 - **Merges land on a practice base.** The lead's merges in `lead-ship` and `lead-merge` go into
   `eval/<run>-dev`, not `dev`. Each card says its base stands in for `dev`.
 - **Sweeps fired by hand since 14:43 UTC.** With `--manual-sweep` the CEO starts from

@@ -32,10 +32,11 @@ the slot. It is empty in every environment until the founder's film exists; set 
 
 1. **The keys.** The scripts read `~/.boiler-room.env` (or the file named by `BR_ENV_FILE`). On
    `br-eng-lead`'s computer, `pnpm company:sync` writes it with mode 600, holding
-   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and nothing else; no other agent's computer
-   has it. Check it exists with `test -f ~/.boiler-room.env && echo present`. Never print it, `cat`
+   `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the Clerk publishable keys the build needs
+   (`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, and `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` once the
+   founder has set it), and nothing else; no other agent's computer has it. Check it exists with `test -f ~/.boiler-room.env && echo present`. Never print it, `cat`
    it, `grep` it or copy a value out of it. If it is missing, or a script stops because a key is
-   missing from it (the build needs `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, for one), move your card to
+   missing from it, move your card to
    `blocked` with the note `credential missing` and the key's name.
 2. **Long steps.** A `bash` call is killed after about 30 seconds. A build and deploy takes about 3
    minutes. Put every long step in a script file and run it in the background, then poll the log:

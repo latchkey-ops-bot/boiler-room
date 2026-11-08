@@ -1026,26 +1026,53 @@ describe('the sweep deployment', () => {
 });
 
 describe('judging the Cloudflare keys on a computer', () => {
-  const names = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN ';
+  const names = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ';
+  const expected = [
+    'CLOUDFLARE_API_TOKEN',
+    'CLOUDFLARE_ACCOUNT_ID',
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+  ];
 
-  it('passes the lead with mode 600 and exactly the two keys', () => {
-    expect(judgeDeployKeys(true, 'mode 600 size 211', names)).toEqual({ ok: true, failures: [] });
+  it('passes the lead with mode 600 and exactly the keys sync writes', () => {
+    expect(judgeDeployKeys(true, 'mode 600 size 211', names, expected)).toEqual({
+      ok: true,
+      failures: [],
+    });
   });
 
-  it('fails the lead with no file, a loose mode, or other keys', () => {
-    expect(judgeDeployKeys(true, 'absent', '').failures).toEqual(['~/.boiler-room.env is missing']);
-    expect(judgeDeployKeys(true, 'mode 644 size 211', names).failures).toEqual([
+  it('fails the lead with no file, a loose mode, other keys, or a missing one', () => {
+    expect(judgeDeployKeys(true, 'absent', '', expected).failures).toEqual([
+      '~/.boiler-room.env is missing',
+    ]);
+    expect(judgeDeployKeys(true, 'mode 644 size 211', names, expected).failures).toEqual([
       '~/.boiler-room.env is not mode 600',
     ]);
     expect(
-      judgeDeployKeys(true, 'mode 600 size 300', `${names}CLERK_SECRET_KEY`).failures.join(),
-    ).toMatch(/not exactly CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN/);
-    expect(judgeDeployKeys(true, 'mode 600 size 40', 'CLOUDFLARE_API_TOKEN').ok).toBe(false);
+      judgeDeployKeys(
+        true,
+        'mode 600 size 300',
+        `${names}CLERK_SECRET_KEY`,
+        expected,
+      ).failures.join(),
+    ).toMatch(
+      /not exactly CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$/,
+    );
+    expect(judgeDeployKeys(true, 'mode 600 size 40', 'CLOUDFLARE_API_TOKEN', expected).ok).toBe(
+      false,
+    );
+    expect(
+      judgeDeployKeys(
+        true,
+        'mode 600 size 150',
+        'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN',
+        expected,
+      ).ok,
+    ).toBe(false);
   });
 
   it('passes any other computer only without the file', () => {
-    expect(judgeDeployKeys(false, 'absent', '')).toEqual({ ok: true, failures: [] });
-    expect(judgeDeployKeys(false, 'mode 600 size 211', names).failures).toEqual([
+    expect(judgeDeployKeys(false, 'absent', '', expected)).toEqual({ ok: true, failures: [] });
+    expect(judgeDeployKeys(false, 'mode 600 size 211', names, expected).failures).toEqual([
       '~/.boiler-room.env is there, and only br-eng-lead may hold it',
     ]);
   });

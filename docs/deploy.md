@@ -82,16 +82,23 @@ back by itself when its smoke check fails. Provisioning and secrets never take a
 founder's, at a terminal. No environment variable skips the guard.
 
 **On the engineering lead's computer:** `pnpm company:sync` writes `~/.boiler-room.env` with mode
-600, holding `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and nothing else, through Naive's
-file write, like the GitHub token in `~/.netrc`. No other agent's computer gets it, and
-`pnpm company:verify` checks both. No Clerk key is placed there. The build inlines the publishable
-key, which is public by design: `STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` or
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for staging, `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for
-production. Until the one an environment needs is on the lead's computer, the lead's deploy of that
-environment stops at the build, and its card goes to `blocked`: `credential missing` on a `SHIP`
-card, `production not provisioned` on a `RELEASE` card. Placing it is a change to what
-`company:sync` writes (`deployEnvFile` in `agents/src/company/cloudflare.ts`) and to what
-`company:verify` accepts (`judgeDeployKeys` in `agents/src/company/verify.ts`), with their tests.
+600 through Naive's file write, like the GitHub token in `~/.netrc`. It holds the Cloudflare keys
+and the Clerk publishable keys the build inlines, which are public by design, and nothing else
+(`deployEnvEntries` in `agents/src/company/cloudflare.ts`):
+
+- `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, for staging: the founder's
+  `STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` when it is set, else `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+  the value the scripts take for staging. Sync stops if neither is set;
+- `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, only when the founder's file has it. Until then
+  the lead's production build stops, and its `RELEASE` card goes to `blocked` with
+  `production not provisioned`. Run `pnpm company:sync` after setting it (step 1 of "First
+  production release") to place it.
+
+No Clerk secret key is placed there: the Worker's secrets are the founder's, through
+`pnpm web:secrets:sync:<env>`. No other agent's computer gets the file. `pnpm company:verify`
+checks that only the lead has it, and that it holds exactly the keys sync would write from the
+founder's file now, so a key added to the founder's file and not yet synced shows as a failure.
 
 ## Working on it locally
 
@@ -169,7 +176,8 @@ asked. None of them takes `--release-card`:
 
 1. **Keys.** In `~/.boiler-room.env`, set `PRODUCTION_CLERK_SECRET_KEY` and
    `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to the development instance's keys, the same
-   values as the unscoped ones. Production reads only the `PRODUCTION_` names.
+   values as the unscoped ones. Production reads only the `PRODUCTION_` names. Then run
+   `pnpm company:sync`, which places the publishable one on the lead's computer.
 2. `pnpm web:provision:production` creates D1 `boiler-room-production` and R2
    `boiler-room-films-production` and writes the database id into `wrangler.jsonc`, which goes to
    `dev` by pull request. Done on 2026-11-08 by the main session (pull request #33).
@@ -183,7 +191,8 @@ production command by hand. The first `RELEASE` card merges `dev` into `main`, a
 migration added since step 4 with `--release-card`, and deploys production with
 `pnpm web:deploy:production --release-card <crd_ id>`, which smoke-checks the live URL and rolls
 back by itself on a failure. Its build needs `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` on the
-lead's computer (see "Credentials"); without it the card goes to `blocked` with
+lead's computer, which `company:sync` places from step 1 (see "Credentials"); without it the card
+goes to `blocked` with
 `production not provisioned`, and the merge into `main` stands.
 
 ## Rolling back

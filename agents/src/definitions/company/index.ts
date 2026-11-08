@@ -32,8 +32,8 @@ export const NETRC: Readonly<Record<string, TokenName>> = {
 };
 
 /**
- * The computers that get the Cloudflare keys, in `~/.boiler-room.env` with mode 600, where the
- * deploy scripts read them (`ENV_FILE` in apps/web/scripts/lib/env.mjs). Only the lead deploys, so
+ * The computers that get the Cloudflare keys (and the Clerk publishable keys the build inlines), in
+ * `~/.boiler-room.env` with mode 600, where the deploy scripts read them (`ENV_FILE` in apps/web/scripts/lib/env.mjs). Only the lead deploys, so
  * only the lead's computer has them. Every other computer with a token must not have the file, and
  * `company:sync` and `company:verify` check that it does not.
  */

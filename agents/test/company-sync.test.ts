@@ -15,6 +15,7 @@ const env = await vi.hoisted(async () => {
   const cloudflare = {
     token: 'fake-cloudflare-token_for_tests_000000001',
     account: '0123456789abcdef0123456789abcdef',
+    publishable: 'pk_test_ZmFrZS1jbGVyay5hY2NvdW50cy5kZXYk',
   };
   writeFileSync(
     file,
@@ -24,6 +25,7 @@ const env = await vi.hoisted(async () => {
       `CLOUDFLARE_API_TOKEN=${cloudflare.token}`,
       `CLOUDFLARE_ACCOUNT_ID=${cloudflare.account}`,
       'CLERK_SECRET_KEY=fake_clerk_secret_never_placed',
+      `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${cloudflare.publishable}`,
       '',
     ].join('\n'),
   );
@@ -45,7 +47,7 @@ const {
 } = await import('../src/company/preflight.ts');
 const { deployKeysOn, ensureComputer, placeDeployKeys, placeFile, placeNetrc, syncCompany } =
   await import('../src/company/sync.ts');
-const { CLOUDFLARE_KEYS, cloudflareTokenActive, deployEnvFile } = await import(
+const { CLOUDFLARE_KEYS, cloudflareTokenActive, deployEnvFile, deployEnvKeys } = await import(
   '../src/company/cloudflare.ts'
 );
 const { DEPLOY_KEYS_STEPS, verifyDeployKeys } = await import('../src/company/verify.ts');
@@ -399,7 +401,7 @@ describe('syncCompany', () => {
     expect(lines).toContain('deploy    absent br-engineer-1 ~/.boiler-room.env');
     expect(lines).toContainEqual(
       expect.stringMatching(
-        /^deploy {4}written br-eng-lead ~\/\.boiler-room\.env \(CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID\) on cmp_agt_br-eng-lead \(existing\) naive:naive 600$/,
+        /^deploy {4}written br-eng-lead ~\/\.boiler-room\.env \(CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY\) on cmp_agt_br-eng-lead \(existing\) naive:naive 600$/,
       ),
     );
   });
@@ -759,7 +761,7 @@ describe('the GitHub preflight', () => {
 });
 
 describe('the Cloudflare keys', () => {
-  it('writes exactly the two Cloudflare keys, by file write only, to ~/.boiler-room.env', async () => {
+  it('writes the two Cloudflare keys and the publishable key, by file write only, to ~/.boiler-room.env', async () => {
     const fake = fakeClient();
     const result = await placeDeployKeys(fake.naive, 'agt_x', definitionOf('br-eng-lead'));
     expect(result).toMatchObject({
@@ -775,9 +777,12 @@ describe('the Cloudflare keys', () => {
         .split('\n')
         .filter((line) => line && !line.startsWith('#'))
         .map((line) => line.split('=')[0]),
-    ).toEqual([...CLOUDFLARE_KEYS]);
+    ).toEqual([...CLOUDFLARE_KEYS, 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY']);
     expect(write.content).toContain(`CLOUDFLARE_API_TOKEN=${env.cloudflare.token}\n`);
-    expect(write.content).not.toMatch(/CLERK|GITHUB|NAIVE/);
+    expect(write.content).toContain(
+      `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${env.cloudflare.publishable}\n`,
+    );
+    expect(write.content).not.toMatch(/CLERK_SECRET|fake_clerk_secret|GITHUB|NAIVE/);
     for (const command of fake.execs) {
       expect(command).not.toContain(env.cloudflare.token);
       expect(command).not.toContain(env.cloudflare.account);
@@ -799,6 +804,93 @@ describe('the Cloudflare keys', () => {
     const read = (name: string) =>
       name === 'CLOUDFLARE_ACCOUNT_ID' ? 'not hex' : env.cloudflare.token;
     expect(() => deployEnvFile(read)).toThrow(/^CLOUDFLARE_ACCOUNT_ID has an unexpected format\.$/);
+    const secretAsPublishable = fileOf({
+      STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'sk_test_abc',
+    });
+    expect(() => deployEnvFile(secretAsPublishable)).toThrow(
+      /^STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY has an unexpected format\.$/,
+    );
+  });
+
+  /** A founder's env file with the Cloudflare keys and `extra`, read the way `readSecret` reads. */
+  const fileOf = (extra: Record<string, string>) => {
+    const values: Record<string, string> = {
+      CLOUDFLARE_API_TOKEN: env.cloudflare.token,
+      CLOUDFLARE_ACCOUNT_ID: env.cloudflare.account,
+      CLERK_SECRET_KEY: 'sk_test_never_placed',
+      ...extra,
+    };
+    return (name: string) => {
+      const value = values[name];
+      if (!value) throw new Error(`The env file has no ${name}.`);
+      return value;
+    };
+  };
+  const linesOf = (content: string) =>
+    content.split('\n').filter((line) => line && !line.startsWith('#'));
+
+  it("writes staging's publishable key as the deploy scripts read it: STAGING_ first, else the unscoped key", () => {
+    const unscoped = fileOf({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_dW5zY29wZWQk' });
+    expect(linesOf(deployEnvFile(unscoped)).slice(2)).toEqual([
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_dW5zY29wZWQk',
+    ]);
+    const scoped = fileOf({
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_dW5zY29wZWQk',
+      STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_c3RhZ2luZyQ=',
+    });
+    expect(linesOf(deployEnvFile(scoped)).slice(2)).toEqual([
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_c3RhZ2luZyQ=',
+    ]);
+    expect(deployEnvFile(scoped)).not.toContain('sk_test_never_placed');
+  });
+
+  it("writes production's publishable key only when the founder's file has it, under its PRODUCTION_ name", () => {
+    const both = fileOf({
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_dW5zY29wZWQk',
+      PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_cHJvZHVjdGlvbiQ=',
+    });
+    expect(deployEnvKeys(both)).toEqual([
+      ...CLOUDFLARE_KEYS,
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+      'PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    ]);
+    expect(deployEnvFile(both)).toContain(
+      'PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_cHJvZHVjdGlvbiQ=\n',
+    );
+    expect(
+      deployEnvKeys(fileOf({ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_dW5zY29wZWQk' })),
+    ).toEqual([...CLOUDFLARE_KEYS, 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY']);
+  });
+
+  it('refuses to write a file without the publishable key the staging build needs', () => {
+    expect(() => deployEnvFile(fileOf({}))).toThrow(
+      /^NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing from the env file/,
+    );
+  });
+
+  it("gives the deploy scripts the values they take for each environment from the founder's file", async () => {
+    // The web app's script library has no type declarations, so it is imported by a path TS does not resolve.
+    const library: string = new URL('../../apps/web/scripts/lib/env.mjs', import.meta.url).href;
+    const { parseEnvFile, valueFor } = (await import(library)) as {
+      parseEnvFile: (text: string) => Map<string, string>;
+      valueFor: (vars: Map<string, string>, name: string, env?: string) => string | null;
+    };
+    const placed = parseEnvFile(
+      deployEnvFile(
+        fileOf({
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_dW5zY29wZWQk',
+          STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_c3RhZ2luZyQ=',
+          PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_live_cHJvZHVjdGlvbiQ=',
+        }),
+      ),
+    );
+    expect(valueFor(placed, 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'staging')).toBe(
+      'pk_test_c3RhZ2luZyQ=',
+    );
+    expect(valueFor(placed, 'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'production')).toBe(
+      'pk_live_cHJvZHVjdGlvbiQ=',
+    );
+    expect(valueFor(placed, 'CLERK_SECRET_KEY', 'staging')).toBeNull();
   });
 
   it('places a file only in the home folder', async () => {
@@ -880,9 +972,9 @@ describe('company:verify, the Cloudflare part', () => {
     };
     return { naive: client as unknown as Naive, execs };
   }
-  const both = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN ';
+  const both = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ';
 
-  it('passes when only the lead holds the file, with mode 600 and the two keys, and the token is active', async () => {
+  it('passes when only the lead holds the file, with mode 600 and the keys sync writes, and the token is active', async () => {
     const fake = verifyClient({ 'br-eng-lead': { mode: '600', names: both } });
     const result = await verifyDeployKeys(fake.naive, async () => true);
     expect(result.verdict).toEqual({ ok: true, failures: [] });
@@ -919,5 +1011,34 @@ describe('company:verify, the Cloudflare part', () => {
     expect((await verifyDeployKeys(fine.naive, async () => null)).verdict.failures).toEqual([
       'could not tell whether CLOUDFLARE_API_TOKEN is active',
     ]);
+  });
+
+  it("fails a lead file that lacks a publishable key the founder's file now has, so sync is run again", async () => {
+    const old = verifyClient({
+      'br-eng-lead': { mode: '600', names: 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN ' },
+    });
+    expect((await verifyDeployKeys(old.naive, async () => true)).verdict.failures).toEqual([
+      'br-eng-lead: ~/.boiler-room.env holds CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, not exactly CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    ]);
+    const production = verifyClient({
+      'br-eng-lead': { mode: '600', names: `${both}PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` },
+    });
+    const withProduction = () => [
+      ...CLOUDFLARE_KEYS,
+      'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+      'PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+    ];
+    expect(
+      (await verifyDeployKeys(production.naive, async () => true, withProduction)).verdict,
+    ).toEqual({
+      ok: true,
+      failures: [],
+    });
+    const unreadable = () => {
+      throw new Error('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing from the env file.');
+    };
+    expect(
+      (await verifyDeployKeys(production.naive, async () => true, unreadable)).verdict.failures[0],
+    ).toBe('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is missing from the env file.');
   });
 });

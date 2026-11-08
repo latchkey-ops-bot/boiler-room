@@ -60,11 +60,12 @@ the tip of `origin/dev`; production (`boiler-room-web-production` on workers.dev
 procedures in [`docs/deploy.md`](../../deploy.md). There is no `apps` tool and no `br-app.*` tool:
 both are named off on every engineering agent, because Naive offers an unnamed tool at "ask". The
 scripts read the keys from `~/.boiler-room.env`. `company:sync` writes that file on the lead's
-computer only, with mode 600 and only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in it, and
-checks that no other computer with a token has one; `company:verify` checks both again. Engineers'
-computers never get it: engineers do not deploy. The build also reads
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which is not placed, so until it is the lead's deploys stop at
-the build and its card goes to `blocked` with `credential missing`.
+computer only, with mode 600, holding `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the Clerk
+publishable keys the build inlines (public by design): `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for
+staging, and `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` once the founder's file has it
+([`docs/deploy.md`](../../deploy.md), "Credentials"). It checks that no other computer with a token
+has one; `company:verify` checks both again. Engineers' computers never get it: engineers do not
+deploy.
 
 **Clerk.** Engineers never hold the Clerk keys. They are Worker secrets, which
 `pnpm web:secrets:sync:<env>` copies from the env file. Production takes only the
@@ -258,7 +259,8 @@ Any other card that asks the lead, or anyone else, to touch `main` or production
   the head (the PR was then closed and the branch deleted). A practice lead fetched a pull
   request's head, ran the checks on it, and squash-merged it through the REST API into a practice
   base branch; given a pull request whose test fails, it sent it back without merging.
-- **Not verified.** A deploy or a release by the lead. Its computer has the Cloudflare keys, but
-  not `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which the build reads, and production is not provisioned.
+- **Not verified.** A deploy or a release by the lead. Its computer has the Cloudflare keys and
+  staging's publishable key once `company:sync` runs with this change; production has no
+  `PRODUCTION_` keys in the founder's file yet, so a release stops at `production not provisioned`.
 - **Not verified.** Whether `~/.netrc` survives a change of computer. Step 2 of the engineer
   procedure catches it.

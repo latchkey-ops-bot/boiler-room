@@ -3,7 +3,7 @@ import type { AgentDefinition } from '../define.ts';
 import { CEO_SWEEP, company, DEPLOY_KEYS, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive, readSecret } from '../naive/client.ts';
 import { type SyncResult, syncAgents } from '../sync.ts';
-import { CLOUDFLARE_KEYS, DEPLOY_ENV_FILE, deployEnvFile } from './cloudflare.ts';
+import { DEPLOY_ENV_FILE, deployEnvFile, deployEnvKeys } from './cloudflare.ts';
 import {
   bindCeo,
   type CatalogueReport,
@@ -221,8 +221,8 @@ export async function placeNetrc(
 }
 
 /**
- * Writes `~/.boiler-room.env` with the two Cloudflare keys on a computer `DEPLOY_KEYS` names, where
- * the deploy scripts read them.
+ * Writes `~/.boiler-room.env` with the Cloudflare keys and the Clerk publishable keys
+ * (`deployEnvEntries`) on a computer `DEPLOY_KEYS` names, where the deploy scripts read them.
  */
 export async function placeDeployKeys(
   client: Naive,
@@ -381,7 +381,7 @@ export async function syncCompany(
     const result = await placeDeployKeys(client, agent.id, definition);
     deployKeys.placed.push(result);
     log(
-      `deploy    ${result.action} ${name} ~/${result.file} (${CLOUDFLARE_KEYS.join(', ')}) on ${result.computer_id} (${result.computer_action}) ${result.stat}`,
+      `deploy    ${result.action} ${name} ~/${result.file} (${deployEnvKeys().join(', ')}) on ${result.computer_id} (${result.computer_action}) ${result.stat}`,
     );
   }
   for (const name of Object.keys(NETRC).filter((item) => !DEPLOY_KEYS.includes(item))) {
