@@ -15,6 +15,7 @@ import {
 import type { Naive } from './client.ts';
 import { listAll, scrub } from './client.ts';
 import { Aborted, withRetry } from './exec.ts';
+import { RUN_DEADLINE_MS } from './reap.ts';
 
 export interface ComputerRecord {
   id: string;
@@ -39,6 +40,8 @@ export interface PoolOptions {
   /** Called once the pool has decided the run must stop, for example at the cost limit. */
   onStop: (error: Error) => void;
   now?: () => number;
+  /** How long the run may hold computers. Other runs reap a computer older than this. */
+  deadlineMs?: number;
 }
 
 /** How long before a billing block begins the pool stops a run that could not pay for it. */
@@ -56,13 +59,33 @@ export class ComputerPool {
   private readonly now: () => number;
   private readonly client: Naive;
   private readonly options: PoolOptions;
+  private readonly deadline: number;
 
   constructor(client: Naive, options: PoolOptions) {
     this.client = client;
     this.options = options;
     this.now = options.now ?? Date.now;
-    this.watchdog = setInterval(() => this.checkNextBlock(), 5000);
+    this.deadline = this.now() + (options.deadlineMs ?? RUN_DEADLINE_MS);
+    this.watchdog = setInterval(() => {
+      this.checkNextBlock();
+      this.checkDeadline();
+    }, 5000);
     this.watchdog.unref();
+  }
+
+  private pastDeadline(): Aborted | undefined {
+    if (this.now() <= this.deadline) return undefined;
+    const minutes = Math.round((this.options.deadlineMs ?? RUN_DEADLINE_MS) / 60_000);
+    return new Aborted(
+      `The run passed its deadline of ${minutes} min with computers. Later runs reap a computer older than that, so it stops here.`,
+    );
+  }
+
+  /** Stops a run at its deadline, so no live run ever holds a computer another run would reap. */
+  private checkDeadline() {
+    if (this.closed || this.live.size === 0) return;
+    const past = this.pastDeadline();
+    if (past) this.options.onStop(past);
   }
 
   get prefix() {
@@ -106,6 +129,8 @@ export class ComputerPool {
     signal?: AbortSignal,
   ): Promise<ComputerRecord> {
     if (this.closed || signal?.aborted) throw new Aborted();
+    const past = this.pastDeadline();
+    if (past) throw past;
     const at = this.now();
     const firstBlock = (ratePerSecond(size) * (blockEnd(at) - at)) / 1000;
     // Creates in flight count too: two that start together would each see the other missing.

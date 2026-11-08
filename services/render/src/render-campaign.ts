@@ -4,7 +4,6 @@
  * and stitched with Remotion's `combineChunks`. Every computer is destroyed when the run ends, by
  * success, failure or abort, and the run refuses to start when its estimate is over the cost limit.
  */
-import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,6 +28,7 @@ import { type BaseRecord, findBase, fitsBase, RECIPE_HASH } from './naive/base.t
 import { type Naive, naiveClient, scrub } from './naive/client.ts';
 import { Aborted, withRetry } from './naive/exec.ts';
 import { ComputerPool } from './naive/pool.ts';
+import { newRunId, RUN_PREFIX, reapOrphans } from './naive/reap.ts';
 import { FS_WRITE_LIMIT, uploadBytes } from './naive/transfer.ts';
 import { type RenderedChunk, renderChunkOnNaive, type WorkerContext } from './naive/workers.ts';
 import { planQuality, writeQualityArtifacts } from './quality.ts';
@@ -68,6 +68,8 @@ export interface RenderCampaignOptions {
   dryRun?: boolean;
   /** Keep the working folder of chunks and frames, for debugging. */
   keepWork?: boolean;
+  /** Names this run's computers and files. A new one is made when it is not given. */
+  runId?: string;
 }
 
 export interface RenderCampaignResult {
@@ -94,8 +96,6 @@ function defaultOutput(campaignId: string, format: Format, hookId?: string, ctaI
   const base = process.env.INIT_CWD ?? process.cwd();
   return path.resolve(base, 'out', 'renders', name, `${name}.mp4`);
 }
-
-const stamp = () => new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').toLowerCase();
 
 async function ledgerUsd(client: Naive, ids: string[], since: string): Promise<number | null> {
   if (ids.length === 0) return 0;
@@ -183,8 +183,19 @@ export async function renderCampaign(
   let base: BaseRecord | undefined;
   let estimate: CostEstimate | null = null;
   const snapshotMode = options.snapshot ?? 'auto';
+  const runId = options.runId ?? newRunId();
   if (runner === 'naive') {
     client = naiveClient();
+    // What killed runs left behind is reclaimed first, so it is never paid for twice over. A dry
+    // run creates nothing and destroys nothing.
+    if (!options.dryRun) {
+      try {
+        await reapOrphans(client, { log });
+      } catch (error) {
+        if (signal.aborted) throw error;
+        warnings.push(`Could not reap computers left by earlier runs: ${scrub(String(error))}`);
+      }
+    }
     if (snapshotMode === 'auto') {
       try {
         base = await findBase(client, signal);
@@ -226,7 +237,7 @@ export async function renderCampaign(
   );
   const outputBase = output.replace(/\.mp4$/i, '');
   const workDir = await mkdtemp(path.join(os.tmpdir(), 'boiler-room-render-'));
-  const runId = `${stamp()}-${randomUUID().slice(0, 6)}`;
+  if (client) log(`run ${runId}: its computers are named ${RUN_PREFIX}${runId}-*`);
   const pool = client
     ? new ComputerPool(client, { runId, limitUsd, log, onStop: stop })
     : undefined;

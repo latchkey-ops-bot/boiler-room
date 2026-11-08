@@ -1,5 +1,6 @@
 /**
  *   pnpm render <campaign.json> [--format 16:9] [--hook id] [--cta id] [--workers N]
+ *   pnpm render --reap [--run <run id>] [--older-than <minutes>]
  *
  * Renders a campaign on Naive computers and writes the MP4, its manifest and its quality artifacts.
  * Ctrl-C, SIGTERM, SIGHUP, a closed output pipe or a parent that goes away stops the render, and
@@ -10,7 +11,9 @@ import { FilmRejected, type Format } from '@boiler-room/motion';
 import { FORMATS } from '@boiler-room/schema';
 import { CostLimitExceeded } from './cost.ts';
 import { guardRun } from './guard.ts';
+import { naiveClient } from './naive/client.ts';
 import { Aborted } from './naive/exec.ts';
+import { newRunId, REAP_AFTER_MS, reapOrphans } from './naive/reap.ts';
 import {
   DEFAULT_MAX_COST_USD,
   DEFAULT_WORKERS,
@@ -19,6 +22,7 @@ import {
 } from './render-campaign.ts';
 
 const USAGE = `pnpm render <campaign.json> [options]
+pnpm render --reap [--run <run id>] [--older-than <minutes>]
 
   --format 16:9|9:16|1:1    the format to render (16:9)
   --hook <id>               swap this hook in for the first scene
@@ -38,7 +42,12 @@ const USAGE = `pnpm render <campaign.json> [options]
   --dry-run                 validate, bundle and estimate, without creating a computer
   --simulate-chunk-failure <n>
                             destroy chunk n's first computer mid-render, to exercise the retry
-  --keep-work               keep the working folder of chunks and frames`;
+  --keep-work               keep the working folder of chunks and frames
+
+  --reap                    destroy the computers and files of runs killed before they could clean
+                            up: every run older than ${REAP_AFTER_MS / 60_000} min, which no live run can be
+  --run <run id>            with --reap, that one run at any age, as logged at its start
+  --older-than <minutes>    with --reap, runs older than this instead`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -59,6 +68,9 @@ const { values, positionals } = parseArgs({
     'dry-run': { type: 'boolean' },
     'simulate-chunk-failure': { type: 'string' },
     'keep-work': { type: 'boolean' },
+    reap: { type: 'boolean' },
+    run: { type: 'string' },
+    'older-than': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -75,6 +87,17 @@ const whole = (name: string, text: string | undefined, min = 1): number | undefi
     fail(`--${name} must be a whole number of at least ${min}.`);
   return value;
 };
+
+if (values.reap) {
+  const olderThan = whole('older-than', values['older-than']);
+  const reaped = await reapOrphans(naiveClient(), {
+    ...(values.run ? { runId: values.run } : {}),
+    ...(olderThan ? { olderThanMs: olderThan * 60_000 } : {}),
+    log: (line) => console.error(line),
+  });
+  console.log(JSON.stringify(reaped, null, 2));
+  process.exit(0);
+}
 
 if (values.help || positionals.length !== 1) {
   console.error(USAGE);
@@ -95,9 +118,12 @@ const memoryMb = whole('memory-mb', values['memory-mb'], 1024);
 const failChunk = whole('simulate-chunk-failure', values['simulate-chunk-failure']);
 
 const controller = new AbortController();
+const runId = newRunId();
 // From here on, every way the process can be stopped aborts the run, so its computers are destroyed:
 // Ctrl-C, SIGTERM, SIGHUP, a closed stdout or stderr, a parent that goes away, or an uncaught error.
-const guard = guardRun(controller);
+const guard = guardRun(controller, {
+  leaving: `Destroy what is left with: pnpm render --reap --run ${runId}`,
+});
 
 const options: RenderCampaignOptions = {
   campaignFile: positionals[0] as string,
@@ -120,6 +146,7 @@ const options: RenderCampaignOptions = {
   ...(failChunk ? { simulateFailure: { chunk: failChunk - 1 } } : {}),
   dryRun: values['dry-run'] ?? false,
   keepWork: values['keep-work'] ?? false,
+  runId,
   signal: controller.signal,
   log: (line) => guard.log(`[${new Date().toISOString().slice(11, 19)}] ${line}`),
 };

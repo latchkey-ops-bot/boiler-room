@@ -35,6 +35,8 @@ export interface GuardOptions {
   now?: () => number;
   /** How often to check that the parent is still there. */
   parentPollMs?: number;
+  /** What to tell someone who leaves on the third press, about what may be left. */
+  leaving?: string;
 }
 
 export interface Guard {
@@ -83,7 +85,7 @@ export function guardRun(controller: AbortController, options: GuardOptions = {}
       log('Still destroying computers. Press Ctrl-C again to leave without waiting.');
     } else {
       log(
-        'Leaving without confirming. Run `pnpm render --reap --run <run id>` with the run id logged at the start to destroy what is left.',
+        `Leaving without confirming. ${options.leaving ?? 'Run `pnpm render --reap --run <run id>`, with the run id logged at the start, to destroy what is left.'}`,
       );
       proc.exit(130);
     }

@@ -69,6 +69,24 @@ second press says it is still cleaning up; only a third leaves without waiting, 
 closed pipe or lost parent never does. One press reaches the process several times under `pnpm`
 and `tsx`, and those copies count once.
 
+### Orphans
+
+A computer whose run was killed outright (SIGKILL, out of memory, a lost machine) can be destroyed
+by nothing in that run, and Naive has no expiry for a computer, so it would bill a new 10-minute
+block forever. So a run may hold computers for at most 120 minutes (a chunk's commands can take
+about 45 minutes a try, and a chunk has two tries): the pool stops the run there and refuses new
+computers. A computer named `br-render-*` and older than 135 minutes therefore belongs to no live
+run in the org, and every Naive run destroys such computers, and its payload and chunk files,
+before it starts. A dry run destroys nothing.
+
+```sh
+pnpm render --reap                      # every run older than 135 min, now
+pnpm render --reap --run <run id>       # one run at any age, such as one left by a third Ctrl-C
+```
+
+Each run logs its id at the start (`run <id>: its computers are named br-render-<id>-*`), and a
+third Ctrl-C prints the `--reap --run` command for it.
+
 pnpm does not pass a signal on to a script's process: it ends its own child. So `pnpm render`
 runs `tsx` in place of the script's shell (`exec`), with no second `pnpm` in between, and that
 child is the CLI's `tsx`, which passes the signal to the CLI. A supervisor that stops the run by
@@ -232,17 +250,18 @@ is how the retry above was shown.
 
 ## Layout
 
-| Path                                              | Contents                                                                                              |
-| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `src/render-campaign.ts`                          | `renderCampaign()`: the whole run                                                                     |
-| `src/cli.ts`                                      | `pnpm render`, and Ctrl-C                                                                             |
-| `src/gate.ts`                                     | The campaign gate                                                                                     |
-| `src/chunks.ts`                                   | Chunk splitting and seam frames                                                                       |
-| `src/cost.ts`                                     | Rates, billing blocks, the estimate and the limit                                                     |
-| `src/bundle.ts`                                   | The public folder, the bundle and the payload                                                         |
-| `src/jobs.ts`                                     | The one worker job builder, and running the worker here                                               |
-| `worker/render-chunk.ts`                          | The worker each computer runs with plain `node`                                                       |
-| `src/naive/`                                      | The client, streamed commands, the computer pool, transfers, the base snapshot, and the chunk workers |
-| `src/verify.ts`, `src/compare.ts`                 | The film check and the seam check                                                                     |
-| `src/quality.ts`, `src/sheets.ts`, `src/media.ts` | Quality artifacts, sheets, and FFmpeg                                                                 |
-| `src/manifest.ts`                                 | The manifest                                                                                          |
+| Path                                              | Contents                                                                                                          |
+| ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `src/render-campaign.ts`                          | `renderCampaign()`: the whole run                                                                                 |
+| `src/cli.ts`                                      | `pnpm render` and `--reap`                                                                                        |
+| `src/guard.ts`                                    | Every way the CLI can be stopped, turned into the cleanup                                                         |
+| `src/gate.ts`                                     | The campaign gate                                                                                                 |
+| `src/chunks.ts`                                   | Chunk splitting and seam frames                                                                                   |
+| `src/cost.ts`                                     | Rates, billing blocks, the estimate and the limit                                                                 |
+| `src/bundle.ts`                                   | The public folder, the bundle and the payload                                                                     |
+| `src/jobs.ts`                                     | The one worker job builder, and running the worker here                                                           |
+| `worker/render-chunk.ts`                          | The worker each computer runs with plain `node`                                                                   |
+| `src/naive/`                                      | The client, streamed commands, the computer pool, transfers, the base snapshot, the chunk workers, and the reaper |
+| `src/verify.ts`, `src/compare.ts`                 | The film check and the seam check                                                                                 |
+| `src/quality.ts`, `src/sheets.ts`, `src/media.ts` | Quality artifacts, sheets, and FFmpeg                                                                             |
+| `src/manifest.ts`                                 | The manifest                                                                                                      |
