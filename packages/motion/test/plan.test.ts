@@ -119,6 +119,25 @@ describe('prepareFilm', () => {
     await expect(rejection).rejects.toThrow(/CLAIM_UNBACKED at scenes\[1\]\.text\[0\]\.value/);
   });
 
+  it('puts every issue and its fix on the first line, the one remotion still and render print', async () => {
+    const campaign = novaCopy();
+    at(at(campaign.scenes, 1).text, 0).value = '90% faster builds';
+    at(at(campaign.scenes, 0).text, 0).value = 'Builds wait 12 minutes.';
+    const error = await prepareFilm({ campaign, format: '16:9' }, exampleProbe()).catch(
+      (rejected: unknown) => rejected,
+    );
+    if (!(error instanceof FilmRejected)) throw new Error('Expected a FilmRejected.');
+    const [first] = `${error.name}: ${error.message}`.split('\n');
+    const errors = error.issues.filter(({ severity }) => severity === 'error');
+    expect(errors.length).toBeGreaterThan(1);
+    for (const { code, path, fix } of errors) {
+      expect(first).toContain(`${code} at ${path}`);
+      expect(first).toContain(fix);
+    }
+    // A terminal of our own lists them one a line.
+    expect(error.report.split('\n')).toHaveLength(errors.length + 1);
+  });
+
   it('refuses a scene type that has no template yet, by name', async () => {
     const campaign = novaCopy();
     at(campaign.scenes, 1).type = 'stat-counter';
