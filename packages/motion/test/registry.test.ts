@@ -10,12 +10,13 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw five of the scene types in the schema registry, under its names', () => {
+  it('draw six of the scene types in the schema registry, under its names', () => {
     expect(IMPLEMENTED_SCENE_TYPES).toEqual([
       'word-slam',
       'site-hero',
-      'feature-card',
+      'proof-bars',
       'stat-counter',
+      'feature-card',
       'end-card',
     ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
@@ -67,8 +68,8 @@ describe('scene templates', () => {
           },
         ],
       },
-      'feature-card': {
-        kind: 'product',
+      'proof-bars': {
+        kind: 'proof',
         ground: 'base plate',
         anchors: [
           {
@@ -76,6 +77,9 @@ describe('scene templates', () => {
             entry: { axis: 'x', sign: 1, v: 46 },
             exit: { axis: 'x', sign: 1, v: 46 },
           },
+          { id: 'bar-0', entry: undefined, exit: undefined },
+          { id: 'bar-1', entry: undefined, exit: undefined },
+          { id: 'bar-2', entry: undefined, exit: undefined },
         ],
       },
       'stat-counter': {
@@ -84,6 +88,17 @@ describe('scene templates', () => {
         anchors: [
           {
             id: 'number',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
+      'feature-card': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
             entry: { axis: 'x', sign: 1, v: 46 },
             exit: { axis: 'x', sign: 1, v: 46 },
           },

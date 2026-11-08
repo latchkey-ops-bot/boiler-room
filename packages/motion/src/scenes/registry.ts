@@ -2,6 +2,7 @@ import { type SceneRegistry, sceneRegistry } from '@boiler-room/schema';
 import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
+import { proofBars } from './proof-bars.tsx';
 import { siteHero } from './site-hero.tsx';
 import { statCounter } from './stat-counter.tsx';
 import { wordSlam } from './word-slam.tsx';
@@ -15,8 +16,9 @@ import { wordSlam } from './word-slam.tsx';
 export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> = {
   'word-slam': wordSlam,
   'site-hero': siteHero,
-  'feature-card': featureCard,
+  'proof-bars': proofBars,
   'stat-counter': statCounter,
+  'feature-card': featureCard,
   'end-card': endCard,
 };
 
