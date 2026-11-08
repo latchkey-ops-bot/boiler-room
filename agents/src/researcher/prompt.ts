@@ -31,6 +31,12 @@ export interface TaskInput {
   material: readonly MaterialRef[];
   budgetUsd: number;
   description?: string;
+  /** Extra Naive file ids to fetch alongside the capture tool (used by the injection test). */
+  extraFileIds?: readonly string[];
+  /** Extra numbered-step lines inserted after fetch_file and before setup (injection test). */
+  preSteps?: readonly string[];
+  /** This run's own folder on the computer, relative to its home, such as `br/lx1a2b3c4d5e6f`. */
+  runDir: string;
 }
 
 /** The first message of a research session. */
@@ -39,11 +45,12 @@ export function researchTask(input: TaskInput): string {
     input.toolFileId,
     ...(input.materialManifestId ? [input.materialManifestId] : []),
     ...input.material.map((item) => item.file_id),
+    ...(input.extraFileIds ?? []),
   ];
   const material = input.material.length
     ? `Customer-supplied material (provenance "uploaded"; it arrives with the tool and the capture reads it):\n${input.material.map((item) => `- ${item.name} (${item.content_type}), file ${item.file_id}, cite as ${item.source_url}`).join('\n')}`
     : 'Customer-supplied material: none.';
-  const out = `~/br/out/${input.host}`;
+  const out = `~/${input.runDir}/out/${input.host}`;
   return [
     `Research this website: ${input.url}`,
     ...(input.description
@@ -57,7 +64,8 @@ export function researchTask(input: TaskInput): string {
     '',
     'Steps. One tool call at a time.',
     '1. read_skill site-research.',
-    `2. fetch_file with file_ids ${JSON.stringify(fileIds)} and dir "br". Below, TOOL is the path it gives for ${TOOL_NAME} (normally ~/br/${TOOL_NAME}).`,
+    `2. fetch_file with file_ids ${JSON.stringify(fileIds)} and dir "${input.runDir}". This run works only in that folder. Below, TOOL is the path it gives for ${TOOL_NAME} (normally ~/${input.runDir}/${TOOL_NAME}).`,
+    ...(input.preSteps ?? []),
     '3. bash: node TOOL setup. Then bash: node TOOL wait, repeated until it prints "BR_JOB_DONE setup ok".',
     `4. bash: node TOOL discover ${input.url}. Then node TOOL wait until "BR_JOB_DONE discover ok".`,
     '5. Choose at most 15 pages in total from the discover summary, as the skill says, and run them in one command: node TOOL capture <site address> <page addresses...>. Then node TOOL wait until "BR_JOB_DONE capture ok". The summary lists the text files, the brand measurements, the files to publish and the template.',
@@ -72,6 +80,7 @@ export function researchTask(input: TaskInput): string {
 /** What the gate sends back when the submitted result fails its checks. */
 export function repairMessage(
   failures: readonly GateFailure[],
+  runDir: string,
   host: string,
   round: number,
   rounds: number,
@@ -81,7 +90,7 @@ export function repairMessage(
     '',
     formatFailures(failures),
     '',
-    `Fix every problem in ~/br/out/${host}/result.json and keep everything else as it is. Run node TOOL verify on it until it prints VERIFY OK, then call submit_output again with the whole corrected result. If a quote cannot be found word for word, remove that claim and every reference to it. Never edit pages.json or any stored text.`,
+    `Fix every problem in ~/${runDir}/out/${host}/result.json and keep everything else as it is. Run node TOOL verify on it until it prints VERIFY OK, then call submit_output again with the whole corrected result. If a quote cannot be found word for word, remove that claim and every reference to it. If a brief fact or a claim's text says a word its quotes do not, write it in the quotes' words or cite the claim whose quote says it; never change a quote to fit. Never edit pages.json or any stored text.`,
   ].join('\n');
 }
 

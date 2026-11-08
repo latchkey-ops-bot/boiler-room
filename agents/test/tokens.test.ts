@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { blend, contrast } from '../src/capture/color.ts';
-import { deriveColors, pickBackground, pickRadius } from '../src/capture/tokens.ts';
+import { deriveColors, pickBackground, pickRadius, variableRole } from '../src/capture/tokens.ts';
 import type { RawCta, RawStyles } from '../src/capture/types.ts';
 
 const color = (hex: string, alpha = 1) => ({ hex, alpha });
@@ -63,6 +63,39 @@ describe('pickBackground', () => {
     ).toBe('#010101');
   });
 
+  it('keeps what html and body paint unless one wrapper covers most of the first screens', () => {
+    const mixed = [
+      { ...color('#222222'), weight: 50 },
+      { ...color('#C9B79C'), weight: 40 },
+      { ...color('#ECE9E2'), weight: 20 },
+    ];
+    expect(pickBackground(styles({ root: '#ECE9E2', rootSet: true, backgrounds: mixed })).hex).toBe(
+      '#ECE9E2',
+    );
+    const wrapped = [
+      { ...color('#222222'), weight: 70 },
+      { ...color('#ECE9E2'), weight: 10 },
+    ];
+    expect(
+      pickBackground(styles({ root: '#ECE9E2', rootSet: true, backgrounds: wrapped })).hex,
+    ).toBe('#222222');
+  });
+
+  it('takes the most sampled surface when html and body paint nothing', () => {
+    const samples = [
+      { ...color('#0B0B0F'), weight: 30 },
+      { ...color('#FFFFFF'), weight: 10 },
+    ];
+    expect(
+      pickBackground(styles({ root: '#FFFFFF', rootSet: false, backgrounds: samples })).hex,
+    ).toBe('#0B0B0F');
+  });
+
+  it('notes the overlays hidden before the colours were measured', () => {
+    const colors = deriveColors(styles({ root: '#FFFFFF', overlays: 2 }));
+    expect(colors.notes.join(' ')).toMatch(/^2 cookie banner/);
+  });
+
   it('falls back to the body colour when nothing was sampled', () => {
     expect(pickBackground(styles({ root: '#0B0B0C', backgrounds: [] })).hex).toBe('#0B0B0C');
   });
@@ -113,9 +146,18 @@ describe('deriveColors', () => {
     });
   });
 
-  it('reads colour custom properties named for the brand when the site has them', () => {
+  it('reads colour custom properties named for the brand when the site paints with them', () => {
+    const painted = {
+      texts: [
+        { ...color('#1F2937'), weight: 2000, heading: false },
+        { ...color('#E11D48'), weight: 40, heading: true },
+      ],
+      links: [{ ...color('#2563EB'), weight: 6 }],
+    };
+    expect(deriveColors(styles(painted)).primary).toBe('#2563EB');
     const result = deriveColors(
       styles({
+        ...painted,
         colorVariables: [
           { name: '--brand-primary', hex: '#E11D48', alpha: 1 },
           { name: '--gray-100', hex: '#F3F4F6', alpha: 1 },
@@ -126,11 +168,188 @@ describe('deriveColors', () => {
     expect(result.cssVariables).toBe(true);
   });
 
-  it('ignores browser default link colours', () => {
+  // linear.app declares --color-accent #7170FF and --color-brand-bg #5E6AD2, but no element a
+  // visitor sees on the home page paints either: they were the accent and the primary.
+  it('never takes a colour only a custom property declares', () => {
+    const result = deriveColors(
+      styles({
+        colorVariables: [
+          { name: '--brand-primary', hex: '#E11D48', alpha: 1 },
+          { name: '--color-accent', hex: '#7170FF', alpha: 1 },
+        ],
+      }),
+    );
+    expect(result.primary).toBe('#1F2937');
+    expect(result.accents).toEqual([]);
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('ignores browser default link colours, and says so', () => {
     const result = deriveColors(styles({ links: [{ ...color('#0000EE'), weight: 20 }] }));
     expect(result.primary).toBe('#1F2937');
+    expect(result.accent).toBeNull();
+    // danluu.com: the link blue is the only colour a visitor sees besides the text.
+    expect(result.accents).toEqual(['#0000EE']);
     expect(result.notes).toContain(
+      "The site sets no brand colour of its own: its links use the browser's default #0000EE, listed with the accents, so the text colour is primary.",
+    );
+  });
+
+  it('says a site with no saturated colour at all has none', () => {
+    expect(deriveColors(styles()).notes).toContain(
       'The site uses no saturated colour, so the text colour is primary.',
+    );
+  });
+
+  // A plain list of links: the browser's blue link text outnumbers the black body text seven to
+  // one, and was taken as the text colour.
+  it('takes the text colour from the body copy, not from link text', () => {
+    const result = deriveColors(
+      styles({
+        texts: [
+          { ...color('#0000EE'), weight: 7800, heading: false, link: true },
+          { ...color('#000000'), weight: 1050, heading: false },
+        ],
+        links: [{ ...color('#0000EE'), weight: 212 }],
+      }),
+    );
+    expect(result.foreground).toBe('#000000');
+    expect(result.primary).toBe('#000000');
+    expect(result.muted).toBeNull();
+  });
+
+  // A dark site whose descriptions are in a tertiary grey: the grey has the most characters, but
+  // the headlines and primary text are near-white.
+  it('takes the strongest of the main text colours, so headlines are not set in a dim grey', () => {
+    const result = deriveColors(
+      styles({
+        root: '#08090A',
+        backgrounds: [{ ...color('#08090A'), weight: 140 }],
+        texts: [
+          { ...color('#8A8F98'), weight: 1600, heading: false },
+          { ...color('#D0D6E0'), weight: 700, heading: false },
+          { ...color('#F7F8F8'), weight: 300, heading: true },
+          { ...color('#F7F8F8'), weight: 900, heading: false, chrome: true },
+        ],
+      }),
+    );
+    expect(result.foreground).toBe('#F7F8F8');
+    expect(result.muted).toBe('#8A8F98');
+  });
+
+  it('never makes muted brighter than the foreground', () => {
+    const result = deriveColors(
+      styles({
+        root: '#08090A',
+        backgrounds: [{ ...color('#08090A'), weight: 140 }],
+        texts: [
+          { ...color('#F7F8F8'), weight: 500, heading: true },
+          { ...color('#FFFFFF'), weight: 30, heading: false },
+          { ...color('#8A8F98'), weight: 1600, heading: false },
+        ],
+      }),
+    );
+    expect(contrast(result.muted ?? '#000000', result.background)).toBeLessThan(
+      contrast(result.foreground, result.background),
+    );
+  });
+
+  it('ignores text in the navigation and footer when there is enough body copy', () => {
+    const result = deriveColors(
+      styles({
+        texts: [
+          { ...color('#6B7280'), weight: 4000, heading: false, chrome: true },
+          { ...color('#111827'), weight: 900, heading: false },
+        ],
+      }),
+    );
+    expect(result.foreground).toBe('#111827');
+  });
+
+  // A monochrome brand: its declared --primary is the near-black its buttons are painted with,
+  // and an orange accent variable must not take the primary role from it.
+  it('keeps a neutral primary the site declares and paints its buttons with', () => {
+    const result = deriveColors(
+      styles({
+        texts: [
+          { ...color('#242424'), weight: 3500, heading: false },
+          { ...color('#CC4510'), weight: 40, heading: true },
+        ],
+        ctas: [
+          cta({ placement: 'nav', background: color('#242424') }),
+          cta({ background: color('#242424') }),
+        ],
+        colorVariables: [
+          { name: '--primary', hex: '#242424', alpha: 1 },
+          { name: '--primary-foreground', hex: '#FFFFFF', alpha: 1 },
+          { name: '--color-site-accent', hex: '#CC4510', alpha: 1 },
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ primary: '#242424', accent: '#CC4510' });
+  });
+
+  // linear.app: the buttons a visitor sees are near-white #E5E5E6 with dark text, and its brand
+  // and accent colours live only in custom properties nothing on the page paints.
+  it('makes the neutral fill of the buttons primary when no painted colour is saturated', () => {
+    const result = deriveColors(
+      styles({
+        root: '#08090A',
+        backgrounds: [{ ...color('#08090A'), weight: 140 }],
+        texts: [{ ...color('#F7F8F8'), weight: 900, heading: false }],
+        ctas: [
+          cta({ placement: 'nav', background: color('#E5E5E6'), color: color('#08090A') }),
+          cta({ background: color('#E5E5E6'), color: color('#08090A') }),
+        ],
+        colorVariables: [
+          { name: '--color-text-primary', hex: '#F7F8F8', alpha: 1 },
+          { name: '--color-bg-primary', hex: '#08090A', alpha: 1 },
+          { name: '--color-accent-hover', hex: '#828FFF', alpha: 1 },
+          { name: '--color-accent', hex: '#7170FF', alpha: 1 },
+          { name: '--color-brand-bg', hex: '#5E6AD2', alpha: 1 },
+        ],
+      }),
+    );
+    expect(result.primary).toBe('#E5E5E6');
+    expect(result.accents).toEqual([]);
+    expect(result.notes.join(' ')).toContain('its buttons are filled with #E5E5E6');
+  });
+
+  // allbirds.com: no saturated colour anywhere; the body text is pure black, but every button and
+  // bar a visitor sees is #212121. A lone dark chip in the body is not the brand's fill.
+  it("takes a monochrome brand's button fill over its black text, but not one chip", () => {
+    const result = deriveColors(
+      styles({
+        root: '#ECE9E2',
+        backgrounds: [{ ...color('#ECE9E2'), weight: 140 }],
+        texts: [
+          { ...color('#000000'), weight: 1100, heading: false },
+          { ...color('#575757'), weight: 300, heading: false },
+        ],
+        ctas: [
+          cta({ background: color('#212121') }),
+          cta({ background: color('#212121') }),
+          cta({ placement: 'body', background: color('#14120B') }),
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ primary: '#212121', foreground: '#000000', muted: '#575757' });
+    const chip = deriveColors(
+      styles({ ctas: [cta({ placement: 'body', background: color('#14120B') })] }),
+    );
+    expect(chip.primary).toBe('#1F2937');
+  });
+
+  // cal.com follows the visitor's system scheme with a media query, and declares no color-scheme.
+  it('notes a dark scheme a stylesheet keeps for a system set to dark', () => {
+    expect(deriveColors(styles({ darkScheme: true })).notes.join(' ')).toContain(
+      'also has a dark scheme',
+    );
+  });
+
+  it('notes a page that declares both light and dark colour schemes', () => {
+    expect(deriveColors(styles({ colorScheme: 'light dark' })).notes.join(' ')).toContain(
+      'both light and dark',
     );
   });
 
@@ -141,13 +360,37 @@ describe('deriveColors', () => {
           cta({ background: color('#FDE047'), color: color('#111111') }),
           cta({ placement: 'nav', background: color('#FDE047') }),
         ],
-        links: [{ ...color('#2563EB'), weight: 5 }],
+        links: [{ ...color('#2563EB'), weight: 8 }],
       }),
     );
     expect(result.primary).toBe('#2563EB');
     expect(result.accents).toContain('#FDE047');
     expect(contrast(result.primary, result.background)).toBeGreaterThanOrEqual(3);
     expect(result.notes.join(' ')).toContain('#FDE047');
+  });
+
+  // posthog.com: the orange button face is on every page but too light for 3:1 on the light
+  // surface; the purple fill of one hero tab cleared 3:1 and was taken as primary.
+  it("does not fall back to one element's colour when the brand colour is too light", () => {
+    const result = deriveColors(
+      styles({
+        root: '#D3DAC6',
+        backgrounds: [{ ...color('#D3DAC6'), weight: 140 }],
+        texts: [{ ...color('#111111'), weight: 2000, heading: false }],
+        ctas: [
+          cta({ background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ placement: 'nav', background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ placement: 'body', background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ background: color('#B62AD9') }),
+        ],
+      }),
+    );
+    expect(result.primary).toBe('#111111');
+    expect(result.accent).toBe('#EB9D2A');
+    // The tab's purple is one element's colour, not an accent.
+    expect(result.accents).toEqual(['#EB9D2A']);
+    expect(result.notes.join(' ')).toContain('no other colour the site uses widely');
   });
 
   it('switches to a real page surface when the brand colour only works there', () => {
@@ -205,13 +448,45 @@ describe('deriveColors', () => {
 });
 
 describe('pickRadius', () => {
+  const fill = { background: color('#4F46E5') };
+
   it('takes the most common button radius, with 999 for pills', () => {
     expect(
-      pickRadius(styles({ ctas: [cta({ radius: 6 }), cta({ radius: 6 }), cta({ radius: 0 })] })),
+      pickRadius(
+        styles({
+          ctas: [
+            cta({ ...fill, radius: 6 }),
+            cta({ ...fill, radius: 6 }),
+            cta({ ...fill, radius: 0 }),
+          ],
+        }),
+      ),
     ).toBe(6);
     expect(
       pickRadius(
-        styles({ ctas: [cta({ radius: 24, pill: true }), cta({ radius: 24, pill: true })] }),
+        styles({
+          ctas: [
+            cta({ ...fill, radius: 24, pill: true }),
+            cta({ ...fill, radius: 24, pill: true }),
+          ],
+        }),
+      ),
+    ).toBe(999);
+  });
+
+  // Twenty square menu toggles with no fill and no border showed no corners at all, and outvoted
+  // the pill-shaped buttons the site actually draws.
+  it('counts only buttons that are drawn, with a fill or a border', () => {
+    const toggles = Array.from({ length: 20 }, () => cta({ placement: 'body', radius: 0 }));
+    expect(
+      pickRadius(
+        styles({
+          ctas: [
+            ...toggles,
+            cta({ placement: 'nav', background: color('#E5E5E6'), radius: 9999, pill: true }),
+            cta({ border: color('#2E2E32'), radius: 16, pill: true }),
+          ],
+        }),
       ),
     ).toBe(999);
   });
@@ -228,5 +503,37 @@ describe('pickRadius', () => {
       ),
     ).toBe(12);
     expect(pickRadius(styles())).toBeNull();
+  });
+});
+
+describe('variableRole', () => {
+  it('reads the brand colour from names that declare it', () => {
+    for (const name of [
+      '--primary',
+      '--color-primary',
+      '--brand',
+      '--color-brand-bg',
+      '--main-color',
+    ])
+      expect(variableRole(name), name).toEqual({ role: 'brand', weight: 8 });
+    expect(variableRole('--color-primary-600')).toEqual({ role: 'brand', weight: 3 });
+    expect(variableRole('--color-site-accent')).toEqual({ role: 'accent', weight: 2 });
+  });
+
+  it('ignores text, border, state and surface colours that only mention primary or accent', () => {
+    for (const name of [
+      '--color-text-primary',
+      '--primary-foreground',
+      '--color-fg-primary',
+      '--color-bg-primary',
+      '--color-border-primary',
+      '--color-link-primary',
+      '--color-accent-hover',
+      '--color-accent-ink',
+      '--sidebar-primary',
+      '--color-brand-text',
+      '--gray-100',
+    ])
+      expect(variableRole(name), name).toBeNull();
   });
 });

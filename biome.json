@@ -5,9 +5,6 @@
     "clientKind": "git",
     "useIgnoreFile": true
   },
-  "files": {
-    "includes": ["**", "!agents/skills"]
-  },
   "formatter": {
     "indentStyle": "space",
     "indentWidth": 2,
@@ -17,5 +14,51 @@
     "formatter": {
       "quoteStyle": "single"
     }
-  }
+  },
+  "markdown": {
+    "parser": {
+      "frontmatter": true
+    }
+  },
+  "files": {
+    "includes": ["**", "!agents/skills", "!apps/web/drizzle/meta"]
+  },
+  "overrides": [
+    {
+      "includes": ["apps/web/src/styles/tokens.css", "apps/web/src/styles/components.css"],
+      "formatter": {
+        "enabled": false
+      },
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noImportantStyles": "off"
+          },
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/src/styles/app.css"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["apps/web/**"],
+      "linter": {
+        "rules": {
+          "performance": {
+            "noImgElement": "off"
+          }
+        }
+      }
+    }
+  ]
 }

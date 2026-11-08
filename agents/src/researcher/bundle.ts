@@ -12,13 +12,25 @@ export interface ToolBundle {
   sha256: string;
 }
 
+export interface BundleOptions {
+  /**
+   * Hosts this build may load although they resolve to a private address. Only the
+   * prompt-injection test sets one, for the fixture it serves on the agent's loopback. It is
+   * compiled in, so it changes the file's digest, and nothing at run time can add to it.
+   */
+  allowPrivateHosts?: readonly string[];
+}
+
 /**
  * Bundles the capture tool, with the verifier and the schema validator inside it, into one ES
  * module the agent's computer runs with plain Node. Playwright stays external: the tool installs
  * it on that computer.
  */
-export async function bundleTool(): Promise<ToolBundle> {
+export async function bundleTool(options: BundleOptions = {}): Promise<ToolBundle> {
   const result = await build({
+    define: {
+      __BR_ALLOW_PRIVATE_HOSTS__: JSON.stringify(options.allowPrivateHosts ?? []),
+    },
     entryPoints: [ENTRY],
     bundle: true,
     platform: 'node',

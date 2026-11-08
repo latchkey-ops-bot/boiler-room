@@ -1,0 +1,82 @@
+/* Boiler Room design tokens, ported from boiler-room-design design-system/tokens.css at 3f4ec14.
+   Two changes from the source: the fonts load through next/font in src/app/fonts.ts instead of a
+   Google Fonts @import, so the --br-font-* tokens name next/font's variables first; and --br-px is
+   set per surface by the marketing and app layouts (3px and 2px), with 3px here as the default. */
+
+:root {
+  /* Brand. The four colours Boiler Room is made of. */
+  --br-deep: #086288;   /* Pipe: headings, primary buttons, outlines */
+  --br-steel: #4D8DBA;  /* Steel: the boiler's body, secondary outlines, large text only */
+  --br-sky: #97D7FF;    /* Steam: fills, hard shadows, highlights. Never small text */
+  --br-cream: #FFEFC4;  /* Butter: warm panels, highlights, the belly screen */
+
+  /* Derived from the brand */
+  --br-ink: #0B2E40;        /* Body text. Pipe, darkened */
+  --br-muted: #3D6A87;      /* Secondary text, captions */
+  --br-paper: #FFFBEF;      /* Page background. Butter, lightened */
+  --br-white: #FFFFFF;      /* Cards and inputs */
+  --br-sky-soft: #DDF2FF;   /* Cool panels, selected rows */
+  --br-cream-deep: #F4DB9A; /* Lines and dithering on butter */
+  --br-deep-press: #064E6D; /* Primary button, hovered or pressed */
+
+  /* Cute accents, used sparingly */
+  --br-pink: #FF9EB5;  /* The boiler's blush. "Needs you" states */
+  --br-mint: #9FE3C1;  /* Done */
+
+  /* Status: a soft fill, plus an ink that passes 4.5:1 on it */
+  --br-success-soft: #DDF7E9;
+  --br-success-ink: #17654A;
+  --br-warning-soft: var(--br-cream);
+  --br-warning-ink: #7A5300;
+  --br-error-soft: #FFE1DE;
+  --br-error-ink: #A82A20;
+  --br-attention-soft: #FFE1EA;
+  --br-attention-ink: #A3214C;
+  --br-info-soft: var(--br-sky-soft);
+  --br-info-ink: var(--br-deep);
+
+  /* Type. Words stay readable; the pixels live in the art, the frames and the big numbers. */
+  --br-font-display: var(--font-bricolage), 'Bricolage Grotesque', var(--font-nunito), 'Nunito', system-ui, sans-serif; /* Headings, buttons */
+  --br-font-body: var(--font-nunito), 'Nunito', ui-rounded, system-ui, sans-serif;                 /* Reading */
+  --br-font-label: var(--font-jetbrains), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; /* Labels */
+  --br-font-mono: var(--font-jetbrains), 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;  /* Data */
+  --br-font-pixel: var(--font-pixelify), 'Pixelify Sans', ui-monospace, monospace; /* Scoreboard numbers, 24px and up only */
+
+  --br-text-display: 64px; /* Landing hero only */
+  --br-text-h1: 44px;
+  --br-text-h2: 32px;
+  --br-text-h3: 24px;
+  --br-text-h4: 19px;
+  --br-text-lg: 18px;
+  --br-text-md: 16px;
+  --br-text-sm: 14px;
+  --br-text-label: 11px; /* JetBrains Mono 600, upper case */
+  --br-text-mono: 13px;
+
+  /* The pixel. Every outline, notch and shadow is a multiple of it. */
+  --br-px: 3px;
+
+  /* Space: a 4px grid */
+  --br-space-1: 4px;
+  --br-space-2: 8px;
+  --br-space-3: 12px;
+  --br-space-4: 16px;
+  --br-space-5: 24px;
+  --br-space-6: 32px;
+  --br-space-7: 48px;
+  --br-space-8: 64px;
+  --br-space-9: 96px;
+
+  --br-max-width: 1160px;
+
+  /* Motion moves in frames, not curves. 12 frames a second, like a sprite. */
+  --br-frame: 83ms;
+  --br-steps-press: steps(1);
+  --br-steps-hover: steps(2);
+
+  /* Pixel textures. Hard edged, never blurred. */
+  --br-dots: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' shape-rendering='crispEdges'%3E%3Crect width='2' height='2' fill='%23F0DCA8'/%3E%3C/svg%3E");
+  --br-dither-sky: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'%3E%3Crect width='4' height='4' fill='%2397D7FF'/%3E%3Crect x='4' y='4' width='4' height='4' fill='%2397D7FF'/%3E%3C/svg%3E");
+  --br-dither-sky-sparse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='8' shape-rendering='crispEdges'%3E%3Crect width='4' height='4' fill='%2397D7FF'/%3E%3Crect x='8' y='4' width='4' height='4' fill='%2397D7FF'/%3E%3C/svg%3E");
+  --br-dither-cream: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' shape-rendering='crispEdges'%3E%3Crect width='4' height='4' fill='%23FFEFC4'/%3E%3Crect x='4' y='4' width='4' height='4' fill='%23FFEFC4'/%3E%3C/svg%3E");
+}

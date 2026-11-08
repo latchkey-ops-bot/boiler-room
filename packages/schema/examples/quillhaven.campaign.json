@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "id": "quillhaven-launch",
+  "sourceUrl": "https://quillhaven.example.com",
+  "fps": 24,
+  "durationSeconds": 18,
+  "brand": {
+    "name": "Quillhaven Manuscript Studio",
+    "colors": {
+      "background": "#FBF7EF",
+      "foreground": "#1F1B16",
+      "primary": "#8C2F1B",
+      "accent": "#2F5D50",
+      "muted": "#A39A8F"
+    },
+    "fonts": {
+      "display": { "family": "Fraunces", "source": "font-display" },
+      "body": { "family": "Source Serif 4", "source": "font-body" }
+    },
+    "logoAssetId": "favicon",
+    "radius": 4
+  },
+  "assets": {
+    "favicon": {
+      "kind": "image",
+      "src": "assets/quillhaven/favicon.png",
+      "provenance": "captured",
+      "width": 32,
+      "height": 32,
+      "sourceUrl": "https://quillhaven.example.com"
+    },
+    "editor-shot": {
+      "kind": "image",
+      "src": "assets/quillhaven/editor.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://quillhaven.example.com/editor"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/fraunces.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/source-serif-4.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [
+    {
+      "id": "trial",
+      "text": "Quillhaven is free to try for 30 days",
+      "sourceUrl": "https://quillhaven.example.com/pricing",
+      "quote": "Try Quillhaven free for 30 days, with every feature included.",
+      "status": "approved"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3.5,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Every draft, kept in one quiet room.",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Every draft, kept in one quiet room.",
+        "claimIds": []
+      },
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "revise",
+      "type": "site-hero",
+      "start": 3.5,
+      "end": 6.75,
+      "props": { "focus": { "x": 720, "y": 360, "w": 1440, "h": 900 } },
+      "text": [
+        {
+          "id": "revise-address",
+          "role": "label",
+          "value": "quillhaven.example.com/editor",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["editor-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "features",
+      "type": "feature-card",
+      "start": 6.75,
+      "end": 9.25,
+      "props": {},
+      "text": [
+        {
+          "id": "features-headline",
+          "role": "headline",
+          "value": "Revise without losing a word",
+          "claimIds": []
+        },
+        { "id": "features-cause", "role": "label", "value": "Every change", "claimIds": [] },
+        { "id": "features-effect", "role": "label", "value": "Always kept", "claimIds": [] }
+      ],
+      "assetIds": ["editor-shot"],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "compare",
+      "type": "feature-card",
+      "start": 9.25,
+      "end": 11.75,
+      "props": {},
+      "text": [
+        {
+          "id": "compare-headline",
+          "role": "headline",
+          "value": "Compare drafts at a glance",
+          "claimIds": []
+        },
+        { "id": "compare-cause", "role": "label", "value": "Old draft", "claimIds": [] },
+        { "id": "compare-effect", "role": "label", "value": "New draft", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "notes",
+      "type": "feature-card",
+      "start": 11.75,
+      "end": 14,
+      "props": { "accent": { "textId": "notes-headline", "from": 1, "to": 2 } },
+      "text": [
+        {
+          "id": "notes-headline",
+          "role": "headline",
+          "value": "Every note stays put",
+          "claimIds": []
+        },
+        { "id": "notes-cause", "role": "label", "value": "Margin notes", "claimIds": [] },
+        { "id": "notes-effect", "role": "label", "value": "Kept in place", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 14,
+      "end": 18,
+      "props": {},
+      "text": [
+        { "id": "close-cta", "role": "cta", "value": "Start writing", "claimIds": [] },
+        {
+          "id": "close-address",
+          "role": "label",
+          "value": "quillhaven.example.com",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Try it free for 30 days.",
+        "claimIds": ["trial"]
+      },
+      "assetIds": ["favicon"]
+    }
+  ],
+  "variants": {
+    "hooks": [
+      {
+        "id": "open-blank-page",
+        "type": "word-slam",
+        "start": 0,
+        "end": 3.5,
+        "props": {},
+        "text": [
+          {
+            "id": "blank-page-headline",
+            "role": "headline",
+            "value": "The blank page was never the hard part.",
+            "claimIds": []
+          }
+        ],
+        "assetIds": []
+      }
+    ],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-writing",
+        "label": "Start writing",
+        "href": "https://quillhaven.example.com/signup"
+      },
+      {
+        "id": "see-pricing",
+        "label": "See pricing",
+        "href": "https://quillhaven.example.com/pricing"
+      }
+    ]
+  }
+}

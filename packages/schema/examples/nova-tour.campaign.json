@@ -1,0 +1,141 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-tour",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 11.6,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": { "family": "Sora", "source": "font-display" },
+      "body": { "family": "Inter", "source": "font-body" }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "docs-page": {
+      "kind": "image",
+      "src": "assets/nova/docs.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 7400,
+      "sourceUrl": "https://nova.example.com/docs"
+    },
+    "integrations-page": {
+      "kind": "image",
+      "src": "assets/nova/integrations.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 8300,
+      "sourceUrl": "https://nova.example.com/integrations"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "See where Nova fits.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "tour",
+      "type": "site-scroll",
+      "start": 3,
+      "end": 5.4,
+      "props": {
+        "pages": [{}, { "ctaBox": { "x": 997, "y": 5645, "w": 419, "h": 128 } }]
+      },
+      "text": [
+        { "id": "tour-docs", "role": "label", "value": "nova.example.com/docs", "claimIds": [] },
+        {
+          "id": "tour-integrations",
+          "role": "label",
+          "value": "nova.example.com/integrations",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["docs-page", "integrations-page"],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "connect",
+      "type": "feature-card",
+      "start": 5.4,
+      "end": 7.8,
+      "props": { "accent": { "textId": "connect-headline", "from": 1, "to": 2 } },
+      "text": [
+        {
+          "id": "connect-headline",
+          "role": "headline",
+          "value": "Your tools, in the loop",
+          "claimIds": []
+        },
+        { "id": "connect-cause", "role": "label", "value": "Push code", "claimIds": [] },
+        { "id": "connect-effect", "role": "label", "value": "Team alerted", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 7.8,
+      "end": 11.6,
+      "props": {},
+      "text": [
+        { "id": "close-cta", "role": "cta", "value": "Start building", "claimIds": [] },
+        { "id": "close-address", "role": "label", "value": "nova.example.com", "claimIds": [] }
+      ],
+      "assetIds": ["logo"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-building",
+        "label": "Start building",
+        "href": "https://nova.example.com/start"
+      }
+    ]
+  }
+}
