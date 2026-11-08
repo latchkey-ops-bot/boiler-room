@@ -201,7 +201,10 @@ export const CEILINGS: Record<FilmStep, number> = {
   'art-director': 2_100_000,
   gate: 0,
   render: 2_000_000,
-  'quality-check': 1_500_000,
+  // Review sessions of about $0.20 each, one per group of images the model can see at once (two
+  // for a 15-image film, three for 22), and one more for a group asked again. Every session must
+  // start with $1 of room under this, so $1.50 held only two or three.
+  'quality-check': 2_500_000,
 };
 
 /** What a stage leaves for the stages after it in the same round. */

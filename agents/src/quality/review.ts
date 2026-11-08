@@ -14,6 +14,15 @@
  * fresh session with every image attached again; if that one does not see them all either, the
  * review that saw more stands, the rest is chosen by rule and not reviewed, and the report is
  * blocked on the images nobody opened.
+ *
+ * No session is given more images than the model can see at once. Naive shows the model only the
+ * pictures of the latest `view_image` calls, about twelve of them: on 8 November every review of
+ * 15 or 22 images (ses_97xh2k226hs1k8hhjkks2gsbs8, ses_a806xhwn7nk893y9cegckjenck,
+ * ses_s4j9xmtj5dkrbq27gd3n701qhr) saw the last twelve and none of the first, which were the
+ * sheets, and a session that opened three sheets again in a later turn
+ * (ses_x0959kb9rps4vrnmv5zpprhtkk) then saw only those three. So the images are split into groups
+ * (`groupImages`), each reviewed in its own session that opens all of its images in one turn, and
+ * the groups' reviews are merged.
  */
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
@@ -22,6 +31,7 @@ import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naiv
 import { ViewEvidence } from '../naive/evidence.ts';
 import { closeSession, type InputSize, pausedOnBudget, SessionTracker } from '../naive/session.ts';
 import { type AgentSync, ensureAgents } from '../sync.ts';
+import { pngSize } from './media.ts';
 import { type QcReview, qcReviewSchema } from './output.ts';
 import { CONTINUE_MESSAGE, type ReviewImage } from './prompt.ts';
 
@@ -39,6 +49,43 @@ export interface LocalImage {
 
 /** Records the file ids every successful `view_image` call opened, before the submission. */
 export { ViewEvidence as ViewTracker };
+
+/**
+ * The most images one review session is given, by count and by pixels. Twelve images of about
+ * 24.4 million pixels in all were the most a session was seen to show at once; these stay under
+ * both, whichever of the two Naive counts, in as few sessions as that allows: each costs about
+ * $0.20, and the stage's cap must hold every group and one more session for a group asked again.
+ */
+export const SESSION_IMAGES = { count: 10, pixels: 22_000_000 } as const;
+
+/** The size an image is counted at when its file cannot be read as a PNG: a 1080p frame. */
+const UNKNOWN_SIZE = { width: 1920, height: 1080 };
+
+/**
+ * Splits images into groups for separate sessions, in the order given: each group takes the next
+ * image while it stays within `limit`. An image larger than the limit on its own gets a group of
+ * its own. Returns the indexes of the images in each group.
+ */
+export function groupImages(
+  sizes: readonly { width: number; height: number }[],
+  limit: { count: number; pixels: number } = SESSION_IMAGES,
+): number[][] {
+  const groups: number[][] = [];
+  let current: number[] = [];
+  let pixels = 0;
+  for (const [index, size] of sizes.entries()) {
+    const area = size.width * size.height;
+    if (current.length > 0 && (current.length >= limit.count || pixels + area > limit.pixels)) {
+      groups.push(current);
+      current = [];
+      pixels = 0;
+    }
+    current.push(index);
+    pixels += area;
+  }
+  if (current.length > 0) groups.push(current);
+  return groups;
+}
 
 /** A claim the agent made that no image it was shown can back: taken out of its review. */
 export interface Unreviewed {
@@ -228,7 +275,7 @@ export function supportedReview(
 export function againNote(why: string): string {
   return [
     `This review was asked for once already, and it could not be used in full: ${why}.`,
-    'Every image is attached again by the same file ids. Open each one with view_image before you judge, and report only on frames of images that arrived.',
+    'Every image is attached again by the same file ids. Open them all at once with view_image, in one turn, and do not open any again; report only on frames of images that arrived.',
   ].join(' ');
 }
 
@@ -395,12 +442,14 @@ interface ReviewOptions {
 
 /**
  * Runs the review. `say` prints progress; `eventsFile` keeps every event with the key scrubbed.
- * Images are uploaded before and deleted after, whatever happens. A session paused on its budget
- * is cancelled and the review retried once in two smaller sessions, each with half the images,
- * whose reviews are merged; the halves are not split again. Each session's review keeps only what
- * the images it was shown can back (`supportedReview`). A review that leaves any image unseen is
- * asked for once more, in one fresh session with every image attached again; the review that saw
- * more images is the one that stands.
+ * Images are uploaded before and deleted after, whatever happens. They are reviewed in groups no
+ * larger than the model can see at once (`groupImages`), one session per group, and the groups'
+ * reviews are merged. A session paused on its budget is cancelled and its group retried once in
+ * two smaller sessions, each with half the images, whose reviews are merged; the halves are not
+ * split again. Each session's review keeps only what the images it was shown can back
+ * (`supportedReview`). A group whose review leaves any of its images unseen is asked for once more,
+ * in one fresh session with every image of the group attached again; the review that saw more
+ * images is the one that stands.
  */
 export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
   const { client, definition, say } = options;
@@ -447,13 +496,13 @@ export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
       unreviewed: supported?.unreviewed ?? [],
     };
   };
-  /** The first review, in one session, or in two halves after a budget pause. */
-  const firstReview = async (): Promise<Attempt> => {
-    const first = await run(images);
-    if (!first.paused || images.length < 2) return { ...first, viewed: new Set(first.viewed) };
-    const cut = Math.ceil(images.length / 2);
-    say(`retrying the review in two sessions of ${cut} and ${images.length - cut} images`);
-    const halves = [await run(images.slice(0, cut)), await run(images.slice(cut))];
+  /** A group's first review, in one session, or in two halves after a budget pause. */
+  const firstReview = async (group: readonly ReviewImage[]): Promise<Attempt> => {
+    const first = await run(group);
+    if (!first.paused || group.length < 2) return { ...first, viewed: new Set(first.viewed) };
+    const cut = Math.ceil(group.length / 2);
+    say(`retrying the review in two sessions of ${cut} and ${group.length - cut} images`);
+    const halves = [await run(group.slice(0, cut)), await run(group.slice(cut))];
     const problems = halves.flatMap((half, index) =>
       half.problem ? [`half ${index + 1}: ${half.problem}`] : [],
     );
@@ -469,25 +518,59 @@ export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
           unreviewed,
         };
   };
-  const unseenOf = (attempt: Attempt) =>
-    images.filter((image) => !attempt.viewed.has(image.fileId));
-  try {
-    const first = await firstReview();
-    const unseen = unseenOf(first);
-    const retracted = sessions.find((each) => each.retraction)?.retraction;
-    if (!first.review || unseen.length === 0) return result(first, null);
-    // Not done: once more, with every image attached again.
+  const unseenIn = (group: readonly ReviewImage[], attempt: Attempt) =>
+    group.filter((image) => !attempt.viewed.has(image.fileId));
+  /** A group's review, asked for once more when it left any of the group's images unseen. */
+  const groupReview = async (
+    group: readonly ReviewImage[],
+  ): Promise<{ attempt: Attempt; askedAgain: string | null }> => {
+    const before = sessions.length;
+    const first = await firstReview(group);
+    const unseen = unseenIn(group, first);
+    const retracted = sessions.slice(before).find((each) => each.retraction)?.retraction;
+    if (!first.review || unseen.length === 0) return { attempt: first, askedAgain: null };
+    // Not done: once more, with every image of the group attached again.
     const why = retracted
       ? `the agent said afterwards that the images did not reach it ("${retracted}")`
       : `its session's events show no view_image result for ${unseen.map((image) => `${image.name} (${image.fileId})`).join(', ')}`;
     say(
       `the review left ${unseen.length} image(s) unseen; asking once more with every image attached again`,
     );
-    const again = await run(images, againNote(why));
+    const again = await run(group, againNote(why));
     const second: Attempt = { ...again, viewed: new Set(again.viewed) };
     // The review that was shown more stands; on a tie, the second, which was told what went wrong.
-    const better = second.review && unseenOf(second).length <= unseen.length ? second : first;
-    return result(better, why);
+    const better =
+      second.review && unseenIn(group, second).length <= unseen.length ? second : first;
+    return { attempt: better, askedAgain: why };
+  };
+  try {
+    const sizes = await Promise.all(
+      options.images.map((image) => pngSize(image.file).catch(() => UNKNOWN_SIZE)),
+    );
+    const groups = groupImages(sizes).map((indexes) =>
+      indexes.map((index) => images[index] as ReviewImage),
+    );
+    if (groups.length > 1)
+      say(
+        `reviewing the ${images.length} images in ${groups.length} sessions of ${groups.map((group) => group.length).join(', ')}, as the model sees about twelve at once`,
+      );
+    const done: { attempt: Attempt; askedAgain: string | null }[] = [];
+    for (const group of groups) done.push(await groupReview(group));
+    const askedAgain = done.flatMap((each) => (each.askedAgain ? [each.askedAgain] : []));
+    const viewed = new Set(done.flatMap((each) => [...each.attempt.viewed]));
+    const unreviewed = done.flatMap((each) => each.attempt.unreviewed);
+    const reviews = done.flatMap((each) => (each.attempt.review ? [each.attempt.review] : []));
+    const only = done.length === 1 ? done[0] : undefined;
+    if (only) return result(only.attempt, only.askedAgain);
+    const problems = done.flatMap((each, index) =>
+      each.attempt.problem ? [`group ${index + 1}: ${each.attempt.problem}`] : [],
+    );
+    return result(
+      reviews.length === done.length
+        ? { review: mergeReviews(reviews), problem: null, viewed, unreviewed }
+        : { review: null, problem: problems.join('; '), viewed, unreviewed },
+      askedAgain.length > 0 ? askedAgain.join('; ') : null,
+    );
   } finally {
     const deleted = await deleteImages(client, images);
     say(`deleted ${deleted} of ${images.length} uploaded images`);
