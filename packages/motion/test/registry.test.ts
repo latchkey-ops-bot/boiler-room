@@ -10,10 +10,11 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw seven of the scene types in the schema registry, under its names', () => {
+  it('draw eight of the scene types in the schema registry, under its names', () => {
     expect(IMPLEMENTED_SCENE_TYPES).toEqual([
       'word-slam',
       'site-hero',
+      'type-card',
       'site-scroll',
       'proof-bars',
       'stat-counter',
@@ -66,6 +67,17 @@ describe('scene templates', () => {
             id: 'browser',
             entry: { axis: 'y', sign: -1, v: 36 },
             exit: { axis: 'scale', sign: 1, v: 0.03 },
+          },
+        ],
+      },
+      'type-card': {
+        kind: 'type',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
           },
         ],
       },
@@ -129,15 +141,17 @@ describe('scene templates', () => {
 });
 
 describe('validateForRender', () => {
+  /** A type the scene library specifies that no template draws yet. */
+  const unbuilt = Object.keys(sceneRegistry).find(
+    (type) => !IMPLEMENTED_SCENE_TYPES.includes(type),
+  ) as string;
+
   it.each(Object.entries(examples))('passes %s as it stands', async (_name, copy) => {
     const campaign = copy();
     expect(await validateForRender(campaign)).toEqual({ ok: true, issues: [], campaign });
   });
 
   it('refuses a scene type the library specifies but no template draws, by name', async () => {
-    const unbuilt = Object.keys(sceneRegistry).find(
-      (type) => !IMPLEMENTED_SCENE_TYPES.includes(type),
-    ) as string;
     const campaign = novaCopy();
     at(campaign.scenes, 1).type = unbuilt;
     const { ok, issues } = await validateForRender(campaign);
@@ -155,7 +169,7 @@ describe('validateForRender', () => {
 
   it('refuses a hook of a type with no template', async () => {
     const campaign = novaCopy();
-    at(campaign.variants.hooks, 0).type = 'type-card';
+    at(campaign.variants.hooks, 0).type = unbuilt;
     const { issues } = await validateForRender(campaign);
     expect(issues).toEqual([
       expect.objectContaining({ code: 'SCENE_TYPE_UNBUILT', path: 'variants.hooks[0].type' }),
