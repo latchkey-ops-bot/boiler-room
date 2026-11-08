@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { type Campaign, sceneRegistry, validateCampaign } from '@boiler-room/schema';
+import { type Campaign, sceneFrames, sceneRegistry, validateCampaign } from '@boiler-room/schema';
 import { describe, expect, it, vi } from 'vitest';
 import { qualityCheck } from '../src/definitions/quality-check.ts';
 import type { Naive } from '../src/naive/client.ts';
@@ -17,6 +17,8 @@ import {
   timecode,
 } from '../src/quality/checks.ts';
 import {
+  edgePixels,
+  FrameScanner,
   type FrameStats,
   measureFrame,
   nearestPatch,
@@ -48,6 +50,8 @@ function film(length: number, edit: (frame: number) => Partial<FrameStats> = () 
       mean: 40,
       spread: 20,
       mad: frame === 0 ? null : 0.5,
+      edges: 600,
+      echo: Array.from({ length: 12 }, () => 5),
       ...edit(frame),
     }),
   );
@@ -73,6 +77,32 @@ describe('pixel measures', () => {
     const second = measureFrame(lit, dark, 1);
     expect(second).toMatchObject({ max: 250, mean: 130, mad: 120 });
     expect(second.spread).toBeCloseTo(120);
+  });
+
+  it('counts edge pixels: none on flat or graded ground, many on a shape', () => {
+    const width = 40;
+    const height = 20;
+    const flat = Buffer.alloc(width * height * 3, 200);
+    expect(edgePixels(flat, width)).toBe(0);
+    const graded = Buffer.alloc(width * height * 3);
+    for (let i = 0; i < graded.length; i += 1) graded[i] = 150 + Math.floor((i / 3) % width);
+    expect(edgePixels(graded, width)).toBe(0);
+    const shape = Buffer.from(flat);
+    for (let y = 5; y < 15; y += 1)
+      for (let x = 10; x < 20; x += 1) shape.fill(0, (y * width + x) * 3, (y * width + x) * 3 + 3);
+    expect(edgePixels(shape, width)).toBeGreaterThan(20);
+  });
+
+  it('compares each frame with the frames before the one before it', () => {
+    const scanner = new FrameScanner(8, 8);
+    const a = Buffer.alloc(8 * 8 * 3, 10);
+    const b = Buffer.alloc(8 * 8 * 3, 200);
+    scanner.push(Buffer.concat([a, b, a]));
+    const [first, second, third] = scanner.finish();
+    expect(first?.echo).toEqual([]);
+    expect(second?.echo).toEqual([]);
+    expect(third?.echo).toEqual([0]);
+    expect(third?.mad).toBe(190);
   });
 
   it('counts a static run in frames that look the same, from the frame before the first still one', () => {
@@ -107,8 +137,95 @@ describe('frame checks', () => {
     expect(checks.map((check) => [check.id, check.result])).toEqual([
       ['black-frames', 'pass'],
       ['frame-0', 'pass'],
+      ['blank-frames', 'pass'],
+      ['flash-frames', 'pass'],
       ['static-runs', 'pass'],
     ]);
+  });
+
+  it('fails empty ground on frames the agent is never shown', () => {
+    const { checks, issues } = checkFrames(
+      film(600, (frame) => (frame >= 100 && frame <= 105 ? { edges: 0, max: 250 } : {})),
+      cut,
+    );
+    expect(checks.find((check) => check.id === 'blank-frames')).toMatchObject({
+      result: 'fail',
+      frames: [100],
+    });
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: 'major',
+        check: 'blank-frames',
+        owner: 'motion',
+        frame: 100,
+        sceneId: 'open',
+      }),
+    ]);
+  });
+
+  it('allows the blank frames of a t5 seam, and no more', () => {
+    const t5 = example();
+    const open = t5.scenes[0];
+    if (open) open.transitionOut = 't5';
+    const seam = sceneFrames(t5).scenes[1]?.from ?? 0;
+    const blank = (last: number) =>
+      checkFrames(
+        film(600, (frame) => (frame >= seam && frame <= last ? { edges: 3 } : {})),
+        t5,
+      ).issues.map((issue) => issue.check);
+    expect(blank(seam + 1)).toEqual([]);
+    expect(blank(seam + 2)).toEqual(['blank-frames']);
+  });
+
+  it('fails a frame 0 that shows only graded ground', () => {
+    const { issues } = checkFrames(
+      film(600, (frame) => (frame === 0 ? { edges: 0, spread: 9.5, max: 56 } : {})),
+      cut,
+    );
+    expect(issues).toEqual([
+      expect.objectContaining({ check: 'frame-0', what: expect.stringContaining('only ground') }),
+    ]);
+  });
+
+  it('leaves frame 0 to the frame-0 check', () => {
+    const { issues } = checkFrames(
+      film(600, (frame) => (frame <= 1 ? { edges: 0, spread: frame === 0 ? 0 : 20 } : {})),
+      cut,
+    );
+    expect(issues.map((issue) => issue.check)).toEqual(['frame-0']);
+  });
+
+  it('fails a flash that jumps away and back between sampled frames', () => {
+    const { issues } = checkFrames(
+      // Frame 105 is 0.7 levels from frame 94, 11 frames back, which is echo index 9.
+      film(600, (frame) => (frame === 95 || frame === 105 ? { mad: 28 } : {})).map((stat) =>
+        stat.frame === 105
+          ? { ...stat, echo: stat.echo?.map((value, index) => (index === 9 ? 0.7 : value)) }
+          : stat,
+      ),
+      cut,
+    );
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: 'major',
+        check: 'flash-frames',
+        owner: 'motion',
+        frame: 95,
+        what: expect.stringContaining('Frames 95-104 (10)'),
+      }),
+    ]);
+  });
+
+  it('does not take two jumps that do not come back for a flash', () => {
+    const { issues } = checkFrames(
+      film(600, (frame) =>
+        frame === 95 || frame === 105
+          ? { mad: 28, echo: Array.from({ length: 12 }, () => 25) }
+          : {},
+      ),
+      cut,
+    );
+    expect(issues).toEqual([]);
   });
 
   it('fails black frames and names the scene and timecode they are in', () => {

@@ -16,9 +16,14 @@ import {
 } from '@boiler-room/schema';
 import {
   BLACK_MAX,
+  BLANK_EDGES,
   blackRuns,
+  blankRuns,
   channelDistance,
+  FLASH_WINDOW,
+  type Flash,
   type FrameStats,
+  flashRuns,
   hexToRgb,
   type Rgb,
   type Run,
@@ -362,6 +367,59 @@ export const MAX_STATIC_RUN = 30;
 /** Black frames are allowed only inside a `t16` dip to black, which spans its boundary. */
 const T16_REACH = 12;
 
+/** Blank frames `t5` allows after its seam: 2, or 5 for a chapter blink into a pivot card. */
+const T5_BLANK = 2;
+const T5_PIVOT_BLANK = 5;
+
+/** Frames that may show only ground: after a `t5` seam, and inside a `t16` dip. */
+export function blankAllowed(
+  cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds'>,
+): { from: number; to: number; why: string }[] {
+  const frames = sceneFrames(cut);
+  return frames.scenes.flatMap((_scene, index) => {
+    const next = frames.scenes[index + 1];
+    const transition = cut.scenes[index]?.transitionOut;
+    if (!next) return [];
+    if (transition === 't5') {
+      const pivot = cut.scenes[index + 1]?.props.variant === 'pivot';
+      return [
+        {
+          from: next.from,
+          to: next.from + (pivot ? T5_PIVOT_BLANK : T5_BLANK) - 1,
+          why: `t5 at F${next.from}`,
+        },
+      ];
+    }
+    if (transition === 't16') {
+      return [
+        { from: next.from - T16_REACH, to: next.from + T16_REACH - 1, why: `t16 at F${next.from}` },
+      ];
+    }
+    return [];
+  });
+}
+
+/**
+ * Frames code flags on every frame of the film, whether or not the agent is shown them: runs of
+ * empty ground outside what `t5` and `t16` allow (frame 0 is the frame-0 check's), and flashes,
+ * where the picture jumps away and back within a few frames.
+ */
+export function frameOutliers(
+  stats: readonly FrameStats[],
+  cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds'>,
+): { blank: Run[]; flash: Flash[] } {
+  const allowed = blankAllowed(cut);
+  const within = (run: Run, pad = 0) =>
+    allowed.some((span) => run.from >= span.from - pad && run.to <= span.to + pad);
+  const blank = blankRuns(stats).filter((run) => run.from > 0 && !within(run));
+  const covered = [...blackRuns(stats), ...blankRuns(stats)];
+  const flash = flashRuns(stats).filter(
+    (run) =>
+      !within(run, 1) && !covered.some((other) => other.from <= run.to && other.to >= run.from),
+  );
+  return { blank, flash };
+}
+
 export function checkFrames(
   stats: readonly FrameStats[],
   cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds'>,
@@ -374,6 +432,43 @@ export function checkFrames(
     const next = frames.scenes[index + 1];
     return cut.scenes[index]?.transitionOut === 't16' && next ? [next.from] : [];
   });
+  const measuredEdges = stats.some((stat) => stat.edges !== undefined);
+  const measuredEcho = stats.some((stat) => stat.echo !== undefined);
+  const outliers = frameOutliers(stats, cut);
+  for (const run of outliers.blank) {
+    const sceneId = sceneAt(frames, run.from);
+    issues.push(
+      codeIssue(
+        {
+          severity: 'major',
+          check: 'blank-frames',
+          owner: 'motion',
+          frame: run.from,
+          sceneId,
+          what: `${run.length === 1 ? `Frame ${run.from} shows` : `Frames ${run.from}-${run.to} (${run.length}) show`} only ground: at most ${BLANK_EDGES} edge pixels at 320 x 180, in scene ${sceneId ?? 'none'}, outside any t5 blink or t16 dip.`,
+          fix: `Find why ${sceneId ?? 'the film'} draws nothing at ${timecode(run.from, fps)}: a chunk that rendered empty, a layer that has not entered, or a transition that leaves the ground bare. Only a t5 seam may show empty ground, for 2 frames (5 into a pivot).`,
+        },
+        fps,
+      ),
+    );
+  }
+  for (const run of outliers.flash) {
+    const sceneId = sceneAt(frames, run.from);
+    issues.push(
+      codeIssue(
+        {
+          severity: 'major',
+          check: 'flash-frames',
+          owner: 'motion',
+          frame: run.from,
+          sceneId,
+          what: `${run.length === 1 ? `Frame ${run.from}` : `Frames ${run.from}-${run.to} (${run.length})`} jump away from the picture and back: ${run.jumpIn.toFixed(1)} levels in and ${run.jumpOut.toFixed(1)} out, and frame ${run.to + 1} is within ${run.back.toFixed(2)} levels of frame ${run.from - 1}. Something showed for ${run.length} frame${run.length === 1 ? '' : 's'} that the scene does not.`,
+          fix: `Look at ${timecode(run.from, fps)} to ${timecode(run.to, fps)} in ${sceneId ?? 'the film'}: a chunk from another render, a frame drawn out of order, or a layer that flashes. Render those frames again.`,
+        },
+        fps,
+      ),
+    );
+  }
   const black = blackRuns(stats).filter(
     (run) =>
       !dips.some((boundary) => run.from >= boundary - T16_REACH && run.to < boundary + T16_REACH),
@@ -397,7 +492,8 @@ export function checkFrames(
   }
 
   const first = stats[0];
-  const frameZeroOk = Boolean(first && first.spread > 0 && first.max > BLACK_MAX);
+  const frameZeroBare = first?.edges !== undefined && first.edges <= BLANK_EDGES;
+  const frameZeroOk = Boolean(first && first.spread > 0 && first.max > BLACK_MAX && !frameZeroBare);
   if (first && !frameZeroOk) {
     issues.push(
       codeIssue(
@@ -407,7 +503,7 @@ export function checkFrames(
           owner: 'motion',
           frame: 0,
           sceneId: sceneAt(frames, 0),
-          what: `Frame 0 is ${first.max <= BLACK_MAX ? 'black' : 'one flat colour'} (max ${first.max}, spread ${first.spread.toFixed(2)}).`,
+          what: `Frame 0 is ${first.max <= BLACK_MAX ? 'black' : first.spread > 0 ? 'only ground' : 'one flat colour'} (max ${first.max}, spread ${first.spread.toFixed(2)}${first.edges !== undefined ? `, ${first.edges} edge pixels` : ''}).`,
           fix: 'Put content on screen from frame 0: the first scene starts in motion, not from an empty ground.',
         },
         fps,
@@ -457,10 +553,32 @@ export function checkFrames(
         'frame-0',
         frameZeroOk ? 'pass' : 'fail',
         first
-          ? `max ${first.max}, mean ${first.mean.toFixed(1)}, spread ${first.spread.toFixed(2)}`
+          ? `max ${first.max}, mean ${first.mean.toFixed(1)}, spread ${first.spread.toFixed(2)}${first.edges !== undefined ? `, ${first.edges} edge pixels` : ''}`
           : 'no frames decoded',
-        'pixel variance above 0 and not black',
+        `pixel variance above 0, not black, and more than ${BLANK_EDGES} edge pixels (not only ground)`,
         [0],
+      ),
+      check(
+        'blank-frames',
+        !measuredEdges ? 'n/a' : outliers.blank.length ? 'fail' : 'pass',
+        !measuredEdges
+          ? 'edges not measured'
+          : outliers.blank.length
+            ? `empty ground at ${listRuns(outliers.blank)}`
+            : `none outside t5 and t16; fewest edge pixels after frame 0: ${Math.min(...stats.slice(1).map((stat) => stat.edges ?? Number.POSITIVE_INFINITY))}`,
+        `no frame after frame 0 with at most ${BLANK_EDGES} edge pixels (only ground), except after a t5 seam or inside a t16 dip`,
+        outliers.blank.map((run) => run.from),
+      ),
+      check(
+        'flash-frames',
+        !measuredEcho ? 'n/a' : outliers.flash.length ? 'fail' : 'pass',
+        !measuredEcho
+          ? 'earlier frames not compared'
+          : outliers.flash.length
+            ? `flash at ${listRuns(outliers.flash)}`
+            : `no run of ${FLASH_WINDOW} frames or fewer that jumps away from the picture and back`,
+        `no run of up to ${FLASH_WINDOW} frames that jumps away and back, on any frame`,
+        outliers.flash.map((run) => run.from),
       ),
       check(
         'static-runs',
