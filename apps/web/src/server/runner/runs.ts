@@ -106,6 +106,7 @@ export const FAILURE_MESSAGES: Record<string, string> = {
   runner_standin:
     "The crew's computer runs a test stand-in instead of the crew, so this film stopped.",
   stopped: 'This film was stopped.',
+  withdrawn: 'Boiler Room withdrew this free sample, so it stopped.',
 };
 
 const LIVE: RunState[] = [

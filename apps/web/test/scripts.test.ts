@@ -146,8 +146,9 @@ describe('real-film secrets', () => {
         ['RUNNER_SIGNING_SECRET', signing],
         ['REAL_FILM_USERS', 'user_a,user_b'],
       ],
-      // The film command's key waits for the real film command; the stand-in needs none.
-      skipped: ['STAGING_NAIVE_RUNNER_KEY'],
+      // The film command's key waits for the real film command; the stand-in needs none. The GTM
+      // token waits for GTM.
+      skipped: ['STAGING_NAIVE_RUNNER_KEY', 'STAGING_GTM_SERVICE_TOKEN'],
       problems: [],
     });
     // The unscoped admin key never stands in for the website's key.
@@ -183,7 +184,7 @@ describe('real-film secrets', () => {
     });
     // The founders list may wait; the key and the signing secret may not.
     expect(runnerSecretsFor(everything, 'staging')).toMatchObject({
-      skipped: ['STAGING_REAL_FILM_USERS', 'STAGING_NAIVE_RUNNER_KEY'],
+      skipped: ['STAGING_REAL_FILM_USERS', 'STAGING_NAIVE_RUNNER_KEY', 'STAGING_GTM_SERVICE_TOKEN'],
       problems: [],
     });
     expect(
@@ -192,6 +193,27 @@ describe('real-film secrets', () => {
         'staging',
       ).problems,
     ).toEqual(['STAGING_RUNNER_SIGNING_SECRET is shorter than 32 characters.']);
+  });
+
+  it('syncs the GTM service token from its STAGING_ name, long and not shared with another secret', () => {
+    const gtm = 'g'.repeat(64);
+    const base = ['STAGING_NAIVE_WEB_KEY=web-FAKE', `STAGING_RUNNER_SIGNING_SECRET=${signing}`];
+    expect(
+      runnerSecretsFor(file([...base, `STAGING_GTM_SERVICE_TOKEN=${gtm}`]), 'staging').values,
+    ).toContainEqual(['GTM_SERVICE_TOKEN', gtm]);
+    // The executor's own copy, GTM_SERVICE_TOKEN, is never what the sync reads.
+    expect(
+      runnerSecretsFor(file([...base, `GTM_SERVICE_TOKEN=${gtm}`]), 'staging').values,
+    ).not.toContainEqual(['GTM_SERVICE_TOKEN', gtm]);
+    expect(
+      runnerSecretsFor(file([...base, 'STAGING_GTM_SERVICE_TOKEN=short']), 'staging').problems,
+    ).toEqual(['STAGING_GTM_SERVICE_TOKEN is shorter than 32 characters.']);
+    expect(
+      runnerSecretsFor(file([...base, `STAGING_GTM_SERVICE_TOKEN=${signing}`]), 'staging').problems,
+    ).toEqual(['STAGING_GTM_SERVICE_TOKEN reuses another secret. It is its own.']);
+    expect(
+      runnerSecretsFor(file([`STAGING_GTM_SERVICE_TOKEN=${gtm}`]), 'production').values,
+    ).toEqual([]);
   });
 
   it('accepts only a website key with exactly computers:write and billing:read', async () => {

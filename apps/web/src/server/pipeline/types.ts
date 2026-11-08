@@ -19,12 +19,14 @@ export interface PipelineClient {
   readonly kind: PipelineKind;
   /**
    * Starts making a film of `url`. `filmId` is the app's id, so a retried start is one run. A
-   * `sample` film (a GTM sample) runs straight through with no approval step.
+   * `sample` film (a GTM sample) runs straight through with no approval step. `costCapMicroUsd`
+   * lowers the film's whole cap below the website's own, never above it.
    */
   start(input: {
     filmId: string;
     url: string;
     mode?: 'customer' | 'sample';
+    costCapMicroUsd?: number;
   }): Promise<{ runId: string }>;
   /** Where the run is now. */
   status(runId: string): Promise<PipelineStatus>;

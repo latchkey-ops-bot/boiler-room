@@ -10,6 +10,9 @@ export const RUNNER_SECRETS = [
   { name: 'REAL_FILM_USERS', from: 'STAGING_REAL_FILM_USERS', optional: true },
   // The film command's key, which the website sends with each launch. The stand-in needs none.
   { name: 'NAIVE_RUNNER_KEY', from: 'STAGING_NAIVE_RUNNER_KEY', optional: true },
+  // The GTM executor's bearer token for /api/gtm/v1/. The executor holds the same value as
+  // GTM_SERVICE_TOKEN. Unset: the GTM routes answer 503 and no sample film can be ordered.
+  { name: 'GTM_SERVICE_TOKEN', from: 'STAGING_GTM_SERVICE_TOKEN', optional: true },
 ];
 
 /** The only scopes the website's Naive key may hold. */
@@ -54,6 +57,13 @@ export function runnerSecretsFor(vars, env) {
   const signing = found.find((secret) => secret.name === 'RUNNER_SIGNING_SECRET')?.value;
   if (signing && signing.length < 32) {
     problems.push('STAGING_RUNNER_SIGNING_SECRET is shorter than 32 characters.');
+  }
+  const gtm = found.find((secret) => secret.name === 'GTM_SERVICE_TOKEN')?.value;
+  if (gtm && gtm.length < 32) {
+    problems.push('STAGING_GTM_SERVICE_TOKEN is shorter than 32 characters.');
+  }
+  if (gtm && [signing, webKey, runnerKey, admin].includes(gtm)) {
+    problems.push('STAGING_GTM_SERVICE_TOKEN reuses another secret. It is its own.');
   }
   return {
     values: found
