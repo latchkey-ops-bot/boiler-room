@@ -49,7 +49,8 @@ export const director: AgentDefinition = {
     ],
   ),
   skills: DIRECTOR_SKILLS.map(repoSkill),
-  budget: { cap_micro_usd: 12_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
+  // Raised on Naive on 8 November to $40 a day and $3 a task; agents:sync keeps them.
+  budget: { cap_micro_usd: 40_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
   output_schema: directorOutputJsonSchema,
   structured_output_required: true,
   handoffs: false,

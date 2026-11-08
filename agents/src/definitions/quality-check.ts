@@ -49,7 +49,8 @@ export const qualityCheck: AgentDefinition = {
         'Pass and fail criteria for a rendered Boiler Room film: contact sheet, transitions, phone-size legibility, brand match, claims, timing and audio.',
     },
   ],
-  budget: { cap_micro_usd: 5_000_000, max_task_micro_usd: 1_500_000, period: 'day' },
+  // Raised on Naive on 8 November to $15 a day and $2 a task; agents:sync keeps them.
+  budget: { cap_micro_usd: 15_000_000, max_task_micro_usd: 2_000_000, period: 'day' },
   output_schema: qcReviewJsonSchema,
   structured_output_required: true,
   handoffs: false,

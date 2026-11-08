@@ -47,7 +47,8 @@ export const artDirector: AgentDefinition = {
         'How the Art Director chooses the style family, fixes colour, type and logo, assigns captured assets by the asset ladder, and generates only what may be generated.',
     },
   ],
-  budget: { cap_micro_usd: 5_000_000, max_task_micro_usd: 1_500_000, period: 'day' },
+  // Raised on Naive on 8 November to $20 a day and $2 a task; agents:sync keeps them.
+  budget: { cap_micro_usd: 20_000_000, max_task_micro_usd: 2_000_000, period: 'day' },
   output_schema: reviewJsonSchema,
   structured_output_required: true,
   handoffs: false,

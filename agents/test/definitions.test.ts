@@ -24,6 +24,29 @@ describe('every agent definition', () => {
       }
     },
   );
+
+  // The caps raised on Naive on 8 November. A sync writes the whole definition, so a cap that
+  // lived only on Naive would be put back to the old one by the next agents:sync.
+  it('keeps the daily and per-task caps the crew runs on', () => {
+    const caps = Object.fromEntries(
+      agents.map((agent) => [
+        agent.name,
+        [agent.budget.cap_micro_usd, agent.budget.max_task_micro_usd],
+      ]),
+    );
+    expect(caps).toEqual({
+      'br-researcher': [15_000_000, 3_000_000],
+      'br-director': [40_000_000, 3_000_000],
+      'br-art-director': [20_000_000, 2_000_000],
+      'br-quality-check': [15_000_000, 2_000_000],
+    });
+    for (const agent of agents) {
+      expect(agent.budget.period, agent.name).toBe('day');
+      expect(agent.session.budget_micro_usd, agent.name).toBeLessThanOrEqual(
+        agent.budget.max_task_micro_usd ?? 0,
+      );
+    }
+  });
 });
 
 describe('the researcher definition', () => {
