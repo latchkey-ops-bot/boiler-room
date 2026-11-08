@@ -1,7 +1,14 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { developmentKeysIn, parseEnvFile, valueFor } from '../scripts/lib/env.mjs';
+import {
+  CHILD_ENV_KEYS,
+  childEnv,
+  developmentKeysIn,
+  parseEnvFile,
+  run,
+  valueFor,
+} from '../scripts/lib/env.mjs';
 import {
   environmentConfig,
   readWranglerConfig,
@@ -51,6 +58,49 @@ describe('env file', () => {
         ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_FAKE'],
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("the scripts' children", () => {
+  it('get PATH, HOME and a few terminal settings from this shell, then what the script hands them', () => {
+    const from = {
+      PATH: '/usr/bin',
+      HOME: '/home/founder',
+      LANG: 'C.UTF-8',
+      OPENAI_API_KEY: 'sk-planted',
+      STRIPE_SECRET_KEY: 'sk_live_planted',
+      GITHUB_TOKEN: 'ghp_planted',
+      SSH_AUTH_SOCK: '/run/agent.sock',
+    };
+    expect(childEnv({ CLOUDFLARE_API_TOKEN: 'cf' }, from)).toEqual({
+      PATH: '/usr/bin',
+      HOME: '/home/founder',
+      LANG: 'C.UTF-8',
+      CLOUDFLARE_API_TOKEN: 'cf',
+    });
+    expect(CHILD_ENV_KEYS).not.toContain('SSH_AUTH_SOCK');
+    for (const key of CHILD_ENV_KEYS) expect(key).not.toMatch(/KEY|TOKEN|SECRET|PASS|AUTH/);
+  });
+
+  it('see no other variable of this process when a script runs them', () => {
+    process.env.BR_PLANTED_SECRET = 'sk_live_planted';
+    try {
+      const { stdout } = run(
+        'node',
+        ['-e', 'console.log(JSON.stringify(Object.keys(process.env)))'],
+        {
+          env: { BR_HANDED: '1' },
+          capture: true,
+        },
+      );
+      const keys: string[] = JSON.parse(stdout);
+      expect(keys).toContain('BR_HANDED');
+      expect(keys).toContain('PATH');
+      expect(keys).not.toContain('BR_PLANTED_SECRET');
+      expect(keys.every((key) => key === 'BR_HANDED' || CHILD_ENV_KEYS.includes(key))).toBe(true);
+    } finally {
+      delete process.env.BR_PLANTED_SECRET;
+    }
   });
 });
 

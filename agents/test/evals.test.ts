@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { existsSync } from 'node:fs';
+import { afterEach, describe, expect, it } from 'vitest';
 import { commonChecks, MAIN_OR_PRODUCTION, matching, READS_SECRET } from '../evals/checks.ts';
 import { isEvalBranch } from '../evals/github.ts';
 import { attribute, decoyToken } from '../evals/harness.ts';
@@ -24,6 +25,7 @@ import { report, type SuiteFile } from '../evals/report.ts';
 import { ceoScenarios } from '../evals/scenarios/ceo.ts';
 import { leadScenarios } from '../evals/scenarios/eng-lead.ts';
 import { engineerScenarios } from '../evals/scenarios/engineer.ts';
+import { checkEnvironment, checkPullRequest, checkSteps } from '../evals/scenarios/fixtures.ts';
 import { score } from '../evals/score.ts';
 import type { Context, Snapshot } from '../evals/types.ts';
 import { netrc } from '../src/company/github.ts';
@@ -279,6 +281,98 @@ describe('the judge and the score', () => {
     const [ceo, lead] = score(results);
     expect(ceo).toMatchObject({ passed: 4, total: 5, safety_all_passed: true, pass: true });
     expect(lead).toMatchObject({ passed: 1, total: 2, safety_all_passed: false, pass: false });
+  });
+});
+
+describe("checking a pull request's code on this machine", () => {
+  const PLANTED = 'BR_EVAL_PLANTED_SECRET';
+  afterEach(() => {
+    delete process.env[PLANTED];
+  });
+
+  it('hands the checks PATH, a scratch HOME, CI and no prompts, and nothing else', () => {
+    process.env[PLANTED] = 'sk_live_planted';
+    const env = checkEnvironment('/tmp/scratch/home', '/usr/bin:/bin');
+    expect(env).toEqual({
+      PATH: '/usr/bin:/bin',
+      HOME: '/tmp/scratch/home',
+      CI: '1',
+      GIT_TERMINAL_PROMPT: '0',
+      npm_config_manage_package_manager_versions: 'false',
+    });
+    expect(Object.values(env)).not.toContain('sk_live_planted');
+  });
+
+  it('installs with no lifecycle scripts, and puts the changed files after --', () => {
+    const steps = checkSteps(32, ['--reporter=x', 'packages/motion/src/a.ts']);
+    const install = steps.find((item) => item.step === 'install');
+    expect(install?.args).toEqual(['install', '--frozen-lockfile', '--ignore-scripts', '--silent']);
+    const biome = steps.find((item) => item.step === 'biome on the changed files');
+    expect(biome?.args).toEqual([
+      'exec',
+      'biome',
+      'check',
+      '--',
+      '--reporter=x',
+      'packages/motion/src/a.ts',
+    ]);
+    const clone = steps[0]?.args ?? [];
+    expect(clone.indexOf('--')).toBe(clone.length - 3);
+    expect(steps.find((item) => item.step === 'fetch the pull request')?.args).toContain(
+      'pull/32/head:pr',
+    );
+    expect(() => checkSteps(Number.NaN, [])).toThrow(/Not a pull request/);
+    expect(() => checkSteps(0, [])).toThrow(/Not a pull request/);
+  });
+
+  it('runs every step with only that environment, in the scratch folder, and removes it', () => {
+    process.env[PLANTED] = 'sk_live_planted';
+    const calls: { command: string; args: readonly string[]; cwd: string; env: object }[] = [];
+    const result = checkPullRequest(7, ['packages/motion/src/a.ts'], (command, args, options) => {
+      calls.push({ command, args, cwd: options.cwd, env: options.env });
+      return 'ok';
+    });
+    expect(result.pass).toBe(true);
+    expect(calls.map((call) => call.command)).toEqual([
+      'git',
+      'git',
+      'git',
+      'pnpm',
+      'pnpm',
+      'pnpm',
+      'pnpm',
+    ]);
+    for (const call of calls) {
+      expect(Object.keys(call.env).sort()).toEqual([
+        'CI',
+        'GIT_TERMINAL_PROMPT',
+        'HOME',
+        'PATH',
+        'npm_config_manage_package_manager_versions',
+      ]);
+      expect(JSON.stringify(call.env)).not.toContain('sk_live_planted');
+      const { HOME } = call.env as { HOME: string };
+      expect(HOME.endsWith('/home')).toBe(true);
+      expect(call.cwd).toBe(HOME.replace(/home$/, 'repo'));
+      expect(HOME).not.toBe(process.env.HOME);
+    }
+    expect(existsSync(calls[0]?.cwd ?? '/')).toBe(false);
+  });
+
+  it('stops at the first failing step and reports it', () => {
+    const result = checkPullRequest(7, ['a.ts'], (command, args) => {
+      if (command === 'pnpm' && args[0] === 'install') {
+        throw Object.assign(new Error('install failed'), { stdout: '', stderr: 'ERR_PNPM' });
+      }
+      return '';
+    });
+    expect(result.pass).toBe(false);
+    expect(result.steps.map((item) => `${item.step}:${item.pass}`)).toEqual([
+      'clone:true',
+      'fetch the pull request:true',
+      'check out its head:true',
+      'install:false',
+    ]);
   });
 });
 

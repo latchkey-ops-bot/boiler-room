@@ -122,11 +122,51 @@ export function requireCloudflare(vars) {
   return credentials;
 }
 
-/** Runs a command in the app folder and waits. Throws on a non-zero exit unless `allowFail`. */
+/**
+ * Variables a child keeps from this shell, when they are set. The children build and run the
+ * repo's code (`next build` runs `next.config.ts` and the app, OpenNext runs its config, wrangler
+ * reads `wrangler.jsonc`), which agents' pull requests wrote, and a person's shell can hold any
+ * key. So a child gets only these, and whatever the script hands it on purpose, such as the
+ * Cloudflare keys. `HOME` stays: wrangler, pnpm and Next keep their config and caches under it.
+ */
+export const CHILD_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'LANG',
+  'TERM',
+  'COLORTERM',
+  'NO_COLOR',
+  'FORCE_COLOR',
+  'CI',
+];
+
+/**
+ * A child's environment: `CHILD_ENV_KEYS` from this process, then `extra`. Nothing else from
+ * `process.env` reaches the child.
+ *
+ * @param {Record<string, string>} [extra]
+ * @param {Record<string, string | undefined>} [from]
+ * @returns {Record<string, string>}
+ */
+export function childEnv(extra = {}, from = process.env) {
+  /** @type {Record<string, string>} */
+  const env = {};
+  for (const key of CHILD_ENV_KEYS) {
+    const value = from[key];
+    if (typeof value === 'string') env[key] = value;
+  }
+  return { ...env, ...extra };
+}
+
+/**
+ * Runs a command in the app folder and waits, with `childEnv(env)`. Throws on a non-zero exit
+ * unless `allowFail`.
+ */
 export function run(command, args, { env = {}, input, allowFail = false, capture = false } = {}) {
   const result = spawnSync(command, args, {
     cwd: APP_DIR,
-    env: { ...process.env, ...env },
+    env: childEnv(env),
     input,
     stdio: [input === undefined ? 'inherit' : 'pipe', capture ? 'pipe' : 'inherit', 'inherit'],
     encoding: 'utf8',
@@ -138,12 +178,15 @@ export function run(command, args, { env = {}, input, allowFail = false, capture
   return { status: result.status ?? 1, stdout: result.stdout ?? '' };
 }
 
-/** Runs a command and streams its output, also returning it, so a script can read a URL from it. */
+/**
+ * Runs a command with `childEnv(env)` and streams its output, also returning it, so a script can
+ * read a URL from it.
+ */
 export function runTee(command, args, { env = {} } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd: APP_DIR,
-      env: { ...process.env, ...env },
+      env: childEnv(env),
       stdio: ['inherit', 'pipe', 'inherit'],
     });
     let out = '';
@@ -160,6 +203,10 @@ export function bin(name, args, options) {
   return run('pnpm', ['exec', name, ...args], options);
 }
 
+/**
+ * Runs git in the repo. It keeps this shell's environment: git runs none of the repo's code, and
+ * a fetch needs the person's own git config and credentials.
+ */
 export function git(args) {
   const result = spawnSync('git', args, { cwd: REPO_DIR, encoding: 'utf8' });
   return result.status === 0 ? result.stdout.trim() : null;
