@@ -444,15 +444,22 @@ class Day {
     }
     // A removal that took a live asset down is a card; any other is a comment, which starts no digest.
     if (liveDown > 0 && plan.domain) {
-      const card = await this.ports.board
-        .ensureCard({
+      const summary = `Removal ${plan.id} by ${plan.request.channel}: ${plan.posts.length} X post(s) deleted, ${plan.films.length} film(s) withdrawn, ${plan.suppressed} suppression row(s). Written by the GTM executor.`;
+      try {
+        // A card reaches done only with a note, so it is created todo and moved to done with one.
+        const card = await this.ports.board.ensureCard({
           title: `REMOVE: ${plan.id}`,
-          body: `Removal ${plan.id} by ${plan.request.channel}: ${plan.posts.length} X post(s) deleted, ${plan.films.length} film(s) withdrawn, ${plan.suppressed} suppression row(s). Written by the GTM executor.`,
-          status: 'done',
+          body: summary,
+          status: 'todo',
           key: `gtm-remove:${plan.domain}:${this.date}`,
-        })
-        .catch(() => null);
-      if (card) this.log(`removals  REMOVE: ${plan.id}`);
+        });
+        await this.ports.board.move(card.id, 'done', summary);
+        this.log(`removals  REMOVE: ${plan.id}`);
+      } catch (error) {
+        this.log(
+          `removals  REMOVE card failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     await this.comment('REMOVAL', plan.id, 'done', [
       `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${plan.posts.length} post(s), ${plan.films.length} film(s).`,

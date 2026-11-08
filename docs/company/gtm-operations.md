@@ -721,9 +721,11 @@ at least as many suppression rows as it ever did.
 
 **Before S3, films live:** (\* checked each tick)
 
-1. \* `company:verify --lockdown` passes with **zero** over-exposed agents, covering every crew agent
-   and any per-run Researcher, and every GTM agent allows only `read_skill` and `session_spend`.
-   Until it passes, `film_lane` is forced to dry run. (Today it fails: `br-researcher`,
+1. \* Zero over-exposed agents on the company board, covering every crew agent and any per-run
+   Researcher: the executor runs the same read as `company:verify --lockdown` on every tick, and
+   until it passes `film_lane` is forced to dry run. The GTM agents' own tools are checked twice:
+   by the executor's daily tamper check, and by `company:verify --lockdown`, which also fails on a
+   stored GTM agent that allows more than `read_skill` and `session_spend`. (Today it fails: `br-researcher`,
    `br-director`, `br-art-director` and `br-quality-check` are offered `board_write` on the company
    board, and the Researcher reads the sites GTM chooses.)
 2. The pipeline makes a real film from a URL end to end, and Quality Check passes it.
@@ -765,12 +767,12 @@ written or minimal answers accepted; the inbox phase built (section 10.4); one c
 
 ### 16.1 Cards
 
-| Card                  | Created                                                                                                       | Status                                          | Body and note                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `GTM: <date>`         | The first tick of the day                                                                                     | `todo`, unassigned, all day; `done` at `report` | Body: the mode, each lane's state, today's caps, the schedule, how to `HOLD`. Note: the report (section 17). |
-| `REMOVE: rm-xxxxxx`   | Only when a live asset (our X post or a film page) was actually taken down. Key `gtm-remove:<domain>:<date>`. | Created `done`                                  | Counts and opaque ids only                                                                                   |
-| `FOUNDER: gtm <need>` | When a person must act; one per need, by key                                                                  | `blocked`, no blocker, unassigned               | What to do, step by step                                                                                     |
-| `GTM-HOLD: <reason>`  | By anyone                                                                                                     | Any but `done`                                  | While open, every lane is dry run                                                                            |
+| Card                  | Created                                                                                                       | Status                                             | Body and note                                                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `GTM: <date>`         | The first tick of the day                                                                                     | `todo`, unassigned, all day; `done` at `report`    | Body: the mode, each lane's state, today's caps, the schedule, how to `HOLD`. Note: the report (section 17). |
+| `REMOVE: rm-xxxxxx`   | Only when a live asset (our X post or a film page) was actually taken down. Key `gtm-remove:<domain>:<date>`. | Created `todo`, then moved to `done` with its note | Counts and opaque ids only                                                                                   |
+| `FOUNDER: gtm <need>` | When a person must act; one per need, by key                                                                  | `blocked`, no blocker, unassigned                  | What to do, step by step                                                                                     |
+| `GTM-HOLD: <reason>`  | By anyone                                                                                                     | Any but `done`                                     | While open, every lane is dry run                                                                            |
 
 **Titles and bodies carry only opaque ids** (`ld-7k2m9q`, `rm-0007`) and fixed words. Domains
 appear only in day-card comments and the review file, because a domain's labels are chosen by its
@@ -883,19 +885,20 @@ out beyond the caps, cannot write the board, and cannot start any agent.
 
 ## 20. What is built, and what waits
 
-| Work                                                                                                               | State                                                                 | Waits on                                                        |
-| ------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Agent definitions, skills, CEO paragraph, verify and halt changes                                                  | built                                                                 | `company:sync` after merge                                      |
-| Executor core, dry-run ports, caps, ledger, suppression, removal, copy checks, report                              | built, tested                                                         |                                                                 |
-| Discovery and site reading                                                                                         | built; HN and PH run free; X and PH site lookup need the executor key | The key                                                         |
-| `pnpm gtm:day`, `gtm:report`, `gtm:halt`, `gtm:schedule`                                                           | built                                                                 |                                                                 |
-| Guarded Naive client, `NaiveAgentRunner`, `NaiveBoard`, `NaiveSocial`, `AppFilmOrder`, `AppGtm`, `AgentMailClient` | built as thin adapters; none constructed in dry run                   | Live use waits on section 15                                    |
-| `--board`                                                                                                          | built, off by default                                                 | The one-card REST probe (section 15, S1 step 5)                 |
-| Inbox phase and reply lane                                                                                         | planned (S6); stop-phrase scanning built                              |                                                                 |
-| `consent` mode                                                                                                     | planned                                                               | The web job's consent route                                     |
-| Cold sender adapter (with DSN bounce parsing)                                                                      | planned                                                               | The founder's choice of sender                                  |
-| `gtm-executor` Worker and D1                                                                                       | planned (S2)                                                          | Three clean dry-run days; Cloudflare access for a second Worker |
-| Weekly ledger comparison phase                                                                                     | planned (S2)                                                          |                                                                 |
+| Work                                                                                                               | State                                                                                                                                                                                                  | Waits on                                                        |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| Agent definitions, skills, CEO paragraph, verify and halt changes                                                  | built                                                                                                                                                                                                  | `company:sync` after merge                                      |
+| Executor core, dry-run ports, caps, ledger, suppression, removal, copy checks, report                              | built, tested                                                                                                                                                                                          |                                                                 |
+| Discovery and site reading                                                                                         | built; HN and PH run free; X and PH site lookup need the executor key                                                                                                                                  | The key                                                         |
+| `pnpm gtm:day`, `gtm:report`, `gtm:halt`, `gtm:schedule`                                                           | built                                                                                                                                                                                                  |                                                                 |
+| Guarded Naive client, `NaiveAgentRunner`, `NaiveBoard`, `NaiveSocial`, `AppFilmOrder`, `AppGtm`, `AgentMailClient` | built as thin adapters; none constructed in dry run                                                                                                                                                    | Live use waits on section 15                                    |
+| `--board`                                                                                                          | built, off by default                                                                                                                                                                                  | The one-card REST probe (section 15, S1 step 5)                 |
+| Inbox phase and reply lane                                                                                         | planned (S6); stop-phrase scanning built                                                                                                                                                               |                                                                 |
+| `consent` mode                                                                                                     | planned                                                                                                                                                                                                | The web job's consent route                                     |
+| Cold sender adapter (with DSN bounce parsing)                                                                      | planned                                                                                                                                                                                                | The founder's choice of sender                                  |
+| `gtm-executor` Worker and D1                                                                                       | planned (S2)                                                                                                                                                                                           | Three clean dry-run days; Cloudflare access for a second Worker |
+| Weekly ledger comparison phase                                                                                     | planned (S2)                                                                                                                                                                                           |                                                                 |
+| Raising a session budget to a pre-flight quote                                                                     | The rule is built (`sessionBudget`, capped at the hard maximum). Reading Naive's quote from a refused session start, and opening `FOUNDER: gtm budget-floor`, is not: a refusal today fails the phase. | The first live dry run's quotes                                 |
 
 ## 21. Founder decisions and actions
 
@@ -930,6 +933,8 @@ out beyond the caps, cannot write the board, and cannot start any agent.
   carries**. If it is the key owner's `usr_` id, person-only commands rest on the founder's specific
   id and on the executor recognising its own comments.
 - The stored shape of an agent's tools as Naive returns it, against the tamper check's comparison.
+- Whether a card moved to `done` by an API key starts a CEO digest the same way an agent's move
+  does (a `REMOVE:` card is meant to).
 - AgentMail's list-messages filters for polling since a cursor, and our account's plan.
 - The legal points: summaries of primary sources, not advice.
 
