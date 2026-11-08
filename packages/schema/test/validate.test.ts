@@ -367,6 +367,9 @@ describe('validateCampaign', () => {
         ['10x', '10x faster builds'],
         ['Nova 10x', 'Nova 10x faster builds'],
         ['Nova, 73% faster', 'Nova, 73% faster'],
+        ['Saves 300 hours a month', 'Saves 300 hours a month'],
+        ['Loved by 300 teams', 'Loved by 300 teams'],
+        ['Ships in 5 Minutes', 'Ships in 5 Minutes'],
       ])('does not hide a statistic behind the name %s', async (name, value) => {
         const campaign = novaCopy();
         campaign.brand.name = name;
@@ -409,15 +412,23 @@ describe('validateCampaign', () => {
         expect(issues[0]?.fix).toContain('add a claim that quotes it');
       });
 
-      it.each(['Nova', 'Nova 2', 'Nova (Mk.2)', '3M', 'Web3 Labs', 'Zero Downtime'])(
-        'accepts %s as a name',
-        async (name) => {
-          const campaign = novaCopy();
-          campaign.brand.name = name;
-          at(at(campaign.scenes, 0).text, 0).value = `Meet ${name}.`;
-          expect(await codes(campaign)).toEqual([]);
-        },
-      );
+      it.each([
+        'Nova',
+        'Nova 2',
+        'Nova (Mk.2)',
+        '3M',
+        'Web3 Labs',
+        'Zero Downtime',
+        'Nova 2 Pro',
+        'Area 51 Studios',
+        '37signals',
+        '1Password',
+      ])('accepts %s as a name', async (name) => {
+        const campaign = novaCopy();
+        campaign.brand.name = name;
+        at(at(campaign.scenes, 0).text, 0).value = `Meet ${name}.`;
+        expect(await codes(campaign)).toEqual([]);
+      });
 
       it.each(['Meet Nova 9.', 'Nova 9 is here', 'Try Nova 9 today', 'Nova 9 users love it'])(
         'still reads a name that ends in a number as a name in "%s"',

@@ -727,6 +727,30 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a brand name that states a measure',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Saves 300 hours a month';
+    },
+  },
+  {
+    name: 'a brand name that states a count',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Loved by 300 teams';
+    },
+  },
+  {
+    name: 'a brand name with a unit joined to its number',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Deploy in 5min';
+    },
+  },
+  {
     name: 'a brand name that is only a number word',
     code: 'CLAIM_UNBACKED',
     path: 'brand.name',

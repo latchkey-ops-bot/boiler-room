@@ -448,6 +448,26 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
   return { ...read, kind: 'number', unit, noun: unit === undefined ? trailing?.word : undefined };
 }
 
+/**
+ * True when the text states a count or a measure: a plain number with a unit after it ("300 hours",
+ * "5min"), or with a lower case word after it ("300 teams"). A word joined to a number that is not
+ * a unit ("37signals", "1Password") and a capitalised word after one ("Nova 2 Pro", "Area 51
+ * Studios") read as parts of a name.
+ */
+export function statesQuantity(text: string): boolean {
+  const normalized = spelledToDigits(text, 'strict');
+  return [...normalized.matchAll(TOKEN)].some((match) => {
+    if (readToken(match, normalized).kind !== 'number') return false;
+    const rest = normalized.slice(match.index + match[0].length);
+    const { attached, spaced, next } = TRAILING_WORDS.exec(rest)?.groups ?? {};
+    if (attached) return UNITS.has(attached.toLowerCase());
+    if (!spaced) return false;
+    const isUnit = (word: string | undefined) =>
+      word !== undefined && UNITS.has(word.toLowerCase());
+    return isUnit(spaced) || isUnit(next) || /^\p{Ll}/u.test(spaced);
+  });
+}
+
 /** True when the text is one number and nothing else, such as "1,200", "10K", "#1" or "Ten". */
 export function isWholeNumber(text: string): boolean {
   const [token, ...others] = extractNumericTokens(text);
