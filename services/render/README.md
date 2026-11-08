@@ -80,9 +80,14 @@ chunk goes through them.
 
 ### The base snapshot
 
-A worker needs Chrome's shared libraries (Remotion's list for Ubuntu 24.04, plus `fonts-liberation`
-so a missing glyph is never a box), `@remotion/renderer` at the version this package resolves, and
-its headless browser. Installing them takes 41 s on a clean computer.
+A worker needs Chrome's shared libraries (Remotion's list for Ubuntu 24.04), fallback fonts for
+copy the brand font does not cover (`fonts-liberation` for Latin, Greek, Cyrillic and Hebrew,
+`fonts-noto-core` for Arabic, Thai, Devanagari and most other scripts, and `fonts-noto-cjk` for
+Chinese, Japanese and Korean), `@remotion/renderer` at the version this package resolves, and its
+headless browser. Without the Noto fonts, Arabic or Chinese copy in a Latin brand font rendered as
+boxes here while a dev machine with Noto showed it, and the render still succeeded. Installing all
+of it took 41 s on a clean computer before the Noto fonts were added. A `--local` render uses this
+machine's fonts instead.
 
 The first run that finds no base sets every worker up from clean, and snapshots the first one the
 moment its setup passes, before any campaign file reaches it. Later runs fork that snapshot, check

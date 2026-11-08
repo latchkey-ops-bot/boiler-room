@@ -15,7 +15,14 @@ import { listAll } from './client.ts';
 import { type CommandOptions, MAX_COMMAND_MS, runCommand, withRetry } from './exec.ts';
 import { uploadBytes } from './transfer.ts';
 
-/** Remotion's list for Ubuntu 24.04, and a fallback font so a missing glyph is never a box. */
+/**
+ * Remotion's list for Ubuntu 24.04, and fallback fonts for the scripts copy may be written in. A
+ * brand font usually covers Latin alone, and the browser draws any other letter from the machine's
+ * fonts, so without these Arabic, Chinese or Thai copy would render as boxes here while a dev
+ * machine with Noto showed it correctly. `fonts-liberation` covers Latin, Greek, Cyrillic and
+ * Hebrew, `fonts-noto-core` Arabic, Thai, Devanagari and most other scripts, and `fonts-noto-cjk`
+ * Chinese, Japanese and Korean.
+ */
 const CHROME_LIBRARIES = [
   'libnss3',
   'libdbus-1-3',
@@ -32,6 +39,8 @@ const CHROME_LIBRARIES = [
   'libpango-1.0-0',
   'libatk-bridge2.0-0',
   'fonts-liberation',
+  'fonts-noto-core',
+  'fonts-noto-cjk',
 ];
 
 /** Where the renderer is installed. A job is unpacked below it, so Node finds its modules. */
