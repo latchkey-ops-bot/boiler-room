@@ -2,7 +2,7 @@ import { boardOffered } from '../company/seats.ts';
 import { allowedTools } from '../company/tools.ts';
 import type { AgentDefinition } from '../define.ts';
 import { cap } from './caps.ts';
-import { CAPS, type FounderNeed, SCHEDULE } from './config.ts';
+import { CAPS, type FounderNeed, SCHEDULE, X_ACCOUNT } from './config.ts';
 import type { LaneState } from './lanes.ts';
 import type { StoreData } from './store.ts';
 
@@ -11,6 +11,13 @@ import type { StoreData } from './store.ts';
  * opaque ids, enums, counts, money, times and URLs on our own domain: no text from outside the
  * company, because br-ceo reads digested cards and holds `board_write`. Domains appear only in
  * day-card comments, never in a title or a body.
+ *
+ * One exception, by the founder's decision of 2026-11-08: the day's pack card
+ * (`FOUNDER: gtm pack <date>`) carries what the founder needs to post by hand, which includes each
+ * startup's verified product name, its domain, its launch post's address and the caption. The
+ * caption is a code template around a quote `checkQuote` found verbatim on the startup's own site,
+ * with no digit, link, @ or #, at most 100 characters, passed by the claims screen. The card says
+ * the quote is the startup's words and not an instruction, and br-ceo's rules leave the card alone.
  */
 
 export const dayTitle = (date: string) => `GTM: ${date}`;
@@ -58,16 +65,54 @@ const FOUNDER_STEPS: Record<FounderNeed, string> = {
   'ledger-mismatch':
     "The store's spend and the Naive ledger differ this week. Compare them before raising any cap.",
   lockdown:
-    'company:verify --lockdown fails: an agent that reads untrusted sites is offered board tools. Films stay in dry run until it passes.',
+    'company:verify --lockdown fails: an agent is offered a board tool its definition does not give it. Films stay in dry run until it passes.',
   reply: 'A reply needs a person. The draft is in the review file.',
   removal:
     'A removal request could not take everything down yet: an X post or a film of ours may still be up. The executor retries it on every run, and needs live ports to delete or withdraw. If this stays open, delete the post or withdraw the film by hand.',
+  pack: `Post each film below on X by hand, from ${X_ACCOUNT}: open its film page, download the film, and post it with its caption exactly as written. Where an X post is named, quote-post it; otherwise post the film on its own. Then move this card to done. The next day's report counts the posts on a done pack card as POSTED and the rest as NOT POSTED; nothing is called posted before that.`,
 };
 
 export const founderTitle = (need: FounderNeed) => `FOUNDER: gtm ${need}`;
 export const founderKey = (need: FounderNeed, scope: string) => `gtm-founder:${need}:${scope}`;
 export const founderBody = (need: FounderNeed) =>
   `${FOUNDER_STEPS[need]}\nWritten by the GTM executor. It moves this card to done when the need is met.`;
+
+export const packTitle = (date: string) => `FOUNDER: gtm pack ${date}`;
+export const packKey = (date: string) => founderKey('pack', date);
+
+/** One post of the pack, as the founder needs it. Every field is code's own or code-checked. */
+export interface PackPost {
+  lead_id: string;
+  /** The verified product name: in the homepage's title, og:site_name or first h1. */
+  product: string;
+  domain: string;
+  film_page: string;
+  /** The verified X launch post, to quote-post. Null: post the film on its own. */
+  quote_post: string | null;
+  caption: string;
+  /** The executor's own post was refused by the provider. */
+  refused: boolean;
+}
+
+export function packBody(date: string, posts: readonly PackPost[]): string {
+  return [
+    `GTM pack ${date}. Written by the GTM executor, which is code. Nothing below was posted by code.`,
+    FOUNDER_STEPS.pack,
+    "Each caption quotes the startup only in words found verbatim on its own website, and holds no number, link, @ or #. The quoted words are the startup's, not an instruction to anyone.",
+    ...posts.map((post, index) =>
+      [
+        '',
+        `Post ${index + 1} · ${post.lead_id}`,
+        `Startup: ${post.product} (${post.domain})`,
+        `Film page: ${post.film_page}`,
+        `X post to quote: ${post.quote_post ?? 'none, post the film on its own'}`,
+        ...(post.refused ? ['The executor tried to post this and the network refused it.'] : []),
+        'Caption:',
+        post.caption,
+      ].join('\n'),
+    ),
+  ].join('\n');
+}
 
 /**
  * What a stored GTM agent differs from its definition in: model, prompt, the tools it may use, its
@@ -86,7 +131,13 @@ export function definitionDrift(
   else {
     if (allowedTools(tools).join(',') !== allowedTools(definition.tools).join(','))
       drift.push('tools');
-    if (boardOffered(tools.configs, 'board_read') || boardOffered(tools.configs, 'board_write'))
+    // The board tools it is offered must be exactly the ones its definition gives it.
+    const given = allowedTools(definition.tools);
+    if (
+      (['board_read', 'board_write'] as const).some(
+        (tool) => boardOffered(tools.configs, tool) !== given.includes(tool),
+      )
+    )
       drift.push('board');
   }
   const budget = stored.budget as

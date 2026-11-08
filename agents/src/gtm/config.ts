@@ -121,6 +121,19 @@ export const SCHEDULE = [
 ] as const;
 export type PhaseName = (typeof SCHEDULE)[number]['phase'] | 'removals';
 
+/**
+ * The founder's ruling for the hackathon: no real email goes out, whatever the store's flags say.
+ * While this is true the email lane is dry run on every run (`resolveLanes`), so `gtm:flags` cannot
+ * lift it. Lifting it is a reviewed change to this line, as `GTM_ACTIVE` is.
+ */
+export const EMAIL_FORCED_DRY_RUN = true;
+
+/**
+ * The X account the founder posts the day's pack from, by hand. X refused programmatic posts from
+ * it through Naive Social, so the pack (a `FOUNDER: gtm pack <date>` card) is how GTM reaches X.
+ */
+export const X_ACCOUNT = '@boilerroomstudi';
+
 /** The minutes between compose and execute in which a person may comment HOLD. */
 export const HOLD_WINDOW_MINUTES = 45;
 
@@ -157,6 +170,7 @@ export const FOUNDER_NEEDS = [
   'lockdown',
   'reply',
   'removal',
+  'pack',
 ] as const;
 export type FounderNeed = (typeof FOUNDER_NEEDS)[number];
 

@@ -35,19 +35,20 @@ describe('the company board', () => {
     expect(boardOffered({ board_write: { enabled: false } }, 'board_write')).toBe(false);
   });
 
-  it('means only br-ceo and the builders to use the board, and no one else', () => {
-    for (const name of ['br-ceo', 'br-eng-lead', 'br-engineer-1', 'br-product', 'br-design']) {
-      expect(intendedBoardTools(name), name).toEqual(['board_read', 'board_write']);
-    }
+  it('means only br-ceo, the builders and the GTM agents on GTM_ON_BOARD to use the board', () => {
     for (const name of [
+      'br-ceo',
+      'br-eng-lead',
+      'br-engineer-1',
+      'br-product',
+      'br-design',
       'br-gtm-lead',
       'br-scout',
       'br-social',
-      'br-inbox-reader',
-      'br-researcher',
-      'br-director',
-      'br-probe-x',
     ]) {
+      expect(intendedBoardTools(name), name).toEqual(['board_read', 'board_write']);
+    }
+    for (const name of ['br-inbox-reader', 'br-researcher', 'br-director', 'br-probe-x']) {
       expect(intendedBoardTools(name), name).toEqual([]);
     }
   });
@@ -63,8 +64,8 @@ describe('the company board', () => {
   });
 
   it('flags the crew and Researcher agents other branches synced, and a company agent that lost its off', () => {
-    const gtm = company.find((agent) => agent.name === 'br-gtm-lead');
-    if (!gtm) throw new Error('br-gtm-lead is not defined');
+    const gtm = company.find((agent) => agent.name === 'br-inbox-reader');
+    if (!gtm) throw new Error('br-inbox-reader is not defined');
     const { board_write: _dropped, ...gtmConfigs } = gtm.tools.configs;
     const exposure = boardExposure([
       unnamedCrew('br-director', 'agt_0nj2ttrmyya7chj8sfwkwj9jzr'),
@@ -72,7 +73,12 @@ describe('the company board', () => {
       unnamedCrew('br-quality-check', 'agt_8k2bdprp50cwqz1dz7r29n5ts2', 1),
       unnamedCrew('br-researcher', 'agt_9nfk2k2v3q2w9p5p28dcms3xg2', 1),
       { name: 'br-ceo', id: 'agt_ceo', current_version: 3, tools: ceo.tools },
-      { name: 'br-gtm-lead', id: 'agt_gtm', current_version: 2, tools: { configs: gtmConfigs } },
+      {
+        name: 'br-inbox-reader',
+        id: 'agt_gtm',
+        current_version: 2,
+        tools: { configs: gtmConfigs },
+      },
       {
         name: 'br-probe-seat',
         id: 'agt_probe',
@@ -83,7 +89,7 @@ describe('the company board', () => {
     expect(exposure.map((item) => [item.name, item.offered])).toEqual([
       ['br-art-director', ['board_read', 'board_write']],
       ['br-director', ['board_read', 'board_write']],
-      ['br-gtm-lead', ['board_write']],
+      ['br-inbox-reader', ['board_write']],
       ['br-probe-seat', ['board_read']],
       ['br-quality-check', ['board_read', 'board_write']],
       ['br-researcher', ['board_read', 'board_write']],

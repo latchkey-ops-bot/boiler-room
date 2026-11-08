@@ -13,6 +13,7 @@ import type {
   SessionResult,
   SocialPoster,
 } from './ports.ts';
+import { PostRefused } from './ports.ts';
 import type { BoardComment } from './removal.ts';
 
 /**
@@ -138,6 +139,24 @@ export class NaiveBoard implements Board {
       .filter((card) => card.title.startsWith('GTM-HOLD: ') && card.status !== 'done')
       .map((card) => card.title);
   }
+  async cardStatus(cardId: string): Promise<CardStatus | null> {
+    const card = (await this.naive.listCards()).find((item) => item.id === cardId);
+    return card && ['todo', 'doing', 'blocked', 'done'].includes(card.status)
+      ? (card.status as CardStatus)
+      : null;
+  }
+}
+
+/** Post statuses that mean the network would not take the post. */
+const REFUSED = new Set(['failed', 'error', 'rejected', 'refused']);
+
+/**
+ * True when an error from creating a post means it did not go out: the provider answered 4xx (but
+ * not a timeout). Anything else, a 5xx or a lost connection, may hide a post that went out.
+ */
+function refusedStatus(error: unknown): boolean {
+  const status = Number((error as { status?: unknown } | null)?.status);
+  return Number.isInteger(status) && status >= 400 && status < 500 && status !== 408;
 }
 
 /**
@@ -169,10 +188,22 @@ export class NaiveSocial implements SocialPoster {
     } catch {
       fileId = null;
     }
-    const post = await this.naive.post({
-      content: input.caption,
-      ...(fileId ? { file_ids: [fileId] } : { media_urls: [input.filmFileUrl] }),
-    });
+    let post: { id: string; status: string };
+    try {
+      post = await this.naive.post({
+        content: input.caption,
+        ...(fileId ? { file_ids: [fileId] } : { media_urls: [input.filmFileUrl] }),
+      });
+    } catch (error) {
+      if (refusedStatus(error))
+        throw new PostRefused(
+          `the provider refused the post (${(error as { status: number }).status})`,
+        );
+      throw error;
+    }
+    // "The network refused it": the provider took the request and X would not post it.
+    if (REFUSED.has(String(post.status).toLowerCase()))
+      throw new PostRefused(`the post came back ${post.status}`);
     return { postId: post.id };
   }
   /**

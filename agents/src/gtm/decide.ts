@@ -135,11 +135,21 @@ export function chosenAddress(lead: LeadRow) {
 }
 
 /** Why the X lane is closed for a lead today, or null when it is open. */
-export function xBlocker(store: StoreData, lead: LeadRow, now: Date): string | null {
+export function xBlocker(
+  store: StoreData,
+  lead: LeadRow,
+  now: Date,
+  /**
+   * `post`: code posts it, so a verified X launch post is needed. `pack`: the founder posts it by
+   * hand and quotes the launch post only if there is one, so the social-proof floor alone holds.
+   */
+  how: 'post' | 'pack' = 'post',
+): string | null {
   if (lead.verdict?.verdict !== 'qualified') return 'not_qualified';
   if (!lead.product_name) return 'no_product_name';
-  if (!lead.x_post?.verified) return 'no_verified_x_post';
-  const proof = (lead.hn_points ?? 0) >= DISCOVERY.hn_min_points_x || lead.x_post.verified;
+  if (how === 'post' && !lead.x_post?.verified) return 'no_verified_x_post';
+  const proof =
+    (lead.hn_points ?? 0) >= DISCOVERY.hn_min_points_x || lead.x_post?.verified === true;
   if (!proof) return 'social_proof';
   if (lead.brand_flags.length) return 'brand_safety';
   if (suppressedBy(store, { domain: lead.domain })) return 'suppressed';

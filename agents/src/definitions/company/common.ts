@@ -24,7 +24,8 @@ export const CEO = 'br-ceo';
 /**
  * Card title prefixes. A fixed prefix and a slug make the board read as a log. `GTM`, `REMOVE` and
  * `FOUNDER: gtm ...` cards are written by the GTM executor, which is code; `GTM-HOLD` is anyone's,
- * and stops every GTM lane while it is open.
+ * and stops every GTM lane while it is open. `OUTREACH` is br-ceo's card for br-gtm-lead, and
+ * `LEADS` and `POST` are the GTM lead's for br-scout and br-social.
  */
 export const CARD_PREFIXES = [
   'DIR',
@@ -37,6 +38,9 @@ export const CARD_PREFIXES = [
   'GTM',
   'REMOVE',
   'GTM-HOLD',
+  'OUTREACH',
+  'LEADS',
+  'POST',
 ] as const;
 
 const COMPANY = 'Boiler Room is an autonomous company that turns any website into a launch film.';

@@ -14,6 +14,14 @@ export interface DayMetrics {
   picks: { x: number; email: number };
   films: { ordered: number; dryRun: number; ready: number; failed: number; late: number };
   x: { posted: number; drafts: number; skipped: number };
+  /**
+   * The founder's hand posts, from `FOUNDER: gtm pack <date>` cards. A post counts as POSTED only
+   * once its card is done; every other is NOT POSTED.
+   */
+  pack: {
+    today: { posts: number; status: 'none' | 'waiting' | 'posted' };
+    yesterday: { date: string; posted: number; notPosted: number } | null;
+  };
   email: { sent: number; drafts: number; skipped: Record<string, number> };
   replies: { in: number; answered: number; toPerson: number };
   optOuts: number;
@@ -49,6 +57,9 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
   const bySource: Record<Source, number> = { hn: 0, ph: 0, x: 0 };
   for (const lead of qualified) bySource[lead.source] += 1;
   const films = store.films.filter((row) => row.date === date);
+  const packToday = (store.packs ?? []).find((row) => row.date === date);
+  const yesterday = addDays(date, -1);
+  const packYesterday = (store.packs ?? []).find((row) => row.date === yesterday);
   const posts = actionsOn(store, date, 'x-post');
   const emails = actionsOn(store, date, 'email');
   const skipped: Record<string, number> = {};
@@ -92,6 +103,19 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
       posted: posts.filter((row) => row.status === 'sent').length,
       drafts: posts.filter((row) => row.status === 'dry_run').length,
       skipped: posts.filter((row) => row.status === 'skipped').length,
+    },
+    pack: {
+      today: {
+        posts: packToday?.entries.length ?? 0,
+        status: packToday ? (packToday.status === 'posted' ? 'posted' : 'waiting') : 'none',
+      },
+      yesterday: packYesterday
+        ? {
+            date: yesterday,
+            posted: packYesterday.status === 'posted' ? packYesterday.entries.length : 0,
+            notPosted: packYesterday.status === 'posted' ? 0 : packYesterday.entries.length,
+          }
+        : null,
     },
     email: {
       sent: emails.filter((row) => row.status === 'sent').length,
@@ -144,6 +168,7 @@ export function reportText(
     `Picks: x ${m.picks.x}, email ${m.picks.email}`,
     `Films: ${m.films.ordered} ordered, ${m.films.dryRun} dry run, ${m.films.ready} ready, ${m.films.failed} failed, ${m.films.late} late`,
     `X: ${m.x.posted} posted, ${m.x.drafts} draft, ${m.x.skipped} skipped`,
+    `X by hand: today's pack ${m.pack.today.status === 'none' ? 'none' : `${m.pack.today.posts} post(s), ${m.pack.today.status === 'posted' ? 'POSTED' : 'NOT POSTED yet (the founder moves the card to done)'}`}. Yesterday's pack: ${m.pack.yesterday ? `${m.pack.yesterday.posted} POSTED, ${m.pack.yesterday.notPosted} NOT POSTED` : 'none'}`,
     `Email: ${m.email.sent} sent, ${m.email.drafts} drafts, skipped: ${list(m.email.skipped)}`,
     `Replies: ${m.replies.in} in, ${m.replies.answered} answered, ${m.replies.toPerson} to a person. Opt-outs ${m.optOuts}. Removals ${m.removals} (${m.unmatchedRemovals} for domains we never touched). Bounces ${m.bounces}. Complaints ${m.complaints}.`,
     `Cost per qualified lead: ${m.costPerQualified === null ? 'n/a' : usd(m.costPerQualified)}. Last 7 days: ${m.week.qualified} qualified, ${usd(m.week.spend)}, ${m.week.costPerQualified === null ? 'n/a' : usd(m.week.costPerQualified)} per lead`,

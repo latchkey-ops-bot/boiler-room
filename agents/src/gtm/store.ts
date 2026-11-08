@@ -193,6 +193,31 @@ export interface PendingRemoval {
   last_error: string | null;
 }
 
+/** One post in a day's pack: what the founder posts by hand on X. */
+export interface PackEntry {
+  lead_id: string;
+  domain: string;
+  film_page: string;
+  /** The executor tried to post it and the provider refused. */
+  refused: boolean;
+}
+
+/**
+ * The day's pack: one `FOUNDER: gtm pack <date>` card holding every post the executor did not make
+ * itself. It is `waiting` until the founder moves the card to done, and only then `posted`. The
+ * next day's report counts a done card's posts as POSTED and every other as NOT POSTED.
+ */
+export interface PackRow {
+  date: string;
+  card_id: string;
+  key: string;
+  entries: PackEntry[];
+  status: 'waiting' | 'posted';
+  posted_at: string | null;
+  /** When a later run last read the card. */
+  checked_at: string | null;
+}
+
 export interface OptOutTokenRow {
   hash: string;
   lead_id: string;
@@ -264,6 +289,7 @@ export interface StoreData {
   /** Removal requests for domains GTM never touched: counted, never put on the board. */
   unmatched_removals: Record<string, number>;
   pending_removals: PendingRemoval[];
+  packs: PackRow[];
 }
 
 export const DEFAULT_FLAGS: Flags = {
@@ -310,6 +336,7 @@ export function emptyStore(): StoreData {
     flag_audit: [],
     unmatched_removals: {},
     pending_removals: [],
+    packs: [],
   };
 }
 

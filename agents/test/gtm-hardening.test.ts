@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { GTM } from '../src/definitions/company/index.ts';
 import { definitionDrift } from '../src/gtm/cards.ts';
+import { EMAIL_FORCED_DRY_RUN } from '../src/gtm/config.ts';
 import { buildCaption, templatesHash } from '../src/gtm/copy.ts';
 import { runDay } from '../src/gtm/day.ts';
 import { singleAddress, stableId } from '../src/gtm/domain.ts';
@@ -17,6 +19,7 @@ import {
   type FilmOrder,
   type FilmOrderStatus,
   LocalBoard,
+  PostRefused,
   type SenderEvent,
   type SocialPoster,
 } from '../src/gtm/ports.ts';
@@ -234,6 +237,9 @@ async function day(
     date: options.date ?? DATE,
     forcedDryRun: options.forcedDryRun ?? false,
     gtmActive: true,
+    // These tests prove the email lane's own machinery, which EMAIL_FORCED_DRY_RUN keeps off on
+    // every real run (gtm-pack.test.ts proves that).
+    emailForcedDryRun: false,
     save: () => {},
     writeFile: (name, content) => files.set(name, content),
     log: (line) => logs.push(line),
@@ -1071,5 +1077,205 @@ describe('sync and the tamper check', () => {
     const stored = { ...(reader as unknown as Record<string, unknown>), mcp_servers: [agentmail] };
     expect(definitionDrift(stored, reader)).toContain('mcp_servers');
     expect(definitionDrift({ ...stored, mcp_servers: [] }, reader)).not.toContain('mcp_servers');
+  });
+});
+
+describe('the X pack: the founder posts by hand', () => {
+  const NEXT_MORNING = '2026-11-09T13:00:00Z';
+  const packRunner = () =>
+    new ScriptedRunner({
+      'br-scout': [scoutQualifies()],
+      'br-gtm-lead': [
+        { ...leadPicksEmail(), x_pick: { lead_id: QUILLBOX_LEAD, why: 'A clear promise.' } },
+      ],
+      'br-social': [{ lead_id: QUILLBOX_LEAD, template_id: 't1', quote_ref: 'q1' }],
+    });
+
+  /** A real day as `gtm:day --live --board` runs it: no test override of the email flag. */
+  async function packDay(store: StoreData, ports: Ports, clock: Clock, date = DATE) {
+    const files = new Map<string, string>();
+    const result = await runDay({
+      store,
+      ports,
+      clock,
+      date,
+      forcedDryRun: false,
+      gtmActive: true,
+      save: () => {},
+      writeFile: (name, content) => files.set(name, content),
+      log: () => {},
+      sleep: async (ms) => {
+        clock.t += ms;
+      },
+    });
+    return { result, files };
+  }
+  const packCards = (ports: Ports) =>
+    [...(ports.board as LocalBoard).cards.values()].filter((card) =>
+      card.title.startsWith('FOUNDER: gtm pack'),
+    );
+
+  it('puts the day on ONE FOUNDER card, posts nothing, and never calls it posted', async () => {
+    const store = liveStore();
+    store.flags.x_lane = 'pack';
+    const clock = clockAt(NOW.toISOString());
+    const { ports, sender } = livePorts(clock, {
+      agents: packRunner(),
+      social: new DryRunSocial(),
+    });
+    const post = vi.spyOn(ports.social, 'post');
+    const { result, files } = await packDay(store, ports, clock);
+    // Pack mode needs no Naive social account: the founder posts.
+    expect(result.lanes.x).toBe('pack');
+    expect(post).not.toHaveBeenCalled();
+    const cards = packCards(ports);
+    expect(cards).toHaveLength(1);
+    const card = cards[0];
+    expect(card).toMatchObject({ title: 'FOUNDER: gtm pack 2026-11-08', status: 'blocked' });
+    expect(card?.body).toContain('Startup: Quillbox (quillbox.example)');
+    expect(card?.body).toContain('Film page: https://app.example/f/shfo_1');
+    expect(card?.body).toContain('X post to quote: none, post the film on its own');
+    expect(card?.body).toContain(`Their website says: "${LINE}"`);
+    expect(card?.body).toContain('@boilerroomstudi');
+    expect(card?.body).toContain('move this card to done');
+    // The caption quotes the site in words only: no number anywhere in it.
+    const caption = card?.body.split('Caption:\n')[1] ?? '';
+    expect(caption).not.toMatch(/\d/);
+    expect(store.packs).toMatchObject([
+      { date: DATE, status: 'waiting', entries: [{ lead_id: QUILLBOX_LEAD, domain: QUILLBOX }] },
+    ]);
+    expect(store.contacts.filter((row) => row.channel === 'x_post')).toEqual([]);
+    expect(files.get('report.txt')).toContain(
+      "X by hand: today's pack 1 post(s), NOT POSTED yet (the founder moves the card to done)",
+    );
+    // No email goes out: the code flag keeps the lane dry run whatever the store says.
+    expect(result.lanes.email).toBe('dry_run');
+    expect(result.lanes.reasons.email[0]).toMatch(/EMAIL_FORCED_DRY_RUN/);
+    expect(sender.sent).toEqual([]);
+  });
+
+  it('writes the pack too when the X lane is dry run but the film is real', async () => {
+    const store = liveStore();
+    store.flags.x_lane = 'dry_run';
+    const clock = clockAt(NOW.toISOString());
+    const { ports } = livePorts(clock, { agents: packRunner() });
+    const { result } = await packDay(store, ports, clock);
+    expect(result.lanes.x).toBe('dry_run');
+    expect(packCards(ports)).toHaveLength(1);
+  });
+
+  it('puts a post the network refused on the pack, and does not count it as posted', async () => {
+    const store = liveStore();
+    const clock = clockAt(NOW.toISOString());
+    const refusing: SocialPoster = {
+      kind: 'naive',
+      ready: async () => ({ ok: true, reason: null }),
+      post: async () => {
+        throw new PostRefused('the post came back failed');
+      },
+      find: async () => null,
+      remove: async () => {},
+    };
+    // A launch post to quote, as discovery would have verified it.
+    const runner = packRunner();
+    const start = runner.start.bind(runner);
+    runner.start = async (input) => {
+      if (input.agent === 'br-scout')
+        for (const lead of store.leads)
+          lead.x_post = {
+            url: 'https://x.com/quillbox/status/1855',
+            verified: true,
+            author_name: null,
+            at: null,
+          };
+      return start(input);
+    };
+    const { ports } = livePorts(clock, { agents: runner, social: refusing });
+    const { result } = await packDay(store, ports, clock);
+    expect(result.lanes.x).toBe('standalone');
+    expect(store.actions.find((row) => row.kind === 'x-post')?.status).toBe('failed');
+    expect(store.actions.filter((row) => row.status === 'unknown')).toEqual([]);
+    expect(store.contacts.filter((row) => row.channel === 'x_post')).toEqual([]);
+    const card = packCards(ports)[0];
+    expect(card?.body).toContain('The executor tried to post this and the network refused it.');
+    expect(card?.body).toContain('X post to quote: https://x.com/quillbox/status/1855');
+  });
+
+  it('counts the posts as POSTED the next day only once the founder moved the card to done', async () => {
+    for (const moved of [true, false]) {
+      const store = liveStore();
+      store.flags.x_lane = 'pack';
+      const clock = clockAt(NOW.toISOString());
+      const { ports } = livePorts(clock, { agents: packRunner(), social: new DryRunSocial() });
+      await packDay(store, ports, clock);
+      const card = packCards(ports)[0];
+      if (moved && card) await ports.board.move(card.id, 'done');
+      clock.t = Date.parse(NEXT_MORNING);
+      const { files } = await packDay(store, ports, clock, NEXT);
+      expect(files.get('report.txt')).toContain(
+        moved
+          ? "Yesterday's pack: 1 POSTED, 0 NOT POSTED"
+          : "Yesterday's pack: 0 POSTED, 1 NOT POSTED",
+      );
+      expect(store.packs[0]?.status).toBe(moved ? 'posted' : 'waiting');
+      // A posted startup is never posted again: it counts as an X post for good.
+      expect(store.contacts.filter((row) => row.channel === 'x_post').length).toBe(moved ? 1 : 0);
+    }
+  });
+
+  it('writes no pack while someone holds the day', async () => {
+    const store = liveStore();
+    store.flags.x_lane = 'pack';
+    const clock = clockAt(NOW.toISOString());
+    const { ports } = livePorts(clock, { agents: packRunner(), social: new DryRunSocial() });
+    vi.spyOn(ports.board, 'comments').mockResolvedValue([
+      { id: 'cmt_hold', author: 'usr_anyone', body: 'HOLD', created_at: NOW.toISOString() },
+    ]);
+    await packDay(store, ports, clock);
+    expect(packCards(ports)).toEqual([]);
+  });
+});
+
+describe('email stays dry run for the hackathon', () => {
+  it('is forced by a code flag that no store flag and no CLI option reaches', () => {
+    expect(EMAIL_FORCED_DRY_RUN).toBe(true);
+    const cli = readFileSync(new URL('../src/cli/gtm-day.ts', import.meta.url), 'utf8');
+    expect(cli).not.toContain('emailForcedDryRun');
+    const flags = readFileSync(new URL('../src/cli/gtm-flags.ts', import.meta.url), 'utf8');
+    expect(flags).not.toContain('EMAIL_FORCED_DRY_RUN');
+  });
+
+  it('keeps every email a draft even when every flag and precondition says live', async () => {
+    const store = liveStore();
+    const clock = clockAt(NOW.toISOString());
+    const sender = liveSender();
+    const { ports } = livePorts(clock, {
+      agents: new ScriptedRunner({
+        'br-scout': [scoutQualifies()],
+        'br-gtm-lead': [leadPicksEmail()],
+      }),
+      sender: sender.port,
+    });
+    const files = new Map<string, string>();
+    const result = await runDay({
+      store,
+      ports,
+      clock,
+      date: DATE,
+      forcedDryRun: false,
+      gtmActive: true,
+      save: () => {},
+      writeFile: (name, content) => files.set(name, content),
+      log: () => {},
+      sleep: async (ms) => {
+        clock.t += ms;
+      },
+    });
+    expect(result.lanes.email).toBe('dry_run');
+    expect(result.lanes.reasons.email).toEqual([
+      "email is dry run in code for the hackathon (EMAIL_FORCED_DRY_RUN), whatever the store's flags say",
+    ]);
+    expect(sender.sent).toEqual([]);
+    expect(store.actions.find((row) => row.kind === 'email')?.status).toBe('dry_run');
   });
 });

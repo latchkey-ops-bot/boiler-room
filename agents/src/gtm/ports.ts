@@ -107,6 +107,19 @@ export class DryRunFilmOrder implements FilmOrder {
 // ---------------------------------------------------------------------------------------------
 // X
 
+/**
+ * The provider answered that it would not post: the post did not go out. Unlike any other error
+ * from a post, which may hide a post that went out, this one is safe to treat as not sent, so the
+ * day puts the post in the founder's pack instead of marking it unknown.
+ */
+export class PostRefused extends Error {
+  readonly notSent = true;
+  constructor(message: string) {
+    super(message);
+    this.name = 'PostRefused';
+  }
+}
+
 export interface SocialPoster {
   readonly kind: 'dry-run' | 'naive';
   /** Whether an X account is connected and posting can work. */
@@ -243,6 +256,8 @@ export interface Board {
   comments(cardId: string): Promise<BoardComment[]>;
   /** Open `GTM-HOLD:` cards, by title. */
   holdCards(): Promise<string[]>;
+  /** A GTM card's status now, such as a pack card the founder moved to done. Null when unknown. */
+  cardStatus(cardId: string): Promise<CardStatus | null>;
 }
 
 /** The `--no-board` board: an in-memory log the CLI writes to the day's folder. */
@@ -297,6 +312,9 @@ export class LocalBoard implements Board {
   }
   async holdCards() {
     return [];
+  }
+  async cardStatus(cardId: string) {
+    return this.cards.get(cardId)?.status ?? null;
   }
   markdown(): string {
     return `${this.log.join('\n')}\n`;
