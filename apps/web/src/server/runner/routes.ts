@@ -316,6 +316,24 @@ function uploadAllowed(run: FilmRun, kind: UploadKind): boolean {
 
 const VARIANT = /^(16:9|9:16|1:1)\.([a-z0-9][a-z0-9-]{0,63})\.([a-z0-9][a-z0-9-]{0,63})$/;
 
+/**
+ * R2 stores a stream only when it knows the stream's length. Next can hand a route a body it has
+ * wrapped, which loses it, so the signed Content-Length is put back with the Workers runtime's
+ * `FixedLengthStream`, which also fails the put if the body is any other length. Outside workerd
+ * (the unit tests) there is no such class and the body goes as it is.
+ */
+function withLength(body: ReadableStream<Uint8Array>, length: number): ReadableStream<Uint8Array> {
+  const Fixed = (
+    globalThis as {
+      FixedLengthStream?: new (length: number) => TransformStream<Uint8Array, Uint8Array>;
+    }
+  ).FixedLengthStream;
+  if (!Fixed) return body;
+  const fixed = new Fixed(length);
+  body.pipeTo(fixed.writable).catch(() => undefined);
+  return fixed.readable;
+}
+
 /** A file name the website will store: lower case, safe characters, at most 80. */
 export function safeName(name: string): string | null {
   const clean = name
@@ -417,16 +435,24 @@ export const files: Handler = async (request, { deps, run, url }) => {
   const sha256 = request.headers.get(HEADERS.bodySha256) ?? EMPTY_SHA256;
   if (!request.body) throw new ApiError(411, 'length_required', 'Send the file.');
   try {
-    await deps.films.put(r2Key, request.body, {
+    await deps.films.put(r2Key, withLength(request.body, length), {
       sha256,
       httpMetadata: { contentType },
     });
-  } catch {
-    throw new ApiError(
-      400,
-      'checksum',
-      'The file does not match its signed hash, so it was not stored.',
+  } catch (error) {
+    const text = error instanceof Error ? error.message : String(error);
+    logLine(
+      deps,
+      `runner: film ${run.filmId} upload of ${kind} was not stored: ${text.slice(0, 200)}`,
     );
+    if (/checksum|sha-?256/i.test(text)) {
+      throw new ApiError(
+        400,
+        'checksum',
+        'The file does not match its signed hash, so it was not stored.',
+      );
+    }
+    throw new ApiError(502, 'storage_failed', 'The file could not be stored. Send it again.');
   }
   const [row] = await deps.db
     .insert(runFiles)
