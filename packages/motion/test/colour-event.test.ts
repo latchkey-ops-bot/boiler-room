@@ -207,10 +207,11 @@ describe.each(stages)('colour-event layout in %s', (format, stage) => {
     expect(layout.headline.x + layout.headline.width / 2).toBeCloseTo(W / 2, 10);
   });
 
-  it('sets a headline at any size from the sentence cap height up, and fails below it', () => {
+  it('sets a headline at any size from 60% of the sentence cap height up, and fails below it', () => {
     const width = headlineWidth(stage, 'simple');
-    const floor = Math.floor(sentenceSize(fitOf(), stage));
-    expect(floor).toBe(111);
+    expect(Math.floor(sentenceSize(fitOf(), stage))).toBe(111);
+    const floor = Math.floor(sentenceSize(fitOf(), stage) * colourEvent.minCapShare);
+    expect(floor).toBe(66);
     expect(headlineFitError('Ship it.', fitOf({ fontSize: 301 }), stage, width)).toBeUndefined();
     expect(headlineFitError('Ship it.', fitOf({ fontSize: floor }), stage, width)).toBeUndefined();
     const small = headlineFitError('Ship it.', fitOf({ fontSize: floor - 1 }), stage, width);
@@ -220,6 +221,28 @@ describe.each(stages)('colour-event layout in %s', (format, stage) => {
     expect(split).toContain('does not fit on one line');
     expect(headlineFitError('', fitOf({ lines: [], fontSize: 0 }), stage, width)).toContain(
       '0 words',
+    );
+  });
+
+  // flm_vgv96f69pcpyc4beyzdv on staging: an approved payoff, "Autonomous companies", in Inter
+  // (the brand's Newsreader fell back to it), fits 1152 px on one line only at about 101 px, under
+  // the 107 px sentence size. It is set smaller to fit rather than refused at render.
+  it('sets an approved payoff a few pixels under the sentence size smaller rather than refusing it', () => {
+    const inter = { cap: 0.727, ascent: 0.969, descent: 0.242 };
+    const width = headlineWidth(landscape, 'simple');
+    expect(Math.round(width)).toBe(1152);
+    const payoff = (fontSize: number) =>
+      fitOf({ fontSize, lines: ['Autonomous companies'], width: 1150, metrics: inter });
+    expect(Math.floor(sentenceSize(payoff(101), landscape))).toBe(107);
+    expect(headlineFitError('Autonomous companies', payoff(101), landscape, width)).toBeUndefined();
+    // The floor stands: a line that needs 60% of the sentence size or less is still refused.
+    const floor = Math.floor(sentenceSize(payoff(101), landscape) * colourEvent.minCapShare);
+    expect(floor).toBe(64);
+    expect(
+      headlineFitError('Autonomous companies', payoff(floor), landscape, width),
+    ).toBeUndefined();
+    expect(headlineFitError('Autonomous companies', payoff(floor - 1), landscape, width)).toContain(
+      'at 60% of the sentence cap height or above',
     );
   });
 });
