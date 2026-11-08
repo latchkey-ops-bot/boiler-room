@@ -302,6 +302,32 @@ describe('nouns and units', () => {
     expect(extractNumericTokens('5-10 teams')[0]?.noun).toBe('teams');
   });
 
+  it('records the words a count counts, without function words, in the singular', () => {
+    expect(extractNumericTokens('Used by 50,000+ product teams worldwide')[0]?.nouns).toEqual([
+      'product',
+      'team',
+      'worldwide',
+    ]);
+    expect(extractNumericTokens('1,200 teams Deploying 3x more often')[0]?.nouns).toEqual([
+      'team',
+      'deploying',
+    ]);
+    expect(extractNumericTokens('900+ third party data sources')[0]?.nouns).toEqual([
+      'third',
+      'party',
+      'data',
+      'source',
+    ]);
+    expect(extractNumericTokens('10 of the companies. Teams too')[0]?.nouns).toEqual(['company']);
+    expect(extractNumericTokens('millions of people')[0]?.nouns).toEqual(['person']);
+  });
+
+  it('records the direction word after a percent or multiplier', () => {
+    expect(extractNumericTokens('35% less time')[0]?.direction).toBe('down');
+    expect(extractNumericTokens('3x more deploys')[0]?.direction).toBe('up');
+    expect(extractNumericTokens('40% of teams')[0]?.direction).toBeUndefined();
+  });
+
   it('records no noun when the number stands alone or has a unit', () => {
     expect(extractNumericTokens('10')[0]?.noun).toBeUndefined();
     expect(extractNumericTokens('10 minutes')[0]?.noun).toBeUndefined();
@@ -348,6 +374,28 @@ describe('isBacked', () => {
     ['a verb before the', '2x output', 'double the output'],
     ['a scale with floating point error', '$8.2M saved', 'saved $8,200,000 last year'],
     ['a year-shaped number with a unit', '2,000 minutes', 'in 2000 minutes'],
+    ['a noun the quote qualifies', '50,000+ teams', 'Used by 50,000 product teams'],
+    [
+      'a noun the copy qualifies',
+      '900+ third party data sources',
+      'Pipe in data from 900+ sources for a picture',
+    ],
+    ['a count followed by a verb', '50,000 teams use it', 'Used by 50,000 product teams'],
+    [
+      'a count followed by different verbs',
+      '1,200 teams deploying daily',
+      '1,200 teams ship with Nova',
+    ],
+    ['the qualified noun itself', '50,000 product teams', 'Used by 50,000 product teams'],
+    ['a singular against a plural', '1,200 team', 'Trusted by 1,200 teams'],
+    ['a quantity word before the noun', '10 more integrations', 'Ships with 10 integrations'],
+    [
+      'a vague magnitude of the same noun',
+      'millions of people',
+      'Making time for millions of people every month',
+    ],
+    ['the same direction', '35% less time', 'Deel spends 35% less time scheduling'],
+    ['a direction the quote leaves out', '40% faster builds', 'cut build times by 40% in a month'],
   ])('accepts %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(true);
   });
@@ -401,6 +449,29 @@ describe('isBacked', () => {
     ['a currency prefix against a count', 'CA$40 per seat', 'More than 40 teams'],
     ['a range bound against a count', '5-10x faster', '5 teams went 10x faster'],
     ['cents against dollars', '99 cents', 'only $99'],
+    ['a count of another noun', '50,000+ paying customers', 'Used by 50,000 product teams'],
+    [
+      'a count of people the quote does not count',
+      '50,000+ engineers ship with it',
+      'Used by 50,000 product teams',
+    ],
+    [
+      'a vague magnitude of another noun',
+      'Millions of bookings a month',
+      'Making time for millions of people every month',
+    ],
+    [
+      'another noun before a shared word',
+      '50,000 customers ship with it',
+      '50,000 teams ship with it',
+    ],
+    ['another qualifier of the same noun', '10,000 paying users', 'Loved by 10,000 free users'],
+    [
+      'a percent in the other direction',
+      '35% more meetings booked',
+      'Deel spends 35% less time scheduling',
+    ],
+    ['a multiplier in the other direction', '2x slower', 'Builds run 2x faster'],
   ])('rejects %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(false);
   });

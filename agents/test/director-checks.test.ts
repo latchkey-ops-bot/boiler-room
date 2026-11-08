@@ -346,6 +346,43 @@ describe('checkSubmission', () => {
     });
   });
 
+  describe('numbers a quote states as a goal', () => {
+    const mission = {
+      id: 'mission',
+      text: 'Fernhook aims to reach 10,000 teams by 2030',
+      sourceUrl: 'https://fernhook.example.com/about',
+      quote: 'Our mission is to give 10,000 teams a live preview by 2030.',
+      status: 'approved' as const,
+    };
+    async function goalIssues(headline: string, subhead?: string) {
+      const submission = exampleSubmission();
+      const research = exampleResearch();
+      research.claims.push(structuredClone(mission));
+      submission.campaign.claims.push(structuredClone(mission));
+      const scene = submission.campaign.scenes[3];
+      if (!scene) throw new Error('no scene 4');
+      scene.text = [
+        { id: 'value-line', role: 'headline', value: headline, claimIds: ['mission'] },
+        ...(subhead
+          ? [{ id: 'value-sub', role: 'subhead' as const, value: subhead, claimIds: ['mission'] }]
+          : []),
+      ];
+      const verdict = await checkSubmission(submission, research, exampleBrief());
+      return verdict.blocking
+        .filter((issue) => issue.code === 'CLAIM_GOAL')
+        .map((issue) => issue.path);
+    }
+
+    it('refuses a goal stated as a fact', async () => {
+      expect(await goalIssues('10,000 teams.')).toEqual(['campaign.scenes[3].text[0].value']);
+    });
+
+    it('accepts the number said as the goal it is', async () => {
+      expect(await goalIssues('10,000 teams by 2030.')).toEqual([]);
+      expect(await goalIssues('10,000 teams.', 'Our mission.')).toEqual([]);
+    });
+  });
+
   it('refuses a CTA on a lookalike host that only ends with the site host', async () => {
     const edited = await codesAfter((s) => {
       for (const cta of s.campaign.variants.ctas)

@@ -9,7 +9,17 @@ export interface NumericToken {
   unit: string | undefined;
   /** The word after the number, when that word is not its unit. */
   noun: string | undefined;
+  /**
+   * What a count counts: the words after the number (after "of" for "millions of") up to the
+   * next function word such as "of", "with" or "the", at most five, in the singular. Empty for a
+   * bare number.
+   */
+  nouns: string[];
+  /** For a percent or multiplier, whether the word after it says more or less. */
+  direction: Direction | undefined;
 }
+
+export type Direction = 'up' | 'down';
 
 /**
  * `strict` is for copy, where an ambiguous word counts as a number so that nothing slips past the
@@ -250,6 +260,91 @@ const TOKEN = new RegExp(
   'giu',
 );
 
+/** Words that say a percent or multiplier is more, or less. Only these pairs are compared. */
+const DIRECTIONS = new Map<string, Direction>([
+  ...['more', 'greater', 'higher', 'larger', 'bigger', 'longer', 'faster', 'up', 'increase'].map(
+    (word): [string, Direction] => [word, 'up'],
+  ),
+  ...['less', 'fewer', 'lower', 'smaller', 'shorter', 'slower', 'down', 'decrease', 'cheaper'].map(
+    (word): [string, Direction] => [word, 'down'],
+  ),
+]);
+
+/** Words skipped when reading what a count counts. */
+const FUNCTION_WORDS = new Set([
+  'a',
+  'an',
+  'the',
+  'of',
+  'and',
+  'or',
+  'to',
+  'in',
+  'on',
+  'at',
+  'for',
+  'with',
+  'by',
+  'from',
+  'per',
+  'every',
+  'each',
+  'all',
+  'our',
+  'your',
+  'their',
+  'its',
+  'this',
+  'that',
+  'these',
+  'those',
+  'more',
+  'than',
+  'over',
+  'plus',
+  'about',
+  'around',
+  'some',
+]);
+
+/** Different words for one thing, after the plural is taken off. */
+const SAME_NOUN = new Map(
+  Object.entries({
+    people: 'person',
+    client: 'customer',
+    organization: 'organisation',
+  }),
+);
+
+const singular = (word: string) => {
+  const one = /ies$/.test(word)
+    ? `${word.slice(0, -3)}y`
+    : word.length > 3 && /[^su]s$/.test(word)
+      ? word.slice(0, -1)
+      : word;
+  return SAME_NOUN.get(one) ?? one;
+};
+
+/** Up to six words straight after a number, before any punctuation. */
+function wordsAfter(rest: string): string[] {
+  const run = /^\+?((?:[\s-]+\p{L}[\p{L}'’]*){1,6})/u.exec(rest)?.[1] ?? '';
+  return run
+    .split(/[\s-]+/)
+    .filter(Boolean)
+    .map((word) => word.toLowerCase());
+}
+
+/** The phrase a count counts: content words up to the next function word, in the singular. */
+function countedPhrase(words: readonly string[]): string[] {
+  const start = words.findIndex((word) => !FUNCTION_WORDS.has(word));
+  if (start < 0) return [];
+  const end = words.findIndex((word, index) => index > start && FUNCTION_WORDS.has(word));
+  return words
+    .slice(start, end < 0 ? undefined : end)
+    .slice(0, 5)
+    .map(singular);
+}
+
 /** What may sit between the bounds of a range. */
 const RANGE_GAP = /^\s*(?:-|–|—|to)\s*$/i;
 
@@ -347,7 +442,14 @@ export function extractNumericTokens(text: string, mode: ReadMode = 'strict'): N
       upperMatch?.index,
     );
     return RANGE_GAP.test(gap)
-      ? { ...token, kind: upper.kind, unit: upper.unit, noun: upper.noun }
+      ? {
+          ...token,
+          kind: upper.kind,
+          unit: upper.unit,
+          noun: upper.noun,
+          nouns: upper.nouns,
+          direction: upper.direction,
+        }
       : token;
   });
 }
@@ -366,8 +468,18 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
   const scale = SCALES.get((scaleWord ?? scaleLetter ?? '').toLowerCase()) ?? 1;
   const value = Number((Number(digits.replaceAll(',', '')) * scale).toPrecision(12));
   const raw = match[0].trim();
-  const trailing = readTrailingWords(normalized.slice(match.index + match[0].length));
-  const read = { raw, value, unit: undefined, noun: trailing?.word };
+  const rest = normalized.slice(match.index + match[0].length);
+  const trailing = readTrailingWords(rest);
+  const after = wordsAfter(rest);
+  const direction = DIRECTIONS.get(after[0] ?? '');
+  const read = {
+    raw,
+    value,
+    unit: undefined,
+    noun: trailing?.word,
+    nouns: [],
+    direction: undefined,
+  };
 
   if (rank) return { ...read, kind: 'rank' };
   const moneySign = currency ?? symbol;
@@ -375,16 +487,24 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
     return { ...read, kind: 'money', unit: CURRENCIES.get(moneySign.toLowerCase()) };
   }
   if (prefix || (suffix && /^(?:[x×]|times|fold)$/i.test(suffix))) {
-    return { ...read, kind: 'multiplier' };
+    return { ...read, kind: 'multiplier', direction };
   }
-  if (suffix) return { ...read, kind: 'percent' };
+  if (suffix) return { ...read, kind: 'percent', direction };
 
   const trailingCurrency = trailing && CURRENCIES.get(trailing.word);
   if (trailingCurrency) {
     return { ...read, kind: 'money', unit: trailingCurrency, noun: undefined };
   }
   const unit = trailing && readUnit(trailing);
-  return { ...read, kind: 'number', unit, noun: unit === undefined ? trailing?.word : undefined };
+  // "1000000plural of people": what a vague magnitude counts follows its "of".
+  const counted = unit === VAGUE_UNIT ? wordsAfter(` ${rest.replace(/^\p{L}+/u, '')}`) : after;
+  return {
+    ...read,
+    kind: 'number',
+    unit,
+    noun: unit === undefined ? trailing?.word : undefined,
+    nouns: unit === undefined || unit === VAGUE_UNIT ? countedPhrase(counted) : [],
+  };
 }
 
 /** True when the text is one number and nothing else, such as "1,200", "10K", "#1" or "Ten". */
@@ -398,15 +518,33 @@ const readsAsYear = ({ kind, unit, raw }: NumericToken) =>
   kind === 'number' && unit === undefined && YEAR.test(raw);
 
 /**
+ * True when copy counts what the quote counts: the first word of one phrase is in the other.
+ * Either may qualify the noun, and a verb may follow it, so "50,000 teams use it" and "900+ third
+ * party data sources" are backed by "50,000 product teams" and "900+ sources", while "50,000
+ * paying customers" and "10,000 paying users" against "10,000 free users" are not. A bare number
+ * counts anything the quote counts.
+ */
+function sameNoun(copy: NumericToken, quoted: NumericToken): boolean {
+  const [first] = copy.nouns;
+  const [quotedFirst] = quoted.nouns;
+  if (first === undefined || quotedFirst === undefined) return true;
+  return quoted.nouns.includes(first) || copy.nouns.includes(quotedFirst);
+}
+
+/**
  * True when the quote states this value. A number on its own may match a quote that adds a unit,
- * but a number with a noun may not: "10" is backed by "10 minutes", and "10 teams" is not.
+ * but a number with a noun may not: "10" is backed by "10 minutes", and "10 teams" is not. A
+ * count must count what the quote counts, and a percent or multiplier may not turn the quote's
+ * "less" into "more".
  */
 export function isBacked(token: NumericToken, quoteTokens: readonly NumericToken[]): boolean {
   return quoteTokens.some((quoted) => {
     if (quoted.kind !== token.kind || quoted.value !== token.value) return false;
     if (readsAsYear(quoted) && !FOUR_DIGITS.test(token.raw)) return false;
-    if (quoted.unit === VAGUE_UNIT) return token.unit === VAGUE_UNIT;
+    if (token.direction && quoted.direction && token.direction !== quoted.direction) return false;
+    if (quoted.unit === VAGUE_UNIT) return token.unit === VAGUE_UNIT && sameNoun(token, quoted);
     if (token.unit !== undefined) return quoted.unit === token.unit;
-    return quoted.unit === undefined || token.noun === undefined;
+    if (quoted.unit !== undefined) return token.noun === undefined;
+    return token.kind !== 'number' || sameNoun(token, quoted);
   });
 }

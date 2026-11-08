@@ -3,6 +3,7 @@ import {
   campaignSchema,
   extractNumericTokens,
   type Issue,
+  isBacked,
   type Scene,
   sceneRegistry,
   superlativeForms,
@@ -48,6 +49,13 @@ const FPS = 30;
  * Uncited, the validator's own are reported by the validator; Director policy makes them errors.
  */
 const DIRECTOR_SUPERLATIVES = 'most\\s+powerful|world-class';
+
+/**
+ * A quote that states a number as an aim, not a fact: "Our mission is to connect a billion people
+ * by 2031". Copy may repeat the number only as the goal it is.
+ */
+const GOAL =
+  /\b(?:mission|goals?|aims?|aiming|ambitions?|vision|strives?|striving|plans? to|hopes? to|want to|wants to|on track to|by (?:19|20)\d\d)\b/i;
 
 /** Validator codes the Director fixes. `CONTRAST_LOW` and `ASSET_UNAVAILABLE` belong to others. */
 const DIRECTOR_CODES = new Set([
@@ -675,7 +683,25 @@ function checkSources(
         ? [{ at: `${path}.voiceover`, value: scene.voiceover.text, ids: scene.voiceover.claimIds }]
         : []),
     ];
+    const sceneWords = cited.map((each) => each.value).join(' ');
     for (const { at, value, ids } of cited) {
+      const goals = ids.flatMap((id) => {
+        const quote = claims.get(id)?.quote;
+        return quote
+          ? [{ id, quote, goal: GOAL.test(quote), tokens: extractNumericTokens(quote, 'literal') }]
+          : [];
+      });
+      for (const token of extractNumericTokens(value)) {
+        const backers = goals.filter((each) => isBacked(token, each.tokens));
+        if (backers.length === 0 || !backers.every((each) => each.goal) || GOAL.test(sceneWords))
+          continue;
+        push(
+          'CLAIM_GOAL',
+          `${at}.value`,
+          `"${value}" states "${token.raw}" as a fact, but ${backers.map((each) => `"${each.id}" ("${each.quote}")`).join(' and ')} only states it as a goal.`,
+          `Say "${token.raw}" as the goal the quote states, with its own words such as "our mission" or its year, or cite a claim that states it as a fact, or remove it.`,
+        );
+      }
       for (const id of ids) {
         const claim = claims.get(id);
         if (claim && claim.status !== 'approved' && !brief.citeExtracted) {

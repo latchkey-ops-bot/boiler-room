@@ -24,6 +24,7 @@ describe('@boiler-room/schema', () => {
         'campaignSchema',
         'contrastRatio',
         'extractNumericTokens',
+        'isBacked',
         'fromOklch',
         'mixOklch',
         'oklchLightness',
