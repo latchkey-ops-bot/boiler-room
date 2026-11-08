@@ -1,4 +1,5 @@
 import { type SceneRegistry, sceneRegistry } from '@boiler-room/schema';
+import { cellType } from './cell-type.tsx';
 import { colourEventScene } from './colour-event.tsx';
 import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
@@ -32,6 +33,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'tile-wall': tileWall,
   'status-relay': statusRelay,
   'rail-words': railWords,
+  'cell-type': cellType,
   'colour-event': colourEventScene,
   'end-card': endCard,
 };
