@@ -11,6 +11,9 @@ export { contrastRatio, readableOn } from './contrast.ts';
 export type { CampaignFrames, SceneFrames } from './frames.ts';
 export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';
+export type { NumericToken } from './numbers.ts';
+export { extractNumericTokens } from './numbers.ts';
+export { sceneRegistry } from './scene-registry.ts';
 export type {
   Issue,
   IssueCode,
