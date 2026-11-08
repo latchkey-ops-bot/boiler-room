@@ -195,7 +195,7 @@ export function reviewTask(input: ReviewTaskInput): string {
     ...checks,
     '',
     'Steps.',
-    `1. view_image with file_ids ${JSON.stringify(input.images.map((image) => image.fileId))}. Look at each one closely; open one again on its own only if its text is too small to read.`,
+    `1. view_image with file_ids ${JSON.stringify(input.images.map((image) => image.fileId))}. Open them all at once, in this one turn: several view_image calls side by side are fine. Only the pictures of your latest view_image calls stay in view, so look at each one closely as it arrives and do not open any image again.`,
     '2. Judge each visual check by its criteria above. Read every word of overlaid copy in every image against the scene text above.',
     '3. Call submit_output with your verdict, every image in "inspected", one entry per visual check with the frames it rests on, and one issue per failure with its scene, frame, owner and fix. A check no image could show is "n/a" or "fail", never "pass".',
   ].join('\n');
@@ -203,4 +203,4 @@ export function reviewTask(input: ReviewTaskInput): string {
 
 /** Sent when a turn ends without a submitted review. */
 export const CONTINUE_MESSAGE =
-  'Continue the review from where you stopped. Open any image you have not opened yet with view_image, then call submit_output.';
+  'Continue the review from where you stopped. If you have not opened the images yet, open them all at once with view_image; otherwise do not open any again. Then call submit_output.';

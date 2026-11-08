@@ -483,10 +483,11 @@ describe('the film command, as the film runner calls it', () => {
     );
     expect(code).toBe(0);
     // The Director leaves Quality Check its $1, and the render half gets only what is left.
+    // Quality Check, under its own $2.50, is given all the film has left.
     expect(crew.research.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(0.5));
     expect(crew.direct.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(1.45));
     expect(crew.art.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(0.95));
-    expect(crew.qc.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(1.5));
+    expect(crew.qc.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(1.85));
     const costs = readEvents(eventsFile('all')).filter((event) => event.type === 'cost');
     expect(costs.at(-1)?.totalMicroUsd).toBe(usd(0.95));
     for (const cost of costs) expect(cost.totalMicroUsd).toBeLessThanOrEqual(usd(2.5));

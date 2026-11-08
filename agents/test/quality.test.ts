@@ -30,8 +30,14 @@ import {
 import { qcReviewJsonSchema, qcReviewSchema } from '../src/quality/output.ts';
 import { reviewTask, VISUAL_CHECKS } from '../src/quality/prompt.ts';
 import { cutOf, readRenderDir } from '../src/quality/render-dir.ts';
-import { mergeReviews, runReview, ViewTracker } from '../src/quality/review.ts';
-import { finalVerdict, readResearch } from '../src/quality/run.ts';
+import {
+  groupImages,
+  mergeReviews,
+  runReview,
+  SESSION_IMAGES,
+  ViewTracker,
+} from '../src/quality/review.ts';
+import { finalVerdict, readResearch, unsupportedPasses } from '../src/quality/run.ts';
 import { contactFrames, transitionStills } from '../src/quality/sheets.ts';
 import { PageIndex, type PagesBundle } from '../src/researcher/verify.ts';
 import { skillContent } from '../src/sync.ts';
@@ -933,7 +939,7 @@ describe('the review session', () => {
       files: {
         upload: vi.fn(async () => {
           uploads += 1;
-          return { id: `fil_${'abcdefgh'[uploads - 1]}` };
+          return { id: `fil_${'abcdefghijkl'[uploads - 1]}` };
         }),
         delete: vi.fn(async () => ({ deleted: true })),
       },
@@ -1048,7 +1054,7 @@ describe('the review session', () => {
     ]);
     expect(run.images.every((image) => image.viewed)).toBe(true);
     expect(run.review?.checks).toEqual([
-      { id: 'frame-0', result: 'pass', measured: 'pass here | n/a here', frames: [0, 30] },
+      { id: 'frame-0', result: 'pass', measured: 'pass here', frames: [0] },
     ]);
     expect(run.costMicroUsd).toBe(1_100_000);
     expect(client.files.delete).toHaveBeenCalledTimes(3);
@@ -1150,6 +1156,92 @@ describe('the review session', () => {
     expect(run.images[0]?.viewed).toBe(true);
     expect(run.review?.verdict).toBe('pass');
   });
+
+  // On 8 November Naive showed the model only the pictures of its latest view_image calls, about
+  // twelve: every review of 15 or 22 images saw none of the first, the sheets.
+  it('gives no session more images than the model sees at once, and merges the groups', async () => {
+    const ids = [...'abcdefghijk'].map((letter) => `fil_${letter}`);
+    const { client, start } = reviewClient(
+      (session) => ({
+        events:
+          session === 1
+            ? submitted(ids.slice(0, 10), review('pass', 'pass', [0]))
+            : submitted(ids.slice(10), review('fail', 'fail', [30])),
+        state: done,
+      }),
+      11,
+    );
+    const run = await start();
+    // The files are not PNGs, so each counts as a 1080p frame: ten fit, by count.
+    const tasks = client.sessions.create.mock.calls.map(
+      (call) => (call as unknown as [{ message: string }])[0].message,
+    );
+    expect(tasks).toEqual([`Review ${ids.slice(0, 10).join(' ')}.`, `Review ${ids[10]}.`]);
+    expect(run.sessions.map((each) => [each.session_id, each.images])).toEqual([
+      ['ses_1', 10],
+      ['ses_2', 1],
+    ]);
+    expect(run.sessionId).toBe('ses_1, ses_2');
+    expect(run.images.every((image) => image.viewed)).toBe(true);
+    expect(run.askedAgain).toBeNull();
+    expect(run.review?.verdict).toBe('fail');
+    expect(run.review?.checks).toEqual([
+      { id: 'frame-0', result: 'fail', measured: 'fail here', frames: [30] },
+    ]);
+    expect(client.files.delete).toHaveBeenCalledTimes(11);
+  });
+
+  it('asks again only for the group that left an image unseen', async () => {
+    const ids = [...'abcdefghijk'].map((letter) => `fil_${letter}`);
+    const { client, start } = reviewClient(
+      (session) => ({
+        events:
+          session === 1
+            ? submitted(ids.slice(0, 9), review('pass', 'pass', [0]))
+            : submitted(
+                session === 2 ? ids.slice(0, 10) : ids.slice(10),
+                review('pass', 'pass', [0]),
+              ),
+        state: done,
+      }),
+      11,
+    );
+    const run = await start();
+    expect(client.sessions.create).toHaveBeenCalledTimes(3);
+    expect(run.sessions.map((each) => [each.session_id, each.images])).toEqual([
+      ['ses_1', 10],
+      ['ses_2', 10],
+      ['ses_3', 1],
+    ]);
+    expect(run.askedAgain).toMatch(/frame-9\.png \(fil_j\)/);
+    expect(run.images.every((image) => image.viewed)).toBe(true);
+  });
+});
+
+describe('groupImages', () => {
+  const frame = { width: 1920, height: 1080 };
+  it('splits the 15 images of the agentmail review of 8 November into two sessions', () => {
+    const sheets = [
+      { width: 1992, height: 1308 },
+      { width: 1968, height: 4018 },
+      { width: 816, height: 1580 },
+      { width: 1316, height: 1232 },
+    ];
+    expect(groupImages([...sheets, ...Array(11).fill(frame)])).toEqual([
+      [0, 1, 2, 3, 4, 5, 6, 7],
+      [8, 9, 10, 11, 12, 13, 14],
+    ]);
+  });
+
+  it('holds each group to the count and the pixels, and gives an oversized image its own', () => {
+    expect(groupImages(Array(21).fill({ width: 10, height: 10 })).map((g) => g.length)).toEqual([
+      10, 10, 1,
+    ]);
+    const huge = { width: 2000, height: 11_000 };
+    expect(groupImages([frame, huge, frame])).toEqual([[0], [1], [2]]);
+    expect(SESSION_IMAGES.count).toBeLessThan(12);
+    expect(groupImages([])).toEqual([]);
+  });
 });
 
 describe('mergeReviews', () => {
@@ -1166,6 +1258,36 @@ describe('mergeReviews', () => {
       checks: [{ id: 'c', result: 'fail', frames: [1] }],
     });
     expect(mergeReviews([half('pass', 'n/a'), half('pass', 'n/a')]).checks[0]?.result).toBe('n/a');
+  });
+
+  // A group without the transitions sheet says it was not shown it; that must not ride along with
+  // the other group's pass, or unsupportedPasses blocks the film.
+  it('keeps only the words of the parts that gave the result, so a pass stands', () => {
+    const part = (result: 'pass' | 'n/a', measured: string, frames: number[]) => ({
+      verdict: 'pass' as const,
+      inspected: [],
+      checks: [{ id: 'no-cross-dissolve', result, measured, frames }],
+      issues: [],
+      summary: 'ok',
+    });
+    const merged = mergeReviews([
+      part('pass', 'Each seam is a hard cut.', [89, 90]),
+      part('n/a', 'The transitions sheet was not shown to me.', []),
+    ]);
+    expect(merged.checks).toEqual([
+      {
+        id: 'no-cross-dissolve',
+        result: 'pass',
+        measured: 'Each seam is a hard cut.',
+        frames: [89, 90],
+      },
+    ]);
+    const checks = merged.checks.map((check) => ({
+      ...check,
+      threshold: '',
+      source: 'model' as const,
+    }));
+    expect(unsupportedPasses(checks, new Set([89, 90]))).toEqual([]);
   });
 });
 
@@ -1344,6 +1466,9 @@ describe('the quality-check agent', () => {
       budgetUsd: 1,
     });
     expect(task).toContain('["fil_a","fil_b"]');
+    // A picture opened again in a later turn hides every other from the model.
+    expect(task).toContain('Open them all at once, in this one turn');
+    expect(task).not.toMatch(/open one again/i);
     for (const check of VISUAL_CHECKS) expect(task).toContain(`- ${check.id} (`);
     expect(task).toContain('"40% faster builds" cites build-times');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
