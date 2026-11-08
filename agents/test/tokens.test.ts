@@ -447,6 +447,148 @@ describe('deriveColors', () => {
   });
 });
 
+describe('measured colours', () => {
+  const at = (x: number, y: number, element: string) => ({ x, y, element });
+  const URL = 'https://example.org/';
+
+  it('lists every chosen colour at the point it was read, and the body colour whatever its share', () => {
+    const result = deriveColors(
+      styles({
+        root: '#EEEFE9',
+        rootAt: at(0, 0, 'body'),
+        backgrounds: [
+          { ...color('#D3DAC6'), weight: 76, at: at(420, 180, 'div.window') },
+          { ...color('#FDFDF8'), weight: 4, at: at(420, 300, 'div.card') },
+          { ...color('#CBD5B9'), weight: 1, at: at(60, 20, 'div#taskbar') },
+        ],
+        texts: [
+          { ...color('#111111'), weight: 2000, heading: false, at: at(640, 260, 'p') },
+          { ...color('#65675E'), weight: 600, heading: false, at: at(640, 360, 'p.muted') },
+        ],
+        ctas: [
+          cta({
+            background: color('#EB9D2A'),
+            color: color('#111111'),
+            at: at(1120, 370, 'a.raised'),
+          }),
+          cta({
+            background: color('#EB9D2A'),
+            color: color('#111111'),
+            at: at(1120, 806, 'a.raised'),
+          }),
+        ],
+      }),
+      URL,
+    );
+    expect(result.background).toBe('#D3DAC6');
+    expect(
+      result.measured.map((item) => [item.hex, item.seen_as, item.share, item.tokens]),
+    ).toEqual([
+      ['#D3DAC6', 'surface', 0.938, ['background']],
+      ['#FDFDF8', 'surface', 0.049, []],
+      ['#EEEFE9', 'surface', 0, []],
+      ['#111111', 'text', null, ['foreground', 'primary']],
+      ['#EB9D2A', 'button', null, ['accent', 'accents']],
+      ['#65675E', 'text', null, ['muted']],
+    ]);
+    // A surface on under 2% of the samples is a detail, not a ground.
+    expect(result.measured.some((item) => item.hex === '#CBD5B9')).toBe(false);
+    expect(result.measured[0]).toMatchObject({
+      property: 'background-color',
+      element: 'div.window',
+      page_url: URL,
+      x: 420,
+      y: 180,
+    });
+    expect(result.measured.find((item) => item.hex === '#EB9D2A')).toMatchObject({
+      property: 'background-color',
+      element: 'a.raised',
+    });
+  });
+
+  it("lists the background at its exact value when it is the body's colour", () => {
+    const result = deriveColors(
+      styles({
+        root: '#FFFFFF',
+        rootAt: at(960, 60, 'body'),
+        backgrounds: [{ ...color('#FEFEFE'), weight: 100, at: at(60, 60, 'main') }],
+        texts: [{ ...color('#1F2937'), weight: 2000, heading: false, at: at(300, 200, 'p') }],
+      }),
+      URL,
+    );
+    expect(result.background).toBe('#FFFFFF');
+    expect(result.measured[0]).toMatchObject({
+      hex: '#FFFFFF',
+      element: 'body',
+      tokens: ['background'],
+    });
+  });
+
+  it("lists the body's colour at its exact value beside a surface within rounding of it", () => {
+    const result = deriveColors(
+      styles({
+        root: '#EEEFE9',
+        rootAt: at(0, 0, 'body'),
+        backgrounds: [
+          { ...color('#D3DAC6'), weight: 80, at: at(420, 180, 'div.window') },
+          { ...color('#F3F4EE'), weight: 20, at: at(540, 540, 'div.demo') },
+        ],
+        texts: [{ ...color('#111111'), weight: 2000, heading: false, at: at(300, 200, 'p') }],
+      }),
+      URL,
+    );
+    expect(result.measured.filter((item) => item.seen_as === 'surface')).toMatchObject([
+      { hex: '#D3DAC6', share: 0.8 },
+      { hex: '#F3F4EE', share: 0.2 },
+      { hex: '#EEEFE9', share: 0, element: 'body' },
+    ]);
+  });
+
+  it('does not list a black or white foreground that no text on the site has', () => {
+    const result = deriveColors(
+      styles({
+        rootAt: at(0, 0, 'body'),
+        backgrounds: [{ ...color('#FFFFFF'), weight: 100, at: at(60, 60, 'body') }],
+        texts: [{ ...color('#DDDDDD'), weight: 900, heading: false, at: at(300, 200, 'p') }],
+      }),
+      URL,
+    );
+    expect(result.foreground).toBe('#000000');
+    expect(result.measured.some((item) => item.hex === '#000000')).toBe(false);
+    expect(result.measured[0]?.tokens).toEqual(['background']);
+  });
+
+  it('lists the page surface taken as the background when the brand colour only works there', () => {
+    const result = deriveColors(
+      styles({
+        rootAt: at(0, 0, 'body'),
+        backgrounds: [
+          { ...color('#FFFFFF'), weight: 70, at: at(60, 60, 'body') },
+          { ...color('#111827'), weight: 30, at: at(960, 900, 'section.dark') },
+        ],
+        texts: [
+          { ...color('#1F2937'), weight: 2000, heading: false, at: at(300, 200, 'p') },
+          { ...color('#F9FAFB'), weight: 800, heading: false, at: at(300, 900, 'section.dark p') },
+        ],
+        ctas: [
+          cta({ background: color('#FDE047'), color: color('#111111'), at: at(500, 950, 'a') }),
+        ],
+      }),
+      URL,
+    );
+    expect(result.background).toBe('#111827');
+    expect(result.measured.find((item) => item.tokens.includes('background'))).toMatchObject({
+      hex: '#111827',
+      element: 'section.dark',
+      seen_as: 'surface',
+    });
+  });
+
+  it('lists nothing from a capture made before points were recorded', () => {
+    expect(deriveColors(styles(), URL).measured).toEqual([]);
+  });
+});
+
 describe('pickRadius', () => {
   const fill = { background: color('#4F46E5') };
 

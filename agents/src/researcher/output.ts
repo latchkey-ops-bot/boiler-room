@@ -58,6 +58,33 @@ export const LOGO_SOURCES = [
   'generated',
 ] as const;
 
+/**
+ * Where the logo was found, best first: inside the header's home link (in any variant it holds),
+ * elsewhere in the header or on the first screen, an apple-touch-icon or another icon, and last
+ * the Open Graph image. `uploaded` is the customer's file; `generated` is the name set in type,
+ * only when no picture of a logo could be had.
+ */
+export const LOGO_PLACEMENTS = [
+  'header-home-link',
+  'header',
+  'page',
+  'apple-touch-icon',
+  'icon',
+  'og-image',
+  'uploaded',
+  'generated',
+] as const;
+
+/** The brand colours a measured colour can be set as. `accents` is `brand_details.accents`. */
+export const COLOR_TOKENS = [
+  'background',
+  'foreground',
+  'primary',
+  'accent',
+  'muted',
+  'accents',
+] as const;
+
 export const FONT_METHODS = [
   'google-fonts',
   'adobe-fonts',
@@ -168,6 +195,38 @@ const needUpload = z.strictObject({
   evidence_url: httpUrl.nullable().describe('Where the gap was seen, such as a sign-in page.'),
 });
 
+/**
+ * A colour the capture read from a computed style, at a recorded point on a captured page. Only
+ * these may be brand colours: the background must be one painted as a page surface.
+ */
+export const measuredColorSchema = z.strictObject({
+  hex: hexColor,
+  property: z
+    .enum(['background-color', 'color', 'border-color', 'canvas'])
+    .describe(
+      'The computed style read. `canvas` is the browser canvas, where html and body are transparent.',
+    ),
+  seen_as: z
+    .enum(['surface', 'text', 'link', 'button'])
+    .describe('What painted it: a page surface, text, a link or a button.'),
+  element: z
+    .string()
+    .min(1)
+    .describe('The element whose computed style gave it, as tag#id.class, or "canvas".'),
+  page_url: httpUrl.describe('The captured page it was read on.'),
+  x: z.number().describe('CSS px from the left of the page, in a 1920 x 1080 viewport.'),
+  y: z.number().describe('CSS px from the top of the page.'),
+  share: z
+    .number()
+    .min(0)
+    .max(1)
+    .nullable()
+    .describe('For a page surface, its share of the background samples; null otherwise.'),
+  tokens: z.array(z.enum(COLOR_TOKENS)).describe('The brand colours the capture set to it.'),
+});
+
+export type MeasuredColor = z.infer<typeof measuredColorSchema>;
+
 const brandDetails = z.strictObject({
   mode: z.enum(['light', 'dark']),
   accents: z.array(hexColor),
@@ -181,6 +240,12 @@ const brandDetails = z.strictObject({
   ),
   radius_px: z.number().min(0).nullable(),
   css_variables: z.boolean().describe('Whether the site defines colour custom properties.'),
+  measured: z
+    .array(measuredColorSchema)
+    .min(1)
+    .describe(
+      "Every colour the capture measured, with where. Copy the template's list unchanged: every brand colour and accent must be one of these, and the background one with seen_as surface.",
+    ),
   notes: z.array(z.string()),
 });
 
@@ -190,6 +255,16 @@ const evidence = z.strictObject({
   logo: z.strictObject({
     asset_id: slug,
     source: z.enum(LOGO_SOURCES),
+    found_in: z
+      .enum(LOGO_PLACEMENTS)
+      .describe(
+        "Where the logo was found, as the template has it: 'uploaded' for the customer's file.",
+      ),
+    aspect: z
+      .number()
+      .positive()
+      .nullable()
+      .describe('Width over height of the logo file, as the template has it.'),
     url: httpUrl.nullable().describe('Where the logo came from, or null when generated.'),
   }),
   material: z.array(

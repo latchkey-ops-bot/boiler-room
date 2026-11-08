@@ -1,6 +1,7 @@
 import type { Browser, Page } from 'playwright';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { collectPage } from '../src/capture/collect.ts';
+import { normaliseSvg, rankLogos } from '../src/capture/logo.ts';
 import { deriveColors } from '../src/capture/tokens.ts';
 import type { RawPage } from '../src/capture/types.ts';
 
@@ -217,6 +218,48 @@ const FIELD_STYLE_SITE = `<!doctype html><html><head><title>Hog</title><style>
 <a class="raised" href="/install"><span>Install</span></a>
 <a class="tab" href="/ask">Ask anything</a>
 </div></body></html>`;
+
+// posthog.com's header, as the first real film met it: the home link shows the hedgehog mark at
+// desktop width (sized width="auto" in a 24 px box) and holds the full lockup of mark and name for
+// phones, hidden, with its clip path defined elsewhere on the page, and a white lockup for the
+// dark scheme. The hero draws the lockup again in its colours. A desktop "Home" icon is a home
+// link too, with a hover glow at opacity 0. The body's colour is covered by a wallpaper; the
+// window paints #D3DAC6 and a card #FDFDF8. The hero's lockup fills its mark with gradients, as
+// posthog.com's does.
+const MARK = 'M.87 19.13a.5.5 0 0 0-.87.34v5.94a2.6 2.6 0 0 0 2.59 2.58H7.8a.5.5 0 0 0 .37-.84z';
+const NAME =
+  'M64.9 22.88c-.67 0-1.23-.56-1.23-1.24V5.24c0-.69.56-1.24 1.24-1.24h6.55c3.89 0 6.39 2.32 6.39 5.9';
+const LOGO_SITE = `<!doctype html><html lang="en"><head><title>Hog</title>
+<meta property="og:image" content="/og.png">
+<link rel="apple-touch-icon" sizes="512x512" href="/icon-512.png">
+<style>
+  body { margin: 0; background: #EEEFE9; color: #111111; font-family: sans-serif; }
+  .wallpaper { position: fixed; inset: 0; z-index: -1; background-image: linear-gradient(#A1B2C3, #C3B2A1); }
+  .taskbar { height: 48px; background: #CBD5B9; display: flex; align-items: center; gap: 12px; padding: 0 16px; }
+  .taskbar a { color: #23251D; }
+  .mark { display: block; width: 24px; height: 24px; }
+  .lockup { display: none; height: 20px; }
+  .hidden { display: none; }
+  .icons { position: absolute; left: 20px; top: 70px; }
+  .icons a { color: #FFFFFF; display: block; text-align: center; }
+  .window { width: 1200px; height: 900px; margin: 40px auto; background: #D3DAC6; padding: 40px; }
+  .card { background: #FDFDF8; padding: 24px; width: 400px; }
+  .glow { position: absolute; left: 0; top: 120px; width: 240px; height: 240px; background: #49BAC5; opacity: 0; }
+</style></head><body><div class="wallpaper"></div><div class="glow"></div>
+<svg style="display: none"><defs><clipPath id="lockup-clip"><rect fill="#FFFFFF" width="52" height="28"/></clipPath></defs></svg>
+<div class="taskbar"><a href="/" class="home"><svg class="mark" viewBox="0 0 52 28" width="auto" fill="currentColor"><path d="${MARK}"/></svg><svg class="lockup" viewBox="0 0 160 28" fill="currentColor"><g clip-path="url(#lockup-clip)"><path d="${MARK}"/></g><path d="${NAME}"/></svg><svg class="hidden dark:block" viewBox="0 0 160 28" fill="#FFFFFF"><path d="${NAME}"/></svg></a>
+<a href="/pricing">Pricing</a></div>
+<nav class="icons"><a href="/"><svg viewBox="0 0 36 36" width="36" height="36"><path d="M4 18 18 4l14 14v14H4z" fill="#F1A82C"/></svg><span>Home</span></a></nav>
+<div class="window">
+<svg class="hero-logo" viewBox="0 0 160 28" width="157"><defs><linearGradient id="hog-a"><stop offset="0" stop-color="#1D4AFF"/><stop offset="1" stop-color="#2F80FA"/></linearGradient><linearGradient id="hog-b"><stop offset="0" stop-color="#F9BD2B"/><stop offset="1" stop-color="#F54E00"/></linearGradient></defs><path fill="url(#hog-a)" d="${MARK}"/><path fill="url(#hog-b)" d="M10 10h5v5h-5z"/><path fill="#000000" d="${NAME}"/></svg>
+<h1>Your product's context layer</h1>
+<p>Every tool you need to build a better product, in one place, for teams of every size.</p>
+<div class="card"><p>Most of our users pay nothing at all.</p></div>
+</div></body></html>`;
+
+// html and body paint nothing, in a dark colour scheme: the browser's dark canvas shows.
+const CANVAS_SITE = `<!doctype html><html style="color-scheme: dark"><head><title>Bare</title></head>
+<body style="margin: 0"><h1>Plain text notes</h1><p>Nothing here sets a background colour at all.</p></body></html>`;
 
 let browser: Browser | undefined;
 
@@ -573,6 +616,113 @@ describe('collectPage in Chromium', () => {
     expect(logo).toContain('fill="currentColor"');
     expect(logo).toContain('color="#23251D"');
     expect(logo).not.toContain('data-br-');
+    await page.close();
+  });
+
+  it("finds the header's logo in every variant its home link holds, and its full-colour twin", async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(LOGO_SITE);
+    const svgs = raw.logos.filter((item) => item.kind === 'inline-svg');
+    const mark = svgs.find((item) => item.svg?.includes('viewBox="0 0 52 28"'));
+    const lockup = svgs.find((item) => item.headerHome && item.svg?.includes('0 0 160 28'));
+    const twin = svgs.find((item) => item.twin);
+    const house = svgs.find((item) => item.svg?.includes('0 0 36 36'));
+    // The mark is drawn letterboxed in its 24 px box: its own shape is 24 x 12.92.
+    expect(mark).toMatchObject({ headerHome: true, colors: 1 });
+    expect(mark?.width).toBe(24);
+    expect(mark?.height).toBeCloseTo(12.92, 1);
+    expect(mark?.hidden).toBeUndefined();
+    expect(lockup).toMatchObject({ headerHome: true, hidden: true, width: 160, height: 28 });
+    // Its clip path lives elsewhere on the page and comes with it.
+    expect(lockup?.svg).toContain('<clipPath id="lockup-clip">');
+    // The white lockup kept for the dark scheme is not a candidate.
+    expect(svgs.some((item) => item.svg?.includes('dark:block'))).toBe(false);
+    // The twin's colours are its gradients' stops and its flat fill; a clip path's shape is not ink.
+    expect(twin).toMatchObject({ headerHome: false, colors: 5 });
+    expect(lockup?.colors).toBe(1);
+    expect(twin?.svg).toContain('fill="url(#hog-a)"');
+    expect(house).toMatchObject({ homeLink: true, headerHome: false });
+
+    const ranked = rankLogos(raw.logos);
+    expect(ranked.slice(0, 3).map((item) => item.candidate)).toEqual([twin, lockup, mark]);
+    expect(ranked.at(-1)?.placement).toBe('og-image');
+    const saved = normaliseSvg(ranked[0]?.candidate.svg ?? '', ranked[0]?.candidate);
+    expect(saved).toMatchObject({ width: 512, height: 90 });
+    expect(saved?.aspect).toBeCloseTo(160 / 28, 5);
+    await page.close();
+  });
+
+  it('records the point and element each colour was read at, and the surfaces a film could use', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(LOGO_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    const colors = deriveColors(raw.styles, `${ORIGIN}/`);
+    expect(colors.background).toBe('#D3DAC6');
+    const ground = colors.measured.find((item) => item.tokens.includes('background'));
+    expect(ground).toMatchObject({
+      hex: '#D3DAC6',
+      property: 'background-color',
+      seen_as: 'surface',
+      page_url: `${ORIGIN}/`,
+    });
+    expect(ground?.element).toMatch(/^div\.window/);
+    expect(ground?.share).toBeGreaterThan(0.9);
+    // The point is inside the window, and the window's computed style there is the colour.
+    const at = await page.evaluate(
+      ({ x, y }) =>
+        document
+          .elementsFromPoint(x - window.scrollX, y - window.scrollY)
+          .map((el) => getComputedStyle(el).backgroundColor),
+      { x: ground?.x ?? -1, y: ground?.y ?? -1 },
+    );
+    expect(at).toContain('rgb(211, 218, 198)');
+    // The other surfaces: the card, and the body's own colour though the wallpaper covers it.
+    expect(colors.measured.find((item) => item.hex === '#FDFDF8')).toMatchObject({
+      seen_as: 'surface',
+      tokens: [],
+    });
+    expect(colors.measured.find((item) => item.hex === '#EEEFE9')).toMatchObject({
+      seen_as: 'surface',
+      element: 'body',
+      share: 0,
+    });
+    // A fill at opacity 0 is a computed style nobody sees: it is no surface.
+    expect(raw.styles.backgrounds.some((item) => item.hex === '#49BAC5')).toBe(false);
+    // Every colour chosen is in the record, with a point.
+    for (const hex of [
+      colors.foreground,
+      colors.primary,
+      colors.accent,
+      colors.muted,
+      ...colors.accents,
+    ]) {
+      if (!hex || hex === '#000000' || hex === '#FFFFFF') continue;
+      expect(colors.measured.map((item) => item.hex)).toContain(hex);
+    }
+    expect(colors.measured.find((item) => item.tokens.includes('foreground'))).toMatchObject({
+      hex: '#111111',
+      seen_as: 'text',
+      property: 'color',
+    });
+    await page.close();
+  });
+
+  it("reads the browser's canvas colour for its scheme when html and body paint nothing", async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(CANVAS_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    expect(raw.styles.rootSet).toBe(false);
+    expect(raw.styles.root).toBe('#121212');
+    expect(raw.styles.rootAt?.element).toBe('canvas');
+    const colors = deriveColors(raw.styles, `${ORIGIN}/`);
+    expect(colors.background).toBe('#121212');
+    expect(colors.measured[0]).toMatchObject({
+      hex: '#121212',
+      property: 'canvas',
+      seen_as: 'surface',
+      element: 'canvas',
+      tokens: ['background'],
+    });
     await page.close();
   });
 });

@@ -1,6 +1,6 @@
 import { unbackedNumbers } from '@boiler-room/schema';
 import { z } from 'zod';
-import type { ResearchOutput } from './output.ts';
+import { type MeasuredColor, measuredColorSchema, type ResearchOutput } from './output.ts';
 import { normaliseUrl, normaliseWhitespace, numbersIn } from './text.ts';
 import { ATTRIBUTION_WORDS, RELATION_WORDS, stem, unbackedWords, wordsOf } from './words.ts';
 
@@ -44,6 +44,12 @@ export const pagesBundleSchema = z.object({
   site: z.string(),
   captured_at: z.string(),
   pages: z.array(storedPageSchema),
+  /**
+   * The colours the capture measured on the home page, each with its point. The bundle's digest
+   * binds them to the run, so they are what the result's colours are checked against. Absent in
+   * bundles from older captures.
+   */
+  measured_colors: z.array(measuredColorSchema).optional(),
 });
 
 export type StoredPage = z.infer<typeof storedPageSchema>;
@@ -71,6 +77,9 @@ export const FAILURE_CODES = [
   'ASSET_UNKNOWN',
   'NEED_DUPLICATE',
   'LOGO_MISMATCH',
+  'COLORS_UNMEASURED',
+  'MEASURED_CHANGED',
+  'COLOR_UNMEASURED',
 ] as const;
 
 export type FailureCode = (typeof FAILURE_CODES)[number];
@@ -92,6 +101,12 @@ export interface Failure {
   claimTextId?: string;
   /** Set when a brief fact says more than its quotes, so the gate can settle that fact. */
   briefPath?: string;
+  /**
+   * Set when a colour is not one the capture measured (`brand.colors.background`,
+   * `brand_details.accents[2]`), or `brand_details.measured` differs from the capture's, so the
+   * gate can set the capture's measured value back.
+   */
+  colorPath?: string;
 }
 
 type Field = keyof StoredPage['text'];
@@ -713,6 +728,127 @@ function verifyReferences(output: ResearchOutput): Failure[] {
   return failures;
 }
 
+/** Black or white text, which a foreground may be when no text colour on the site is readable. */
+const PLAIN_INK = new Set(['#000000', '#FFFFFF']);
+
+const BRAND_TOKENS = ['background', 'foreground', 'primary', 'accent', 'muted'] as const;
+
+/**
+ * The brand colours that are not measured colours: each token whose value no measured colour has,
+ * and a background that is not a measured page surface. A foreground may be black or white, which
+ * the capture picks when no text colour on the site clears 4.5:1. The Director and the Art
+ * Director may only use measured colours, so any colour this returns must not reach a film.
+ */
+export function unmeasuredColors(
+  colors: Partial<Record<(typeof BRAND_TOKENS)[number], string | undefined>>,
+  measured: readonly MeasuredColor[],
+  accents: readonly string[] = [],
+): { path: string; token: string; hex: string }[] {
+  const has = (hex: string, surface = false) =>
+    measured.some(
+      (item) =>
+        item.hex.toUpperCase() === hex.toUpperCase() && (!surface || item.seen_as === 'surface'),
+    );
+  const found: { path: string; token: string; hex: string }[] = [];
+  for (const token of BRAND_TOKENS) {
+    const hex = colors[token];
+    if (!hex) continue;
+    if (token === 'foreground' && PLAIN_INK.has(hex.toUpperCase())) continue;
+    if (!has(hex, token === 'background'))
+      found.push({ path: `brand.colors.${token}`, token, hex });
+  }
+  accents.forEach((hex, index) => {
+    if (!has(hex)) found.push({ path: `brand_details.accents[${index}]`, token: 'accents', hex });
+  });
+  return found;
+}
+
+/** The capture's own value for a colour path, from the tokens it set on its measured colours. */
+export function measuredValue(
+  path: string,
+  measured: readonly MeasuredColor[],
+): string | undefined {
+  const token = /^brand\.colors\.(\w+)$/.exec(path)?.[1];
+  if (!token) return undefined;
+  return measured.find((item) => (item.tokens as string[]).includes(token))?.hex;
+}
+
+/** A measured colour as one string with its fields in a fixed order, to compare two lists. */
+const measuredKey = (item: MeasuredColor) =>
+  JSON.stringify([
+    item.hex.toUpperCase(),
+    item.property,
+    item.seen_as,
+    item.element,
+    item.page_url,
+    item.x,
+    item.y,
+    item.share,
+    item.tokens,
+  ]);
+
+const sameMeasured = (a: readonly MeasuredColor[], b: readonly MeasuredColor[]) =>
+  a.length === b.length &&
+  a.every((item, index) => measuredKey(item) === measuredKey(b[index] as MeasuredColor));
+
+/**
+ * Every brand colour must be one the capture measured at a recorded point, and the background one
+ * painted as a page surface: a colour made up downstream (a tint, a mix, a nicer grey) is refused.
+ * `brand_details.measured` must be the capture's own list, which the bundle's digest binds to the
+ * run. A bundle from before colours carried points cannot vouch for any colour.
+ */
+function verifyColors(output: ResearchOutput, bundle: PagesBundle): Failure[] {
+  const measured = bundle.measured_colors;
+  if (!measured) {
+    return [
+      {
+        code: 'COLORS_UNMEASURED',
+        path: 'brand_details.measured',
+        message:
+          'The stored pages.json has no measured colours: it is from a capture that did not record where each colour was read, so no brand colour can be checked.',
+        fix: 'Run the capture again with this tool, publish the pages.json it writes, and copy the template it writes.',
+      },
+    ];
+  }
+  const failures: Failure[] = [];
+  if (!sameMeasured(output.brand_details.measured, measured)) {
+    failures.push({
+      code: 'MEASURED_CHANGED',
+      path: 'brand_details.measured',
+      message:
+        'brand_details.measured is not the list the capture measured. It is the record of where each colour was read, and is never edited.',
+      fix: 'Copy brand_details.measured from the template unchanged.',
+      colorPath: 'brand_details.measured',
+    });
+  }
+  const surfaces = measured
+    .filter((item) => item.seen_as === 'surface')
+    .map((item) => item.hex)
+    .join(', ');
+  for (const item of unmeasuredColors(
+    output.brand.colors,
+    measured,
+    output.brand_details.accents,
+  )) {
+    const value = measuredValue(item.path, measured);
+    failures.push({
+      code: 'COLOR_UNMEASURED',
+      path: item.path,
+      message:
+        item.token === 'background'
+          ? `${item.path} is ${item.hex}, which the capture did not measure as a page surface. Measured surfaces: ${surfaces || 'none'}.`
+          : `${item.path} is ${item.hex}, which the capture did not measure on the site.`,
+      fix: value
+        ? `Set ${item.path} to ${value}, as the template has it, or to another colour brand_details.measured lists${item.token === 'background' ? ' with seen_as "surface"' : ''}.`
+        : item.token === 'accents'
+          ? `Remove ${item.path}, or set it to a colour brand_details.measured lists.`
+          : `Set ${item.path} to a colour brand_details.measured lists, or remove it.`,
+      colorPath: item.path,
+    });
+  }
+  return failures;
+}
+
 /**
  * Checks research output against the text the capture stored. Every claim quote must be in the
  * stored text of its source page, after normalising whitespace, and a figure that only appears in
@@ -729,5 +865,6 @@ export function verifyResearch(output: ResearchOutput, bundle: PagesBundle): Fai
     ...verifyNonClaims(output, pages),
     ...verifyPages(output, pages),
     ...verifyReferences(output),
+    ...verifyColors(output, bundle),
   ];
 }

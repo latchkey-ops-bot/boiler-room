@@ -1,4 +1,5 @@
 import type {
+  PagePoint,
   RawControl,
   RawCta,
   RawFontFace,
@@ -85,6 +86,26 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     );
   };
   const docTop = (rect: DOMRect) => rect.top + window.scrollY;
+  /** An element as `tag#id.class.class`, clipped: enough to find it again in the page. */
+  const describe = (el: Element) => {
+    const id = el.id ? `#${el.id}` : '';
+    const classes = (el.getAttribute('class') ?? '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 3)
+      .map((name) => `.${name}`)
+      .join('');
+    return `${el.tagName.toLowerCase()}${id}${classes}`.slice(0, 120);
+  };
+  /** Where a colour was read: a point in document coordinates and the element it was read from. */
+  const pointAt = (x: number, y: number, el: Element): PagePoint => ({
+    x: Math.round(x + window.scrollX),
+    y: Math.round(y + window.scrollY),
+    element: describe(el),
+  });
+  /** The centre of an element's box, in document coordinates. */
+  const centreOf = (el: Element, rect = el.getBoundingClientRect()): PagePoint =>
+    pointAt(rect.left + rect.width / 2, rect.top + rect.height / 2, el);
   const attrText = (el: Element) => {
     const parts = [el.id, el.getAttribute('class') ?? '', el.getAttribute('aria-label') ?? ''];
     for (const attr of Array.from(el.attributes)) {
@@ -761,6 +782,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     // over its own fill, as a raised button's lighter top over its darker edge. The face a visitor
     // sees is the innermost box that covers the button with a fill of its own, or a border.
     let box = boxOf(el);
+    let face: Element = el;
     let node: Element = el;
     for (let depth = 0; depth < 4; depth++) {
       const cover = Array.from(node.children).find((child) => {
@@ -769,7 +791,10 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       });
       if (!cover) break;
       const drawn = boxOf(cover);
-      if (drawn.filled || (!box.filled && drawn.border)) box = drawn;
+      if (drawn.filled || (!box.filled && drawn.border)) {
+        box = drawn;
+        face = cover;
+      }
       node = cover;
     }
     const { style, background, filled, border } = box;
@@ -809,6 +834,8 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       radius,
       pill: radius >= rect.height / 2 - 1,
       area: Math.round(rect.width * rect.height),
+      at: centreOf(face, rect),
+      textAt: centreOf(el, rect),
     });
   }
 
@@ -925,14 +952,39 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     // one colour: a sample that lands on one is not counted, so a wallpaper never reads as the
     // body colour it covers.
     const PICTURE = /^(img|video|canvas|picture|iframe|object|embed)$/i;
+    // A fill on an element faded out (a hover glow at opacity 0) is a computed style nobody sees.
+    const opacityCache = new WeakMap<Element, number>();
+    const seenOpacity = (el: Element): number => {
+      const cached = opacityCache.get(el);
+      if (cached !== undefined) return cached;
+      const style = styleOf(el);
+      const own = style.visibility === 'hidden' ? 0 : Number(style.opacity) || 0;
+      const value = own * (el.parentElement ? seenOpacity(el.parentElement) : 1);
+      opacityCache.set(el, value);
+      return value;
+    };
     const pictured = (el: Element) => {
       if (PICTURE.test(el.tagName)) return true;
       const image = styleOf(el).backgroundImage;
       return Boolean(image && image !== 'none');
     };
-    const rootFill = opaqueFill(body) ?? opaqueFill(document.documentElement);
+    const rootEl = opaqueFill(body) ? body : document.documentElement;
+    const rootFill = opaqueFill(rootEl);
     const bodyOwnBox = opaqueFill(document.documentElement) !== null && opaqueFill(body) !== null;
-    const backgrounds = new Map<string, number>();
+    // With html and body both transparent the browser's canvas shows, in the CSS system colour
+    // `Canvas` for the page's colour scheme: read as a computed style, not assumed to be white.
+    const canvasFill = (() => {
+      const probe = document.createElement('div');
+      probe.style.backgroundColor = 'Canvas';
+      probe.style.display = 'none';
+      document.documentElement.appendChild(probe);
+      const fill = opaqueFill(probe);
+      probe.remove();
+      return fill ?? '#FFFFFF';
+    })();
+    const pageFill = rootFill ?? canvasFill;
+    let rootAt: PagePoint | undefined;
+    const backgrounds = new Map<string, { weight: number; at: PagePoint }>();
     const height = document.documentElement.scrollHeight;
     document.head.appendChild(touchable);
     for (const y of [0, vh, vh * 2]) {
@@ -941,10 +993,13 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       await sleep(200);
       for (let row = 0; row < 9; row++) {
         for (let col = 0; col < 16; col++) {
-          const stack = document.elementsFromPoint(((col + 0.5) * vw) / 16, ((row + 0.5) * vh) / 9);
+          const px = ((col + 0.5) * vw) / 16;
+          const py = ((row + 0.5) * vh) / 9;
+          const stack = document.elementsFromPoint(px, py);
           const top = stack[0];
           if (!top || insideIllustrative(top)) continue;
           let hex: string | null = null;
+          let from: Element | null = null;
           let picture = false;
           for (const el of stack) {
             // A layer behind the content (a negative z-index wallpaper) is hit after the body but
@@ -955,8 +1010,12 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
               continue;
             }
             if (el.closest('[data-br-overlay]')) continue;
+            if (seenOpacity(el) < 0.5) continue;
             hex = opaqueFill(el);
-            if (hex) break;
+            if (hex) {
+              from = el;
+              break;
+            }
             if (pictured(el)) {
               picture = true;
               break;
@@ -965,13 +1024,25 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
           if (!hex && !picture && (pictured(body) || pictured(document.documentElement)))
             picture = true;
           if (picture) continue;
-          hex ??= rootFill ?? '#FFFFFF';
-          backgrounds.set(hex, (backgrounds.get(hex) ?? 0) + 1);
+          let at: PagePoint;
+          if (hex && from) at = pointAt(px, py, from);
+          else {
+            hex = pageFill;
+            at = rootFill
+              ? pointAt(px, py, rootEl)
+              : { ...pointAt(px, py, rootEl), element: 'canvas' };
+            rootAt ??= at;
+          }
+          const seen = backgrounds.get(hex);
+          if (seen) seen.weight += 1;
+          else backgrounds.set(hex, { weight: 1, at });
         }
       }
     }
     touchable.remove();
     window.scrollTo(0, 0);
+    // A body colour no sample showed is still what the body paints: read at the page's top left.
+    rootAt ??= { x: 0, y: 0, element: rootFill ? describe(rootEl) : 'canvas' };
 
     const texts = new Map<
       string,
@@ -982,11 +1053,15 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         heading: boolean;
         link: boolean;
         chrome: boolean;
+        at: PagePoint;
       }
     >();
     const CHROME =
       'nav, header, footer, [role="banner"], [role="navigation"], [role="contentinfo"]';
-    const linkColors = new Map<string, { hex: string; alpha: number; weight: number }>();
+    const linkColors = new Map<
+      string,
+      { hex: string; alpha: number; weight: number; at: PagePoint }
+    >();
     const cardRadii = new Map<number, number>();
     const all = Array.from(body.querySelectorAll('*')).slice(0, 6000);
     for (const el of all) {
@@ -1014,7 +1089,12 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       if (!color) continue;
       if (el.tagName === 'A') {
         const key = `${color.hex}|${color.alpha}`;
-        const entry = linkColors.get(key) ?? { hex: color.hex, alpha: color.alpha, weight: 0 };
+        const entry = linkColors.get(key) ?? {
+          hex: color.hex,
+          alpha: color.alpha,
+          weight: 0,
+          at: centreOf(el),
+        };
         entry.weight += 1;
         linkColors.set(key, entry);
       }
@@ -1030,6 +1110,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
           heading,
           link,
           chrome,
+          at: centreOf(el),
         };
         entry.weight += chars;
         texts.set(key, entry);
@@ -1072,10 +1153,16 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     }
 
     styles = {
-      root: rootFill ?? '#FFFFFF',
+      root: pageFill,
       rootSet: rootFill !== null,
+      rootAt,
       overlays: hidden,
-      backgrounds: [...backgrounds].map(([hex, weight]) => ({ hex, alpha: 1, weight })),
+      backgrounds: [...backgrounds].map(([hex, { weight, at }]) => ({
+        hex,
+        alpha: 1,
+        weight,
+        at,
+      })),
       texts: [...texts.values()],
       links: [...linkColors.values()],
       ctas,
@@ -1213,33 +1300,74 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       }
     };
     const LOGO_HINT = /logo|brand|wordmark|lockup/i;
-    const context = (el: Element) => {
+    const HEADER = 'header, nav, [role="banner"]';
+    // A home link labelled as navigation, such as a desktop "Home" icon, is not the logo.
+    const NAV_WORD = /^(home|start|back|menu)$/i;
+    // A variant for dark backgrounds or a dark scheme: a light mark, wrong on the page's own ground.
+    const DARK_VARIANT = /dark|white|inverse|invert|negative|reverse/i;
+    const readingOrder = (el: Element) => {
       const rect = el.getBoundingClientRect();
+      return docTop(rect) * 10000 + rect.left;
+    };
+    // The header's home link: the first link to the home page near the top that holds a picture.
+    // Its pictures are the logo, including variants it hides at this width, such as the full
+    // lockup of mark and name a site shows only on phones.
+    const logoAnchor =
+      (Array.from(document.querySelectorAll('a[href]')) as HTMLAnchorElement[])
+        .filter((anchor) => {
+          if (!isHome(anchor.href) || !visible(anchor)) return false;
+          const top = docTop(anchor.getBoundingClientRect());
+          if (top >= 400 || (anchor.closest(HEADER) === null && top >= 160)) return false;
+          // biome-ignore lint/performance/useDomNodeTextContent: the label a visitor reads
+          const label = clip(anchor.innerText ?? '', 40);
+          return anchor.querySelector('svg, img') !== null && !NAV_WORD.test(label);
+        })
+        .sort((a, b) => readingOrder(a) - readingOrder(b))[0] ?? null;
+    const inLogo = (el: Element) => logoAnchor?.contains(el) ?? false;
+    const darkVariant = (el: Element) => {
+      for (let node: Element | null = el; node && node !== logoAnchor; node = node.parentElement)
+        if (DARK_VARIANT.test(`${node.getAttribute('class') ?? ''} ${node.id}`)) return true;
+      return false;
+    };
+    /** Shown, or a variant the header's home link hides at this width (never a dark variant). */
+    const usable = (el: Element) => visible(el) || (inLogo(el) && !darkVariant(el));
+    const context = (el: Element) => {
+      // A hidden variant has no box of its own: it sits where its link is.
+      const rect = (visible(el) ? el : (logoAnchor ?? el)).getBoundingClientRect();
       const anchor = el.closest('a');
       const hint = `${attrText(el)} ${el.parentElement ? attrText(el.parentElement) : ''} ${anchor ? attrText(anchor) : ''}`;
       return {
         rect,
-        inHeader: el.closest('header, nav, [role="banner"]') !== null || docTop(rect) < 160,
-        homeLink: isHome(anchor?.href),
+        inHeader: el.closest(HEADER) !== null || docTop(rect) < 160,
+        homeLink: inLogo(el) || isHome(anchor?.href),
+        headerHome: inLogo(el),
         logoHint: LOGO_HINT.test(hint) || LOGO_HINT.test(el.getAttribute('alt') ?? ''),
       };
     };
     for (const img of Array.from(document.images)) {
-      if (!visible(img)) continue;
-      const { rect, inHeader, homeLink, logoHint } = context(img);
+      if (!usable(img)) continue;
+      const { rect, inHeader, homeLink, headerHome, logoHint } = context(img);
       if (!(inHeader || logoHint) || docTop(rect) > 1200) continue;
       const url = img.currentSrc || img.src;
+      if (!url) continue;
+      const shown = visible(img);
       logos.push({
         kind: 'img',
         url,
         svg: null,
         alt: img.alt ?? '',
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
+        width: Math.round(
+          shown ? rect.width : img.naturalWidth || Number(img.getAttribute('width')) || 0,
+        ),
+        height: Math.round(
+          shown ? rect.height : img.naturalHeight || Number(img.getAttribute('height')) || 0,
+        ),
         inHeader,
         homeLink,
+        headerHome,
         logoHint: logoHint || LOGO_HINT.test(url),
         type: '',
+        ...(shown ? {} : { hidden: true }),
       });
     }
     const SHAPES = new Set([
@@ -1254,10 +1382,59 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       'tspan',
       'use',
     ]);
+    const viewBoxOf = (svg: SVGSVGElement) => {
+      const parts = (svg.getAttribute('viewBox') ?? '')
+        .trim()
+        .split(/[\s,]+/)
+        .map(Number);
+      const [, , width = 0, height = 0] = parts;
+      return parts.length === 4 && width > 0 && height > 0 ? { width, height } : null;
+    };
+    const viewBoxKey = (svg: SVGSVGElement) =>
+      (svg.getAttribute('viewBox') ?? '')
+        .trim()
+        .split(/[\s,]+/)
+        .join(' ');
+    const pathsOf = (svg: SVGSVGElement) =>
+      new Set(
+        Array.from(svg.querySelectorAll('path'))
+          .map((path) => (path.getAttribute('d') ?? '').replace(/\s+/g, ' ').trim())
+          .filter((d) => d.length >= 40),
+      );
+    // The same logo drawn again on the first screen, often in its full colours where the header's
+    // is one colour: the same viewBox and at least one identical path.
+    const homeSvgs = logoAnchor
+      ? (Array.from(logoAnchor.querySelectorAll('svg')) as SVGSVGElement[]).map((svg) => ({
+          key: viewBoxKey(svg),
+          paths: pathsOf(svg),
+        }))
+      : [];
+    const twinOf = (svg: SVGSVGElement) => {
+      const key = viewBoxKey(svg);
+      if (!viewBoxOf(svg)) return false;
+      const own = pathsOf(svg);
+      return homeSvgs.some((home) => home.key === key && [...own].some((d) => home.paths.has(d)));
+    };
     for (const svg of Array.from(document.querySelectorAll('svg'))) {
-      if (!visible(svg) || svg.closest('button')) continue;
-      const { rect, inHeader, homeLink, logoHint } = context(svg);
-      if (!inHeader || rect.width < 16) continue;
+      // A nested svg is part of the one around it.
+      if (svg.ownerSVGElement || svg.closest('button') || !usable(svg)) continue;
+      const shown = visible(svg);
+      const { rect, inHeader, homeLink, headerHome, logoHint } = context(svg);
+      const twin = !headerHome && shown && docTop(rect) < 1200 && twinOf(svg);
+      if (!(inHeader || twin)) continue;
+      // A mark is often drawn letterboxed in a square box: its own shape is its viewBox.
+      const box = viewBoxOf(svg);
+      let width = rect.width;
+      let height = rect.height;
+      if (box && shown) {
+        const scale = Math.min(rect.width / box.width, rect.height / box.height);
+        width = box.width * scale;
+        height = box.height * scale;
+      } else if (box) {
+        width = box.width;
+        height = box.height;
+      } else if (!shown) continue;
+      if (shown && rect.width < 16) continue;
       const clone = svg.cloneNode(true) as SVGSVGElement;
       const from = [svg, ...Array.from(svg.querySelectorAll('*'))];
       const to = [clone, ...Array.from(clone.querySelectorAll('*'))];
@@ -1272,12 +1449,26 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         }
         return '';
       };
+      // The colours the logo is drawn in: flat fills and strokes, and each stop of a gradient it
+      // is filled with. A shape inside a clip path or a mask is not drawn.
+      const inks = new Set<string>();
+      const gradientInks = (value: string) => {
+        const id = /url\(\s*["']?[^"')#]*#([^"')]+)["']?\s*\)/.exec(value)?.[1];
+        const gradient = id ? document.getElementById(id) : null;
+        for (const stop of Array.from(gradient?.querySelectorAll('stop') ?? [])) {
+          const color = toColor(styleOf(stop).getPropertyValue('stop-color'));
+          if (color) inks.add(color.hex);
+        }
+      };
+      let shapes = 0;
       from.forEach((source, index) => {
         const target = to[index];
         // The capture's own markers are not part of the logo.
         for (const attr of Array.from(target?.attributes ?? []))
           if (attr.name.startsWith('data-br-')) target?.removeAttribute(attr.name);
         if (!target || !SHAPES.has(source.tagName.toLowerCase())) return;
+        const drawn = source.closest('clipPath, mask, defs, pattern, marker') === null;
+        if (drawn) shapes += 1;
         const style = styleOf(source);
         for (const [prop, opacity] of [
           ['fill', 'fill-opacity'],
@@ -1285,6 +1476,8 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         ] as const) {
           const value = style.getPropertyValue(prop);
           const color = toColor(value);
+          if (drawn && color) inks.add(color.hex);
+          else if (drawn) gradientInks(value);
           if (color && authored(source, prop) === 'currentcolor') {
             target.setAttribute(prop, 'currentColor');
           } else if (color) {
@@ -1292,26 +1485,41 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
             const own = Number.parseFloat(style.getPropertyValue(opacity)) || 1;
             if (color.alpha * own < 1)
               target.setAttribute(opacity, String(Math.round(color.alpha * own * 100) / 100));
-          } else target.setAttribute(prop, value || 'none');
+          } else {
+            // A gradient or pattern fill names its definition by id: keep it local to the file.
+            const local = (value || 'none').replace(
+              /url\(\s*["']?[^"')#]*#([^"')]+)["']?\s*\)/g,
+              'url(#$1)',
+            );
+            target.setAttribute(prop, local);
+          }
         }
       });
-      for (const use of Array.from(clone.querySelectorAll('use'))) {
-        const ref = use.getAttribute('href') ?? use.getAttribute('xlink:href');
-        const target = ref?.startsWith('#') ? document.getElementById(ref.slice(1)) : null;
-        if (target) {
-          const defs =
-            clone.querySelector('defs') ??
-            clone.insertBefore(
-              document.createElementNS('http://www.w3.org/2000/svg', 'defs'),
-              clone.firstChild,
-            );
-          defs.appendChild(target.cloneNode(true));
+      // Definitions the logo refers to by id (a symbol it uses, a clip path, a mask, a gradient)
+      // that live outside it on the page come with it, or the file draws nothing in their place.
+      const defs = () =>
+        clone.querySelector('defs') ??
+        clone.insertBefore(
+          document.createElementNS('http://www.w3.org/2000/svg', 'defs'),
+          clone.firstChild,
+        );
+      const wanted = new Set<string>();
+      for (const node of [clone, ...Array.from(clone.querySelectorAll('*'))]) {
+        const ref = node.getAttribute('href') ?? node.getAttribute('xlink:href');
+        if (node.tagName.toLowerCase() === 'use' && ref?.startsWith('#')) wanted.add(ref.slice(1));
+        for (const attr of Array.from(node.attributes)) {
+          for (const match of attr.value.matchAll(/url\(\s*["']?#([^"')]+)["']?\s*\)/g))
+            if (match[1]) wanted.add(match[1]);
         }
       }
+      for (const id of wanted) {
+        if (clone.querySelector(`[id="${CSS.escape(id)}"]`)) continue;
+        const found = document.getElementById(id);
+        if (found) defs().appendChild(found.cloneNode(true));
+      }
       clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-      if (!clone.getAttribute('width')) clone.setAttribute('width', String(Math.round(rect.width)));
-      if (!clone.getAttribute('height'))
-        clone.setAttribute('height', String(Math.round(rect.height)));
+      if (!clone.getAttribute('width')) clone.setAttribute('width', String(Math.round(width)));
+      if (!clone.getAttribute('height')) clone.setAttribute('height', String(Math.round(height)));
       // What `currentColor` is on the page, as a colour the file carries itself.
       const ink = toColor(styleOf(svg).color)?.hex ?? styleOf(svg).color;
       clone.setAttribute('color', ink);
@@ -1323,12 +1531,17 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         url: null,
         svg: markup,
         alt: svg.getAttribute('aria-label') ?? '',
-        width: Math.round(rect.width),
-        height: Math.round(rect.height),
+        width: Math.round(width * 100) / 100,
+        height: Math.round(height * 100) / 100,
         inHeader,
         homeLink,
+        headerHome,
         logoHint,
         type: 'image/svg+xml',
+        shapes,
+        colors: inks.size,
+        ...(shown ? {} : { hidden: true }),
+        ...(twin ? { twin: true } : {}),
       });
     }
     for (const el of Array.from(
@@ -1337,7 +1550,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       const image = styleOf(el).backgroundImage;
       const match = /url\(["']?([^"')]+)["']?\)/.exec(image);
       if (!match?.[1] || !visible(el)) continue;
-      const { rect, inHeader, homeLink, logoHint } = context(el);
+      const { rect, inHeader, homeLink, headerHome, logoHint } = context(el);
       if (!logoHint && !homeLink) continue;
       logos.push({
         kind: 'background',
@@ -1348,6 +1561,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         height: Math.round(rect.height),
         inHeader,
         homeLink,
+        headerHome,
         logoHint,
         type: '',
       });
