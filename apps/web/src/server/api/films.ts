@@ -12,6 +12,7 @@ import {
 } from '../../db/schema.ts';
 import { displayHost, FORMATS, type Format } from '../../lib/film.ts';
 import { parseFilmUrl } from '../../lib/film-url.ts';
+import { type Channel, parseChannels } from '../../lib/launch.ts';
 import { newId } from '../ids.ts';
 import { parseFormats } from '../pipeline/index.ts';
 import type { ApiContext } from './context.ts';
@@ -67,6 +68,10 @@ export interface FilmView {
   chosenCta: string | null;
   formats: Format[];
   showcaseOptIn: boolean;
+  /** The founder's launch day, `YYYY-MM-DD`, or null until they set it. */
+  launchDate: string | null;
+  /** Where the founder will post the film. */
+  launchChannels: Channel[];
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +132,8 @@ export function filmView(film: Film): FilmView {
     chosenCta: film.chosenCta,
     formats: parseFormats(film.formatsJson),
     showcaseOptIn: film.showcaseOptIn,
+    launchDate: film.launchDate,
+    launchChannels: parseChannels(film.launchChannelsJson),
     createdAt: film.createdAt.toISOString(),
     updatedAt: film.updatedAt.toISOString(),
   };
@@ -374,7 +381,7 @@ export async function downloadDeliverable(
 // ---------- Internals ----------
 
 /** The film, if it belongs to the caller's account. Someone else's film is a 404, not a 403. */
-async function ownFilm(ctx: ApiContext, id: string): Promise<Film> {
+export async function ownFilm(ctx: ApiContext, id: string): Promise<Film> {
   if (!/^flm_[0-9a-z]{20}$/.test(id)) throw notFound();
   const film = await ctx.db.query.films.findFirst({
     where: and(eq(films.id, id), eq(films.accountId, ctx.account.id)),
