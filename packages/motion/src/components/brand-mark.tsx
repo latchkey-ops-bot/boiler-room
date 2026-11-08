@@ -86,15 +86,19 @@ export const BrandMark = ({
   unit: number;
   style?: CSSProperties;
 }) => {
-  const { logo } = useBrand();
+  const { logo, radius } = useBrand();
   if (logo.kind === 'wordmark')
     return <Wordmark placement={placement} unit={unit} style={style ?? {}} />;
   const rect = fitContain(placement.box, logo.aspect, placement.align, 'center');
+  // A logo on a box of its own colour is drawn as a plate with the brand's corners, rather than as
+  // a hard-edged slab on a background it does not match.
+  const corners = logo.plate ? Math.min(radius, Math.min(rect.width, rect.height) * 0.25) : 0;
   return (
     <Img
       src={assetUrl(logo.src)}
       style={{
         ...style,
+        borderRadius: corners,
         height: rect.height,
         left: rect.x,
         position: 'absolute',

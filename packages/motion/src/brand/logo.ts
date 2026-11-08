@@ -10,8 +10,13 @@ export interface LogoProbe {
    * read. A mark is often two tone, so one average colour would hide a part that vanishes.
    */
   palette?: readonly { color: string; share: number }[];
-  /** How much of it is not transparent, from 0 to 1, when the browser let it be read. */
+  /** How much of it is ink, from 0 to 1, when the browser let it be read. */
   coverage?: number;
+  /**
+   * The colour of an opaque box the mark sits on, such as a JPEG's white, when it has one. It is not
+   * counted as ink, and the ink is judged against it, since that is what the ink is seen on.
+   */
+  plate?: string;
   /**
    * Whether the file has more than one frame, or animates as an SVG. Undefined when the browser
    * would not let its bytes be read, so it cannot be told.
@@ -20,7 +25,8 @@ export interface LogoProbe {
 }
 
 export type ResolvedLogo =
-  | { kind: 'image'; src: string; aspect: number }
+  /** `plate` is set when the logo sits on an opaque box of one colour, which is drawn as a plate. */
+  | { kind: 'image'; src: string; aspect: number; plate?: string }
   | { kind: 'wordmark'; reason: LogoRejection };
 
 export type LogoRejection =
@@ -62,7 +68,9 @@ export function rejectLogo(probe: LogoProbe, background: string): LogoRejection 
   // The mark is in every scene, so a logo that moves on the browser's clock would flicker in all.
   if (animated) return 'animated';
   if (coverage !== undefined && coverage < MIN_COVERAGE) return 'blank';
-  if (palette && faintShare(palette, background) > MAX_FAINT_SHARE) return 'invisible';
+  // Ink on a plate is seen against the plate, whatever the background around it.
+  if (palette && faintShare(palette, probe.plate ?? background) > MAX_FAINT_SHARE)
+    return 'invisible';
   // A file whose bytes the browser hides could be animated, and nothing here could tell.
   if (animated === undefined) return 'unreadable';
   return undefined;
@@ -72,6 +80,8 @@ export function rejectLogo(probe: LogoProbe, background: string): LogoRejection 
 export function resolveLogo(probe: LogoProbe, src: string, background: string): ResolvedLogo {
   const reason = rejectLogo(probe, background);
   if (reason) return { kind: 'wordmark', reason };
-  const { width = 0, height = 0 } = probe;
-  return { kind: 'image', src, aspect: width > 0 && height > 0 ? width / height : 1 };
+  const { width = 0, height = 0, plate } = probe;
+  const aspect = width > 0 && height > 0 ? width / height : 1;
+  // Even a plate of the background's colour shows its edge against the backdrop's glow.
+  return plate ? { kind: 'image', src, aspect, plate } : { kind: 'image', src, aspect };
 }

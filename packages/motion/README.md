@@ -43,7 +43,9 @@ the change that fixes it.
 - Colours, fonts, radius and logo come from `campaign.brand`. A muted colour that cannot be read is
   replaced with a readable mix, an accent that would vanish falls back to primary, and a logo that
   is missing, too small, the wrong shape, animated, unreadable or mostly invisible on the
-  background is replaced by the brand name set in the display font.
+  background is replaced by the brand name set in the display font. A logo on an opaque box of one
+  colour, such as a JPEG's white, is judged by the ink on the box and drawn as a plate with the
+  brand's corners.
 - Copy reads in its own direction. A block takes the direction of its first letter, and a kinetic
   headline, which sets each word as a box of its own, marks each box with its word's direction, so
   Hebrew and Arabic read right to left and a Latin name inside them left to right.
