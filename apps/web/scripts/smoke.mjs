@@ -22,6 +22,14 @@ export async function smoke(baseUrl, { expectVersion } = {}) {
   const get = (path, init) =>
     fetch(`${base}${path}`, { redirect: 'manual', ...init, signal: AbortSignal.timeout(20_000) });
 
+  // A new Worker can take a few seconds to reach every edge: until then workers.dev answers with
+  // a placeholder page. Wait up to 30 seconds for health to answer JSON before judging anything.
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const response = await get('/api/health').catch(() => null);
+    if (response?.headers.get('content-type')?.includes('application/json')) break;
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+  }
+
   await check('GET /api/health answers ok, with D1 up', async () => {
     const response = await get('/api/health');
     const body = await response.json();

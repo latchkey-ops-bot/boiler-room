@@ -9,6 +9,10 @@
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
   "observability": { "enabled": true },
+  // Each environment is served on workers.dev until it has its own domain. Preview URLs stay off:
+  // a version is tested on staging, not on a public preview link.
+  "workers_dev": true,
+  "preview_urls": false,
   "upload_source_maps": true,
   "vars": { "APP_ENV": "development", "PIPELINE": "simulated" },
   "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web" }],
