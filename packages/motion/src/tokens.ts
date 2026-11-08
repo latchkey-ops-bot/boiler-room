@@ -1,7 +1,7 @@
 /**
- * PROVISIONAL, for the transitions and the scene clocks around them: `duration`, `easing`,
- * `spring`, `stagger`, `transition` and `travel` are a first pass that `docs/motion/transitions.md`
- * will replace. Change motion here, not in a template, so that the spec has one file to replace.
+ * PROVISIONAL, for the scene clocks: `duration`, `easing`, `spring`, `stagger` and `travel` are a
+ * first pass. Transitions no longer use them: `seams` holds the catalog's measured values from
+ * `docs/motion/transitions.md`. Change motion here, not in a template.
  *
  * The scene values below them are not provisional. They are the measured values of
  * `docs/motion/reference-spec.md` and the scene files in `docs/motion/scenes`, in pixels at a short

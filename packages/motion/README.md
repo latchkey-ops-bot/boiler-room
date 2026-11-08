@@ -24,8 +24,8 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    as a full-page capture, or one the scene would enlarge more than 1.5 times by its last frame in
    this format, is refused with the size to supply instead. A `site-hero` needs a capture at device
    scale 2, as its scene file says;
-6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, and the
-   transitions overlaid on scene boundaries.
+6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
+   and each scene's ground, and the transition the seam resolver chose for each boundary.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with
 the change that fixes it.
@@ -42,9 +42,11 @@ the change that fixes it.
   render order. The determinism check caught this, and the browser frame now opens with a 2D rise.
 - A browser frame sits on whole pixels. Chrome reuses a blurred shadow it drew at one sub-pixel
   offset for the next frame, so a moving frame's shadow depended on the frames before it.
-- The determinism check compares bytes. When a frame differs, it saves both images and says how
-  many pixels changed and by how much: a level or two on a few edge pixels is Chrome raster
-  variance, while a history bug in a template moves whole shapes.
+- The determinism check compares bytes, on frames spread over the film and on every transition's
+  QC frames. One known difference is tolerated and reported: Chrome drawing a rounded corner one
+  level apart in another tab, so a frame that differs by at most 1 level on at most 32 pixels
+  passes with a note. Anything more fails, and both images are saved with how many pixels changed
+  and by how much: a history bug in a template moves whole shapes.
 - Copy comes only from `scene.text`, so numbers do too. Props are parameters such as a focus box.
   The browser frame's address bar shows a `site-hero`'s `label` text, and is empty otherwise.
 - Colours, fonts, radius and logo come from `campaign.brand`. A muted colour that cannot be read is
@@ -67,8 +69,11 @@ the change that fixes it.
   in one place, so a 24 fps campaign keeps the same timing in seconds and decays at the same speed.
   Type never springs or overshoots: words pop in and rise on `wordRise`, and only a UI node uses
   `spring.pop`.
-- Transitions take no timeline time. Each scene is mounted for its own frames plus the frames it
-  shares with a neighbour, so the film keeps the length the campaign gives it.
+- Transitions take no timeline time. Every built transition is drawn inside the two scenes it
+  joins, so each scene is mounted for exactly its own frames and the film keeps the length the
+  campaign gives it.
+- The ground belongs to the film. The `Stage` draws it once, under every scene, on the film's
+  clock, so a seam cuts the content and never the ground, and it stops where the end card holds.
 
 ## Layout
 
@@ -76,11 +81,12 @@ the change that fixes it.
 | ------------------ | ------------------------------------------------------------------ |
 | `src/tokens.ts`    | The spec's measured scene values; provisional transition timings   |
 | `src/core/`        | The spec curves, presence, scene timing, stagger, camera poses     |
-| `src/brand/`       | Theme from `campaign.brand`, logo checks, font loading             |
-| `src/layout/`      | Stage and safe areas, text fitting                                 |
+| `src/brand/`       | Theme from `campaign.brand`, skin, logo checks, font loading       |
+| `src/layout/`      | Stage size and safe areas, text fitting                            |
+| `src/components/`  | Type, the brand mark, browser frame, `MorphBox`, `RisingWords`     |
 | `src/scenes/`      | The four templates, registered under the schema's scene type names |
-| `src/transitions/` | Timeline, push, shared-element carry                               |
-| `src/film/`        | `<CampaignFilm>`, `calculateMetadata`, the render gate, planning   |
+| `src/transitions/` | The catalog, the seam resolver, the seam wrapper, the timeline     |
+| `src/film/`        | `<CampaignFilm>`, the `Stage`, the render gate, planning           |
 | `src/root.tsx`     | Remotion entry point                                               |
 | `scripts/`         | Stills, full renders, the determinism check                        |
 
@@ -103,9 +109,41 @@ page in 3D, which the determinism check has shown makes a frame depend on render
 blur and light sweep are not built either. Every other type in the library is refused by the
 render gate until it has a template.
 
-Transitions: `push`, and `carry`, which moves the product image between two scenes that show it,
-or the brand mark otherwise. A cut keeps both scenes as they are to the boundary, as the spec's
-dead-stop cut does. The spec's transition catalog is not built yet.
+## Transitions
+
+`transitionOut` is a catalog id from `docs/motion/transitions.md`, `t1` to `t17`. Anything else,
+such as a fade, `push` or `carry`, is refused as `TRANSITION_UNKNOWN`. This package draws:
+
+| Id   | Name                         | How                                                                                                                    |
+| ---- | ---------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `t1` | Matched-velocity seam        | `SeamLayer`: `seamOut` on the outgoing anchor's last 11 frames, `seamIn` on the incoming one's first 14, and the carry |
+| `t3` | Dead-stop cut into word rise | Nothing: the incoming scene plays its native entry from its first frame                                                |
+| `t5` | Blink and rack               | The `Stage` draws only the ground for 2 frames, 5 for the chapter blink, then the scene racks its headline into focus  |
+
+Those are every id the Short and Standard templates and their seam plans write, and both of the
+resolver's fallbacks. The resolver in `src/transitions/resolve.ts` picks each boundary's id: a pin
+first (into a pivot `type-card` is the T5 chapter blink), then the written id if it is legal for
+the boundary and built, else T1 where both anchors move on one axis and sign within 1.5x, else
+T3. `validateFilm` reports every boundary where the id played is not the one written, with both
+scene ids, as a `TRANSITION_RESOLVED` or `TRANSITION_UNBUILT` warning. T6 and T7, the optional
+showpieces into `colour-event`, wait for that scene and are resolved to T3 until then.
+
+## Building a scene
+
+A scene type is a `defineScene` entry in `src/scenes/registry.ts`, under its name in the schema's
+`sceneRegistry`. Besides its component, props schema and roles, it declares:
+
+- `kind` and `ground` per skin (`'neutral-cut'` and `'kinetic-plate'`), as its scene file says;
+- `anchors`: each `{ id, entry?, exit?, colour?, box(f, request) }`. Velocities are data, or a
+  function of props, so the resolver reads them before anything renders. `box` is the anchor's
+  rect in frame pixels at spec frame `f`, from props, text and `specFit` only, never the DOM;
+- `holdFrom`, for a scene that ends still, which stops the ground too.
+
+Inside the component, `useSceneClock()` gives `f` and `dur` in spec frames, `abs`, `b` (blank
+frames after a T5) and `inT` and `outT`, the ids the resolver chose. Wrap the anchor in
+`<SeamLayer anchor="id">` and anything that travels with it in `<SeamLayer>`, and T1, including
+the carry, is done. Play the native entry unless `inT === 't1'`, and rack the headline with
+`blink(f, b)` after a T5. Type enters with `RisingWords` or a pop, never a fade.
 
 ## Commands
 
@@ -113,9 +151,9 @@ dead-stop cut does. The spec's transition catalog is not built yet.
 pnpm test                    # unit tests of the pure functions
 pnpm typecheck
 pnpm studio                  # Remotion Studio, with the examples as the public folder
-pnpm stills                  # stills of both examples in every format, into out/stills
+pnpm stills                  # each scene settled and every transition's QC frames, into out/stills
 pnpm render -- --campaign nova.campaign.json --format 9:16
-pnpm determinism             # renders sampled frames three times: in order, shuffled, in parallel
+pnpm determinism             # renders sampled and seam frames three times: in order, shuffled, in parallel
 pnpm text-direction          # checks that Hebrew and Arabic headlines read right to left
 ```
 
