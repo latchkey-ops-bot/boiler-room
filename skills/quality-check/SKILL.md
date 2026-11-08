@@ -38,7 +38,8 @@ for each transition) and the acceptance stills in each `docs/motion/scenes/<type
    below as PNG files. Open and look at every one.
 4. **Measure.** Run the per-frame measures: static runs, true black, saturation, loudness.
 5. **Judge.** Fill every check in the tables below with `pass`, `fail` or `n/a`, the measured
-   value and the frames it rests on.
+   value and the frames it rests on. A check passes only on frames you looked at: one you could
+   not see, such as a seam with no frames extracted, is `n/a` or `fail`, never `pass`.
 6. **Report.** Write the report in the format at the end.
 
 ### Commands
@@ -92,10 +93,17 @@ For every seam `S = sceneFrames(...).scenes[i + 1].from`, extract the QC frames 
 outgoing ramp), during (`S - 1`, `S`, `S + 1`) and after (the incoming settle frame). Lay each
 seam's frames out as one strip.
 
+A film rendered in chunks and stitched has a chunk seam every `framesPerChunk` frames (in the
+render manifest), where render faults cluster: extract `C - 1` and `C` for every chunk seam `C`.
+Code measures every frame for empty ground and for flashes (a run of up to 12 frames that jumps
+away from the picture and back); extract the frame before and the first frame of every run it
+flags too, and look at each pair.
+
 | Check             | Pass                                                                                                                                                                                                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | No cross-dissolve | No frame shows the outgoing and incoming content both at partial opacity. Allowed exceptions: the single overlap frame of `t4`, the overlays of `t12` and `t14`, and the black of `t16`                                                                                     |
 | No blank flash    | `S` is not empty ground, except after `t5` (exactly 2 frames of uniform ground, 5 for a chapter blink into a pivot) and inside `t16`                                                                                                                                        |
+| Chunk seams       | At every chunk seam `C`, frame `C` continues `C - 1`: no jump in layout, colour or content. No flagged frame shows copy, a number or a picture its scene does not hold                                                                                                      |
 | `t1`              | The outgoing element moves into the cut and the incoming one moves on from it on the same axis, in the same direction. Declared velocities within 1.5x of each other                                                                                                        |
 | `t3`              | `S - 1` is not frozen. `S` already shows incoming motion, the first word up and rising                                                                                                                                                                                      |
 | `t5`              | Uniform ground on the blank frames: no pixel more than 2 levels from the ground colour. The returning headline is soft on its first frame, sharp 3 frames later, at the same pixel position as the card before                                                              |

@@ -3,10 +3,12 @@ import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { formatReport, qualityCheckRender } from '../quality/run.ts';
 
-const usage = `Usage: pnpm qc <render-dir> [--research <research.json>] [--campaign <campaign.json>] [--no-model] [--budget-usd 1] [--json]
+const usage = `Usage: pnpm qc <render-dir> --research <research.json> [--campaign <campaign.json>] [--no-model] [--budget-usd 1] [--json]
 
   <render-dir>  A folder the render service wrote: film.mp4, film.manifest.json and film.quality/.
-  --research    The Researcher's research.json. Claims and brand colours are traced to it.
+  --research    Required. The Researcher's research.json, with the pages.json and report.json of
+                the same run beside it. Every claim is traced to it and to the stored page text,
+                and brand colours to it.
   --campaign    Review against this campaign file instead of the one the manifest names. Its
                 SHA-256 must still match the one the film was rendered from.
   --no-model    Run the code checks only. The verdict is then blocked: no film passes unless
@@ -36,6 +38,13 @@ if (values.help || !dir) {
   console.log(usage);
   process.exit(values.help ? 0 : 2);
 }
+if (!values.research) {
+  console.error(
+    '--research is required: without the research, a claim whose quote was never on the site passes.',
+  );
+  process.exit(2);
+}
+const researchFile = values.research;
 for (const path of [dir, values.research, values.campaign]) {
   if (path && !existsSync(from(path))) {
     console.error(`Not found: ${path}`);
@@ -53,7 +62,7 @@ if (budget !== undefined && !(budget >= 1 && budget <= 1.5)) {
 try {
   const report = await qualityCheckRender({
     renderDir: from(dir),
-    ...(values.research ? { researchFile: from(values.research) } : {}),
+    researchFile: from(researchFile),
     ...(values.campaign ? { campaignFile: from(values.campaign) } : {}),
     model: !values['no-model'],
     ...(budget !== undefined ? { budgetUsd: budget } : {}),

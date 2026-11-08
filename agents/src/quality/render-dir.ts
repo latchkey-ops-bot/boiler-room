@@ -22,6 +22,9 @@ const manifestSchema = z.looseObject({
     fps: z.number(),
     durationInFrames: z.number(),
     muted: z.boolean().optional(),
+    /** Set when the film was rendered in chunks and stitched; a seam falls every this many frames. */
+    framesPerChunk: z.number().int().positive().optional(),
+    chunks: z.number().int().positive().optional(),
   }),
 });
 
@@ -68,8 +71,16 @@ export interface RenderDir {
   manifest: RenderManifest;
   qualityDir: string;
   index: QualityIndex;
-  /** Maps a path the index names to the file in this folder, which may have been moved. */
-  local: (path: string) => string;
+  /**
+   * Maps a path the index names to its file inside the quality folder, wherever the folder was
+   * moved. It never resolves outside that folder, even when the path names a file that exists
+   * there: a picture from another render must not stand in for this one.
+   */
+  artifact: (path: string) => string;
+  /** The campaign file the manifest names: that file if it exists, else the one beside the film. */
+  campaignPath: (path: string) => string;
+  /** Every file the index names, as `artifact` resolves it. */
+  declared: string[];
 }
 
 /** The film in a render folder: the one `.mp4` with a manifest beside it. */
@@ -101,13 +112,22 @@ export function readRenderDir(input: string): RenderDir {
   }
   const index = indexSchema.parse(JSON.parse(readFileSync(indexFile, 'utf8')));
   const marker = `${basename(qualityDir)}${sep}`;
-  const local = (path: string) => {
-    if (existsSync(path)) return path;
+  const artifact = (path: string) => {
     const at = path.lastIndexOf(marker);
-    if (at >= 0) return join(qualityDir, path.slice(at + marker.length));
-    return join(dirname(manifestFile), basename(path));
+    const mapped =
+      at >= 0 ? join(qualityDir, path.slice(at + marker.length)) : resolve(qualityDir, path);
+    return mapped.startsWith(`${qualityDir}${sep}`) ? mapped : join(qualityDir, basename(path));
   };
-  return { dir, film, manifestFile, manifest, qualityDir, index, local };
+  // The campaign's own SHA-256 is checked against the manifest, so it may live anywhere.
+  const campaignPath = (path: string) =>
+    existsSync(path) ? path : join(dirname(manifestFile), basename(path));
+  const declared = [
+    index.contactSheet.file,
+    ...(index.transitionSheet ? [index.transitionSheet.file] : []),
+    index.phoneSheet.file,
+    ...index.transitions.flatMap((transition) => Object.values(transition.files)),
+  ].map(artifact);
+  return { dir, film, manifestFile, manifest, qualityDir, index, artifact, campaignPath, declared };
 }
 
 /**

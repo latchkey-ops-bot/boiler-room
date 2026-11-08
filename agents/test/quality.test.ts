@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -29,8 +30,11 @@ import { qcReviewJsonSchema, qcReviewSchema } from '../src/quality/output.ts';
 import { reviewTask, VISUAL_CHECKS } from '../src/quality/prompt.ts';
 import { cutOf, readRenderDir } from '../src/quality/render-dir.ts';
 import { runReview, ViewTracker } from '../src/quality/review.ts';
-import { finalVerdict } from '../src/quality/run.ts';
+import { finalVerdict, readResearch } from '../src/quality/run.ts';
+import { contactFrames, transitionStills } from '../src/quality/sheets.ts';
+import { PageIndex, type PagesBundle } from '../src/researcher/verify.ts';
 import { skillContent } from '../src/sync.ts';
+import { exampleResearch, workedExample } from './director-fixtures.ts';
 
 const example = (): Campaign =>
   JSON.parse(
@@ -334,6 +338,22 @@ describe('integrity checks', () => {
       ['stills-from-film', 'blocker'],
     ]);
   });
+
+  it('blocks a render folder missing files its index names, and one with no stills to compare', () => {
+    const { checks, issues } = checkIntegrity({
+      ...base,
+      stills: [],
+      missing: ['/r/film.quality/transitions-sheet.png', '/r/film.quality/phone-sheet.png'],
+    });
+    expect(issues.map((issue) => [issue.check, issue.severity])).toEqual([
+      ['stills-from-film', 'blocker'],
+      ['artifacts', 'blocker'],
+    ]);
+    expect(checks.find((check) => check.id === 'artifacts')?.result).toBe('fail');
+    expect(finalVerdict(issues, checks, null, true).blocked).toMatch(
+      /not the complete render of this campaign \(stills-from-film, artifacts\)/,
+    );
+  });
 });
 
 describe('ground check', () => {
@@ -485,6 +505,156 @@ describe('gate and claims', () => {
   });
 });
 
+describe('research as evidence', () => {
+  /** The stored page text the worked example's claims were captured from. */
+  function bundle(): PagesBundle {
+    const claims = exampleResearch().claims;
+    const page = (url: string) => {
+      const text = claims
+        .filter((claim) => claim.sourceUrl === url)
+        .map((claim) => claim.quote)
+        .join(' ');
+      return {
+        url,
+        final_url: url,
+        origin: 'site' as const,
+        file_id: null,
+        status: 200,
+        content_type: 'text/html',
+        title: 'Fernhook',
+        text: { rendered: text, dom: text, meta: '', clean: text, illustrative: '' },
+      };
+    };
+    return {
+      version: 1,
+      site: 'https://fernhook.example.com',
+      captured_at: '2026-11-07T00:00:00Z',
+      pages: [...new Set(claims.map((claim) => claim.sourceUrl))].map(page),
+    };
+  }
+
+  /** A Researcher folder: research.json, pages.json and a report.json naming its digest. */
+  function folder(edit: { pages?: string; digest?: string } = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'qc-research-'));
+    const pages = edit.pages ?? JSON.stringify(bundle());
+    writeFileSync(join(dir, 'research.json'), JSON.stringify(exampleResearch()));
+    writeFileSync(join(dir, 'pages.json'), pages);
+    const digest = edit.digest ?? createHash('sha256').update(pages).digest('hex');
+    writeFileSync(join(dir, 'report.json'), JSON.stringify({ capture_digests: [digest] }));
+    return dir;
+  }
+
+  it('reads a Researcher result tied to the pages its capture stored', () => {
+    const { facts, pages } = readResearch(join(folder(), 'research.json'));
+    expect(facts.claims.map((claim) => claim.id)).toEqual(
+      exampleResearch().claims.map((c) => c.id),
+    );
+    expect(pages.find('https://fernhook.example.com')).toBeDefined();
+  });
+
+  it('refuses the campaign under review, or any file that is not a Researcher result', () => {
+    const dir = folder();
+    const campaign = join(dir, 'campaign.json');
+    writeFileSync(campaign, JSON.stringify(workedExample()));
+    expect(() => readResearch(campaign, campaign)).toThrow(/is the campaign under review/);
+    expect(() => readResearch(campaign)).toThrow(/is not a Researcher result/);
+  });
+
+  it('refuses research without its stored pages, or with pages its capture did not report', () => {
+    const dir = folder();
+    const lonely = mkdtempSync(join(tmpdir(), 'qc-research-'));
+    writeFileSync(join(lonely, 'research.json'), readFileSync(join(dir, 'research.json')));
+    expect(() => readResearch(join(lonely, 'research.json'))).toThrow(/pages\.json is missing/);
+    const edited = folder({ digest: 'f'.repeat(64) });
+    expect(() => readResearch(join(edited, 'research.json'))).toThrow(
+      /is not a bundle the capture .* reported/,
+    );
+  });
+
+  it('blocks a claim whose quote is not in the stored text, even when research.json holds it', () => {
+    const campaign = workedExample();
+    const facts = {
+      brand: { colors: { ...campaign.brand.colors } },
+      claims: campaign.claims.map(({ id, quote, sourceUrl }) => ({ id, quote, sourceUrl })),
+      accents: [],
+    };
+    const stored = bundle();
+    const home = stored.pages.find((page) => page.url === 'https://fernhook.example.com');
+    if (home)
+      home.text = {
+        ...home.text,
+        rendered: 'Nothing here.',
+        dom: 'Nothing here.',
+        clean: 'Nothing here.',
+      };
+    const { checks, issues } = checkResearchClaims(campaign, facts, 30, new PageIndex(stored));
+    expect(checks[0]?.result).toBe('fail');
+    expect(issues).toEqual([
+      expect.objectContaining({
+        severity: 'blocker',
+        check: 'claims-research',
+        what: expect.stringContaining('is not in the stored text of its page'),
+      }),
+    ]);
+    const clean = checkResearchClaims(campaign, facts, 30, new PageIndex(bundle()));
+    expect(clean.checks[0]?.result).toBe('pass');
+  });
+});
+
+describe('sheet frames', () => {
+  it('takes one contact frame per second, from frame 0', () => {
+    expect(contactFrames(example()).slice(0, 4)).toEqual([0, 30, 60, 90]);
+    expect(contactFrames(example())).toHaveLength(20);
+  });
+
+  it('takes during from the cut, and before and after from the plan only when near the seam', () => {
+    const cut = example();
+    for (const scene of cut.scenes.slice(0, -1)) scene.transitionOut = 't1';
+    const [first, second] = sceneFrames(cut)
+      .scenes.slice(1)
+      .map((scene) => scene.from);
+    const index = {
+      transitions: [
+        {
+          index: 0,
+          name: 't1',
+          boundary: first,
+          from: 0,
+          to: 0,
+          files: {},
+          stills: [
+            { when: 'before', frame: (first ?? 0) - 8 },
+            { when: 'after', frame: (first ?? 0) + 8 },
+          ],
+        },
+        {
+          index: 1,
+          name: 't1',
+          boundary: second,
+          from: 0,
+          to: 0,
+          files: {},
+          stills: [
+            { when: 'before', frame: 2 },
+            { when: 'after', frame: 599 },
+          ],
+        },
+      ],
+    } as unknown as Parameters<typeof transitionStills>[1];
+    const [one, two] = transitionStills(cut, index, 600);
+    expect(one?.stills).toEqual([
+      { when: 'before', frame: (first ?? 0) - 8 },
+      { when: 'during', frame: first },
+      { when: 'after', frame: (first ?? 0) + 8 },
+    ]);
+    expect(two?.stills).toEqual([
+      { when: 'before', frame: (second ?? 0) - 1 },
+      { when: 'during', frame: second },
+      { when: 'after', frame: (second ?? 0) + 1 },
+    ]);
+  });
+});
+
 describe('brand colours against the research', () => {
   it('passes measured colours, and black or white ink', () => {
     const campaign = example();
@@ -557,6 +727,55 @@ describe('the verdict', () => {
 
   it('fails when code fails, whatever the model says', () => {
     expect(finalVerdict([], [check('fail')], run('pass'), true).verdict).toBe('fail');
+  });
+
+  it('blocks a review whose claims were not traced to the research', () => {
+    const untraced = { ...check('pass'), id: 'claims-research', result: 'n/a' as const };
+    expect(finalVerdict([], [untraced], run('pass'), true).blocked).toBe(
+      'claims and brand colours were not traced to the research',
+    );
+  });
+
+  describe('model checks that pass without evidence', () => {
+    const modelCheck = (measured: string, frames: number[]) => ({
+      id: 'no-cross-dissolve',
+      result: 'pass' as const,
+      measured,
+      threshold: 'see the quality-check skill',
+      frames,
+      source: 'model' as const,
+    });
+    const shown = new Set([0, 30, 119, 120, 121]);
+
+    it('blocks a pass that says it could not check', () => {
+      const said = modelCheck(
+        'Seam frames were not supplied, so I judged from the contact sheet. I could not check S-1, S and S+1.',
+        [120],
+      );
+      expect(finalVerdict([], [said], run('pass'), true, shown).blocked).toMatch(
+        /passed checks without evidence .*no-cross-dissolve \(it says "Seam frames were not supplied/,
+      );
+    });
+
+    it('blocks a pass that names no frame it was shown', () => {
+      expect(finalVerdict([], [modelCheck('clean', [])], run('pass'), true, shown).blocked).toMatch(
+        /no-cross-dissolve \(it names no frame\)/,
+      );
+      expect(
+        finalVerdict([], [modelCheck('clean', [95])], run('pass'), true, shown).blocked,
+      ).toMatch(/none of frames 95 is in an image it was given/);
+    });
+
+    it('accepts a pass that rests on frames it was shown, and words like "could not find"', () => {
+      const fine = modelCheck(
+        'I could not find any frame with both scenes at partial opacity.',
+        [119, 120, 121],
+      );
+      expect(finalVerdict([], [fine], run('pass'), true, shown)).toEqual({
+        verdict: 'pass',
+        blocked: null,
+      });
+    });
   });
 });
 
@@ -673,10 +892,58 @@ describe('render folders', () => {
       }),
     );
     const render = readRenderDir(dir);
-    expect(render.local(render.index.contactSheet.file)).toBe(
+    expect(render.artifact(render.index.contactSheet.file)).toBe(
       join(dir, 'film.quality', 'contact-sheet.png'),
     );
-    expect(render.local('/elsewhere/nova.campaign.json')).toBe(join(dir, 'nova.campaign.json'));
+    expect(render.campaignPath('/elsewhere/nova.campaign.json')).toBe(
+      join(dir, 'nova.campaign.json'),
+    );
+    expect(render.declared).toEqual([
+      join(dir, 'film.quality', 'contact-sheet.png'),
+      join(dir, 'film.quality', 'phone-sheet.png'),
+    ]);
+  });
+
+  it('never resolves an artifact outside the quality folder, even when that file exists', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'qc-'));
+    const outside = mkdtempSync(join(tmpdir(), 'qc-other-'));
+    writeFileSync(join(outside, 'contact-sheet.png'), 'another film');
+    mkdirSync(join(dir, 'film.quality'));
+    writeFileSync(join(dir, 'film.mp4'), '');
+    writeFileSync(
+      join(dir, 'film.manifest.json'),
+      JSON.stringify({
+        manifestVersion: 1,
+        output: { file: 'film.mp4', sha256: 'a' },
+        campaign: { id: 'nova-launch', file: 'nova.campaign.json', fileSha256: 'b' },
+        settings: {
+          format: '16:9',
+          width: 1920,
+          height: 1080,
+          fps: 30,
+          durationInFrames: 600,
+          framesPerChunk: 150,
+        },
+      }),
+    );
+    writeFileSync(
+      join(dir, 'film.quality', 'index.json'),
+      JSON.stringify({
+        film: { file: 'film.mp4', width: 1920, height: 1080, fps: 30, durationInFrames: 600 },
+        contactSheet: { file: join(outside, 'contact-sheet.png'), frames: [] },
+        transitionSheet: { file: 'film.quality/../../escape.png' },
+        transitions: [],
+        phoneSheet: { file: 'phone-sheet.png', widthPx: 390, frames: [] },
+      }),
+    );
+    const render = readRenderDir(dir);
+    expect(render.artifact(render.index.contactSheet.file)).toBe(
+      join(dir, 'film.quality', 'contact-sheet.png'),
+    );
+    expect(render.artifact('film.quality/../../escape.png')).toBe(
+      join(dir, 'film.quality', 'escape.png'),
+    );
+    expect(render.manifest.settings.framesPerChunk).toBe(150);
   });
 
   it('cuts the film the way the render step does: hook first, CTA label everywhere', () => {

@@ -17,6 +17,7 @@ Rules that always apply:
 7. Every issue has one owner: "director" for copy, claims, timing and seams; "art-director" for colour, assets, fonts and the logo; "motion" for a scene or transition the templates did not build right, such as text that overflows its box, is cropped, collides with another element, or is set too small to read.
 8. Severity: "blocker" for claims, invented content, or a number on screen that the scene's text does not contain; "major" for any other failed check; "minor" for taste with no failed threshold. A fix says exactly what to change.
 9. Your verdict is "pass" only when every check is "pass" or "n/a" and you opened every image. Otherwise it is "fail".
+10. A check passes only on what an image showed you. If no image you were given can show it, such as a seam you were not shown, its result is "n/a" or "fail", never "pass", and "measured" says why. In "frames" list the frames your result rests on, read off the image labels; each must be a frame an image you opened shows. A pass that says it could not check, or names no frame you were shown, is thrown out and the review is blocked.
 
 The skill "quality-check" holds the criteria. Read it with read_skill before you look at any image.`;
 
@@ -58,6 +59,11 @@ export const VISUAL_CHECKS: { id: string; section: string; pass: string }[] = [
     id: 'no-blank-flash',
     section: 'Transitions',
     pass: 'The boundary frame is not empty ground.',
+  },
+  {
+    id: 'chunk-seams',
+    section: 'Transitions',
+    pass: 'On the seams sheet, each frame at a chunk seam continues the frame before it, with no jump in layout, colour or content, and no flagged frame shows copy, a number or a picture its scene does not hold. n/a when there is no seams sheet.',
   },
   {
     id: 'words-recovered',
@@ -170,7 +176,7 @@ export function reviewTask(input: ReviewTaskInput): string {
     `What code measured${input.researchSupplied ? ', including claims and colours traced to the research' : '; no research was supplied, so claims and colours were checked against the campaign only'}:`,
     ...measured,
     '',
-    'Images taken from the rendered film. Open every one:',
+    'Images taken from the rendered film. Quality Check decoded every one from the film itself. Open every one:',
     ...images,
     '',
     'Visual checks to fill in, one entry each in "checks", with the frames you judged:',
@@ -180,7 +186,7 @@ export function reviewTask(input: ReviewTaskInput): string {
     '1. read_skill quality-check.',
     `2. view_image with file_ids ${JSON.stringify(input.images.map((image) => image.fileId))}. Look at each one closely; open one again on its own if you need it larger.`,
     '3. Judge each visual check. Read every word of overlaid copy in every image against the scene text above.',
-    '4. Call submit_output with your verdict, every image in "inspected", one entry per visual check, and one issue per failure with its scene, frame, owner and fix.',
+    '4. Call submit_output with your verdict, every image in "inspected", one entry per visual check with the frames it rests on, and one issue per failure with its scene, frame, owner and fix. A check no image could show is "n/a" or "fail", never "pass".',
   ].join('\n');
 }
 

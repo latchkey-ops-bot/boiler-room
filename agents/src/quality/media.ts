@@ -178,6 +178,101 @@ export async function extractFrames(
   return result;
 }
 
+/**
+ * Decodes the listed frames of a film at `width` x `height`, as packed RGB, in one pass. Frames
+ * the film does not have are left out of the result.
+ */
+export function decodeFrames(
+  film: string,
+  frames: readonly number[],
+  width: number,
+  height: number,
+): Promise<Map<number, RgbImage>> {
+  const wanted = [...new Set(frames)].filter((frame) => frame >= 0).sort((a, b) => a - b);
+  const result = new Map<number, RgbImage>();
+  if (wanted.length === 0) return Promise.resolve(result);
+  const select = wanted.map((frame) => `eq(n\\,${frame})`).join('+');
+  return new Promise((done, fail) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-i',
+        film,
+        '-vf',
+        `select='${select}',scale=${width}:${height}:flags=lanczos,format=rgb24`,
+        '-fps_mode',
+        'vfr',
+        '-f',
+        'rawvideo',
+        '-',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on('data', (chunk: Buffer) => out.push(chunk));
+    child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+    child.on('error', fail);
+    child.on('close', (code) => {
+      if (code !== 0) {
+        fail(
+          new Error(`ffmpeg exited ${code}: ${Buffer.concat(err).toString('utf8').slice(0, 500)}`),
+        );
+        return;
+      }
+      const all = Buffer.concat(out);
+      const size = width * height * 3;
+      for (const [index, frame] of wanted.entries()) {
+        const start = index * size;
+        if (start + size > all.length) break;
+        result.set(frame, { width, height, data: Buffer.from(all.subarray(start, start + size)) });
+      }
+      done(result);
+    });
+  });
+}
+
+/** Writes packed RGB as a PNG file. */
+export function writePng(file: string, image: RgbImage): Promise<void> {
+  return new Promise((done, fail) => {
+    const child = spawn(
+      'ffmpeg',
+      [
+        '-v',
+        'error',
+        '-y',
+        '-f',
+        'rawvideo',
+        '-pix_fmt',
+        'rgb24',
+        '-s',
+        `${image.width}x${image.height}`,
+        '-i',
+        '-',
+        '-frames:v',
+        '1',
+        file,
+      ],
+      { stdio: ['pipe', 'ignore', 'pipe'] },
+    );
+    const err: Buffer[] = [];
+    child.stderr.on('data', (chunk: Buffer) => err.push(chunk));
+    child.on('error', fail);
+    child.on('close', (code) =>
+      code === 0
+        ? done()
+        : fail(
+            new Error(
+              `ffmpeg exited ${code}: ${Buffer.concat(err).toString('utf8').slice(0, 500)}`,
+            ),
+          ),
+    );
+    child.stdin.end(image.data);
+  });
+}
+
 export interface RgbImage {
   width: number;
   height: number;

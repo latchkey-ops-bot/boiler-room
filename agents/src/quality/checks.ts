@@ -14,6 +14,7 @@ import {
   superlativeForms,
   type ValidationResult,
 } from '@boiler-room/schema';
+import { checkQuote, type PageIndex } from '../researcher/verify.ts';
 import {
   BLACK_MAX,
   BLANK_EDGES,
@@ -111,8 +112,13 @@ export interface IntegrityInput {
   campaignFile: string;
   /** Contact-sheet stills compared with the same frames decoded from the film here. */
   stills: { frame: number; file: string; mad: number }[];
+  /** Files the quality index names that are not in the quality folder. */
+  missing?: string[];
   fps: number;
 }
+
+/** Checks that decide whether the film under review is this campaign's render, complete. */
+export const INTEGRITY_CHECKS = ['film-hash', 'campaign-hash', 'stills-from-film', 'artifacts'];
 
 /** Stills that differ from the film by more than this many levels were not taken from it. */
 export const STILL_MATCH_MAD = 3;
@@ -165,6 +171,35 @@ export function checkIntegrity(input: IntegrityInput): Findings {
       ),
     );
   }
+  if (input.stills.length === 0) {
+    issues.push(
+      codeIssue(
+        {
+          severity: 'blocker',
+          check: 'stills-from-film',
+          owner: 'motion',
+          what: 'No contact or transition still the quality index names could be compared with the film, so nothing shows the quality artifacts are from this film.',
+          fix: 'Regenerate the quality artifacts from the stitched film (render without --no-quality).',
+        },
+        input.fps,
+      ),
+    );
+  }
+  const missing = input.missing ?? [];
+  if (missing.length) {
+    issues.push(
+      codeIssue(
+        {
+          severity: 'blocker',
+          check: 'artifacts',
+          owner: 'motion',
+          what: `The quality index names ${missing.length} file(s) the render folder does not hold: ${missing.slice(0, 6).join(', ')}${missing.length > 6 ? `, and ${missing.length - 6} more` : ''}. The folder is not what the render step wrote.`,
+          fix: 'Render again with quality artifacts, and review the render folder exactly as the render step wrote it.',
+        },
+        input.fps,
+      ),
+    );
+  }
   const worst = Math.max(0, ...input.stills.map((still) => still.mad));
   return {
     checks: [
@@ -188,6 +223,14 @@ export function checkIntegrity(input: IntegrityInput): Findings {
           : 'no contact stills to compare',
         `every still within ${STILL_MATCH_MAD} levels of its frame`,
         input.stills.map((still) => still.frame),
+      ),
+      check(
+        'artifacts',
+        missing.length ? 'fail' : 'pass',
+        missing.length
+          ? `${missing.length} named file(s) missing`
+          : 'every file the quality index names is in the folder',
+        'every file the quality index names is in the quality folder',
       ),
     ],
     issues,
@@ -889,15 +932,27 @@ const page = (url: string) => {
   }
 };
 
+/** What the stored page text says about a quote, in words for the report. */
+const STORED_VERDICTS: Record<string, string> = {
+  missing: 'is not in the stored text of its page',
+  meta: 'is only in the title, meta tags or alt text of its page',
+  concealed: 'is only in text on its page styled so nobody can see it',
+  illustrative: 'only appears inside a product mockup on its page, so its figures are sample data',
+  'no page': 'cites a page the Researcher did not capture',
+};
+
 /**
  * Every claim the campaign makes must be one the Researcher verified: the same quote, word for
  * word, from the same page. A claim the Director wrote without the research is invented, however
- * well its copy cites it.
+ * well its copy cites it. With `pages`, the Researcher's stored page text, each quote is also
+ * checked against that text by the Researcher's own verbatim rule, so a research file that was
+ * edited after the gate cannot vouch for a quote.
  */
 export function checkResearchClaims(
   campaign: Campaign,
   research: ResearchFacts | undefined,
   fps: number,
+  pages?: PageIndex,
 ): Findings {
   if (!research) {
     return {
@@ -922,10 +977,22 @@ export function checkResearchClaims(
       ...(scene.voiceover?.claimIds ?? []),
     ]),
   );
-  const invented = campaign.claims.filter((claim) => {
+  const stored = (claim: Campaign['claims'][number]) => {
+    if (!pages) return 'found';
+    const text = pages.find(claim.sourceUrl);
+    return text ? checkQuote(text, claim.quote) : 'no page';
+  };
+  const reasons = new Map<string, string[]>();
+  for (const claim of campaign.claims) {
     const quote = words(claim.quote);
-    return !known.some((entry) => entry.quote === quote && entry.page === page(claim.sourceUrl));
-  });
+    const why: string[] = [];
+    if (!known.some((entry) => entry.quote === quote && entry.page === page(claim.sourceUrl)))
+      why.push('no research claim states it');
+    const verdict = stored(claim);
+    if (verdict !== 'found') why.push(`it ${STORED_VERDICTS[verdict] ?? verdict}`);
+    if (why.length) reasons.set(claim.id, why);
+  }
+  const invented = campaign.claims.filter((claim) => reasons.has(claim.id));
   const frames = sceneFrames(campaign);
   const issues = invented.map((claim) => {
     const scene = campaign.scenes.find(
@@ -942,7 +1009,7 @@ export function checkResearchClaims(
         owner: 'director',
         sceneId: scene?.id ?? null,
         frame: sceneFrame?.from ?? null,
-        what: `Claim "${claim.id}" quotes "${claim.quote}" from ${claim.sourceUrl}, which no research claim states${shown ? ', and the film shows copy that cites it' : ''}.`,
+        what: `Claim "${claim.id}" quotes "${claim.quote}" from ${claim.sourceUrl}, but ${(reasons.get(claim.id) ?? []).join(', and ')}${shown ? '; the film shows copy that cites it' : ''}.`,
         fix: shown
           ? `Remove claim "${claim.id}" and the copy that cites it, or cite a research claim whose quote states the same thing.`
           : `Remove claim "${claim.id}" from the campaign.`,
@@ -956,9 +1023,9 @@ export function checkResearchClaims(
         'claims-research',
         invented.length ? 'fail' : 'pass',
         invented.length
-          ? `not in research: ${invented.map((claim) => claim.id).join(', ')}`
-          : `${campaign.claims.length} campaign claim(s), all research quotes from the same page`,
-        "every campaign claim's quote is a research quote from the same page",
+          ? `not traced: ${invented.map((claim) => `${claim.id} (${(reasons.get(claim.id) ?? []).join('; ')})`).join(', ')}`
+          : `${campaign.claims.length} campaign claim(s), all research quotes from the same page${pages ? ', each found in the stored text of that page' : ''}`,
+        `every campaign claim's quote is a research quote from the same page${pages ? ', in the stored text of that page' : ''}`,
       ),
     ],
     issues,

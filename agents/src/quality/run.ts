@@ -4,8 +4,9 @@
  * model: a review passes only when code found nothing, the agent found nothing, and the agent
  * opened every image it was given.
  */
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import {
   type Campaign,
   campaignSchema,
@@ -13,9 +14,12 @@ import {
   sceneRegistry,
   validateCampaign,
 } from '@boiler-room/schema';
+import { z } from 'zod';
 import type { AgentDefinition } from '../define.ts';
 import { qualityCheck } from '../definitions/quality-check.ts';
 import { naiveClient, scrub, usd } from '../naive/client.ts';
+import { researchOutputSchema } from '../researcher/output.ts';
+import { PageIndex, pagesBundleSchema } from '../researcher/verify.ts';
 import {
   checkFrames,
   checkGate,
@@ -25,7 +29,9 @@ import {
   checkResearchBrand,
   checkResearchClaims,
   type Findings,
+  frameOutliers,
   type GroundSample,
+  INTEGRITY_CHECKS,
   merge,
   type ResearchFacts,
   sceneAt,
@@ -37,13 +43,17 @@ import type { QcCheck, QcIssue, QcReport } from './output.ts';
 import { reviewTask } from './prompt.ts';
 import { cutOf, type RenderDir, readRenderDir } from './render-dir.ts';
 import { type LocalImage, type ReviewRun, runReview } from './review.ts';
+import { buildSheets } from './sheets.ts';
 
 export interface QcOptions {
   renderDir: string;
   /** Overrides the campaign the manifest names. Its hash must still match the render's. */
   campaignFile?: string;
-  /** A Researcher `research.json`; claims and brand colours are traced to it. */
-  researchFile?: string;
+  /**
+   * The Researcher's `research.json`, with the `pages.json` and `report.json` of the same run
+   * beside it. Claims are traced to it and to the stored page text, and brand colours to it.
+   */
+  researchFile: string;
   /** False runs code checks only. Such a review is blocked, since no one looked at the frames. */
   model: boolean;
   budgetUsd?: number;
@@ -53,19 +63,58 @@ export interface QcOptions {
 
 const SEVERITY_ORDER = { blocker: 0, major: 1, minor: 2 } as const;
 
-export function readResearch(file: string): ResearchFacts {
-  const raw = JSON.parse(readFileSync(file, 'utf8')) as {
-    brand?: { colors?: Record<string, string> };
-    claims?: { id: string; quote: string; sourceUrl: string }[];
-    brand_details?: { accents?: string[] };
-  };
-  if (!raw.brand?.colors || !Array.isArray(raw.claims)) {
-    throw new Error(`${file} is not a Researcher result: it needs brand.colors and claims.`);
+const reportSchema = z.looseObject({ capture_digests: z.array(z.string()) });
+
+export interface ResearchEvidence {
+  facts: ResearchFacts;
+  /** The page text the Researcher's capture stored, which its gate verified quotes against. */
+  pages: PageIndex;
+}
+
+/**
+ * Reads a Researcher result and ties it to its run. The file must parse as `researchOutputSchema`
+ * (a campaign does not), must not be the campaign under review, and must have beside it the
+ * `pages.json` its capture stored and the `report.json` whose `capture_digests` name that
+ * bundle's SHA-256. Throws, as an input error, on anything else.
+ */
+export function readResearch(file: string, campaignFile?: string): ResearchEvidence {
+  if (campaignFile && resolve(file) === resolve(campaignFile)) {
+    throw new Error(`${file} is the campaign under review, not a Researcher result.`);
   }
+  const parsed = researchOutputSchema.safeParse(JSON.parse(readFileSync(file, 'utf8')));
+  if (!parsed.success) {
+    const first = parsed.error.issues
+      .slice(0, 3)
+      .map((issue) => `${issue.path.join('.') || '$'}: ${issue.message}`)
+      .join('; ');
+    throw new Error(`${file} is not a Researcher result (${first}).`);
+  }
+  const folder = dirname(file);
+  const pagesFile = join(folder, 'pages.json');
+  const reportFile = join(folder, 'report.json');
+  for (const needed of [pagesFile, reportFile]) {
+    if (!existsSync(needed)) {
+      throw new Error(
+        `${needed} is missing. Claims are traced to the page text the Researcher stored, so research.json needs the pages.json and report.json of its run beside it.`,
+      );
+    }
+  }
+  const bundle = readFileSync(pagesFile);
+  const digest = createHash('sha256').update(bundle).digest('hex');
+  const report = reportSchema.safeParse(JSON.parse(readFileSync(reportFile, 'utf8')));
+  if (!report.success || !report.data.capture_digests.includes(digest)) {
+    throw new Error(
+      `${pagesFile} (sha256 ${digest.slice(0, 12)}...) is not a bundle the capture in ${reportFile} reported. It was changed after the capture, or it is from another run.`,
+    );
+  }
+  const research = parsed.data;
   return {
-    brand: { colors: raw.brand.colors },
-    claims: raw.claims,
-    accents: raw.brand_details?.accents ?? [],
+    facts: {
+      brand: { colors: research.brand.colors },
+      claims: research.claims,
+      accents: research.brand_details.accents,
+    },
+    pages: new PageIndex(pagesBundleSchema.parse(JSON.parse(bundle.toString('utf8')))),
   };
 }
 
@@ -90,7 +139,8 @@ function stillsToCompare(render: RenderDir): { frame: number; file: string }[] {
   const transition = render.index.transitions[0];
   const during = transition?.stills.find((still) => still.when === 'during');
   const duringFile = transition?.files.during;
-  if (during && duringFile) picks.push({ frame: during.frame, file: render.local(duringFile) });
+  if (during && duringFile) picks.push({ frame: during.frame, file: render.artifact(duringFile) });
+  // A missing still is reported by the artifacts check; it is not compared.
   return picks.filter((pick) => existsSync(pick.file));
 }
 
@@ -121,28 +171,68 @@ function restFrames(cut: Campaign): { sceneId: string; frame: number }[] {
   }));
 }
 
+/** A model's measured text that says the check could not be made. */
+const UNCHECKED =
+  /\b(?:could not|couldn't|cannot|can't|unable to|was not able to|were not able to)\s+(?:be\s+)?(?:check|verify|confirm|judge|inspect|see|assess|measure|tell)|\b(?:were|was)\s+not\s+(?:supplied|provided|given|shown|available|included)\b|\bnot\s+(?:supplied|provided)\b/i;
+
+/**
+ * Model checks that pass without evidence: the agent says it could not make the check, or it
+ * names no frame that any image it was given shows. Such a check must be n/a or fail.
+ */
+export function unsupportedPasses(
+  checks: readonly QcCheck[],
+  shownFrames: ReadonlySet<number>,
+): { id: string; why: string }[] {
+  return checks
+    .filter((check) => check.source === 'model' && check.result === 'pass')
+    .flatMap((check) => {
+      if (UNCHECKED.test(check.measured))
+        return [{ id: check.id, why: `it says "${check.measured.slice(0, 120)}"` }];
+      if (!check.frames.some((frame) => shownFrames.has(frame)))
+        return [
+          {
+            id: check.id,
+            why: check.frames.length
+              ? `none of frames ${check.frames.join(', ')} is in an image it was given`
+              : 'it names no frame',
+          },
+        ];
+      return [];
+    });
+}
+
 export function finalVerdict(
   issues: readonly QcIssue[],
   checks: readonly QcCheck[],
   run: ReviewRun | null,
   modelRequested: boolean,
+  shownFrames: ReadonlySet<number> = new Set(),
 ): { verdict: 'pass' | 'fail'; blocked: string | null } {
   const integrity = issues.filter(
-    (issue) =>
-      issue.source === 'code' &&
-      ['film-hash', 'campaign-hash', 'stills-from-film'].includes(issue.check),
+    (issue) => issue.source === 'code' && INTEGRITY_CHECKS.includes(issue.check),
   );
   let blocked: string | null = null;
+  const untraced = checks.some(
+    (check) =>
+      check.source === 'code' &&
+      ['claims-research', 'brand-research'].includes(check.id) &&
+      check.result === 'n/a',
+  );
   if (integrity.length) {
-    blocked = `the film under review is not the render of this campaign (${[...new Set(integrity.map((issue) => issue.check))].join(', ')})`;
+    blocked = `the film under review is not the complete render of this campaign (${[...new Set(integrity.map((issue) => issue.check))].join(', ')})`;
   } else if (!modelRequested) {
     blocked = 'no rendered frames were inspected (--no-model); code checks alone never pass a film';
   } else if (!run?.review) {
     blocked = `no review from the agent: ${run?.problem ?? 'it did not run'}`;
+  } else if (untraced) {
+    blocked = 'claims and brand colours were not traced to the research';
   } else {
     const unopened = run.images.filter((image) => !image.viewed);
+    const unsupported = unsupportedPasses(checks, shownFrames);
     if (unopened.length) {
       blocked = `the agent did not open ${unopened.map((image) => `${image.name} (${image.fileId})`).join(', ')}`;
+    } else if (unsupported.length) {
+      blocked = `the agent passed checks without evidence from the frames it was given: ${unsupported.map((each) => `${each.id} (${each.why})`).join('; ')}`;
     }
   }
   const failed =
@@ -160,11 +250,11 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
   const work = join(render.dir, `${manifest.campaign.id}.qc`);
   mkdirSync(work, { recursive: true });
 
-  const campaignFile = options.campaignFile ?? render.local(manifest.campaign.file);
+  const campaignFile = options.campaignFile ?? render.campaignPath(manifest.campaign.file);
   const campaignBytes = readFileSync(campaignFile);
   const raw: unknown = JSON.parse(campaignBytes.toString('utf8'));
   const parsed = campaignSchema.safeParse(raw);
-  const research = options.researchFile ? readResearch(options.researchFile) : undefined;
+  const research = readResearch(options.researchFile, campaignFile);
 
   say(`measuring ${render.film}`);
   const [film, filmSha256, campaignSha256, stats, plain, withRegistry] = await Promise.all([
@@ -177,6 +267,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
   ]);
   const fps = parsed.success ? parsed.data.fps : manifest.settings.fps;
   const stills = await compareStills(render, work);
+  const missing = render.declared.filter((file) => !existsSync(file));
 
   const parts: Findings[] = [
     checkIntegrity({
@@ -186,10 +277,12 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       manifestCampaignSha256: manifest.campaign.fileSha256,
       campaignFile,
       stills,
+      missing,
       fps,
     }),
   ];
   let cut: Campaign | undefined;
+  let rests: { sceneId: string; frame: number }[] = [];
   const images: LocalImage[] = [];
   if (!parsed.success) {
     parts.push(checkGate(plain, withRegistry, undefined, fps));
@@ -209,11 +302,11 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
         cut,
       }),
       checkFrames(stats, cut),
-      checkResearchClaims(cut, research, fps),
-      checkResearchBrand(cut, research, fps),
+      checkResearchClaims(cut, research.facts, fps, research.pages),
+      checkResearchBrand(cut, research.facts, fps),
     );
 
-    const rests = restFrames(cut).filter((rest) => rest.frame < film.frames);
+    rests = restFrames(cut).filter((rest) => rest.frame < film.frames);
     const extracted = await extractFrames(
       render.film,
       rests.map((rest) => rest.frame),
@@ -236,41 +329,10 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
         file,
         name: `${manifest.campaign.id}-rest-${rest.sceneId}-${rest.frame}.png`,
         what: `Full-size frame ${rest.frame} (${timecode(rest.frame, fps)}), scene ${rest.sceneId} two thirds through: its copy has landed and its exit has not begun.`,
+        frames: [rest.frame],
       });
     }
     parts.push(checkGround(cut.brand.colors.background, ground, fps));
-
-    const sheets: LocalImage[] = [
-      {
-        file: render.local(render.index.contactSheet.file),
-        name: `${manifest.campaign.id}-contact-sheet.png`,
-        what: `Contact sheet: one frame per second, each labelled with its time and frame number (${render.index.contactSheet.frames
-          .map((entry) => `F${entry.frame} ${entry.scene}`)
-          .join(', ')}).`,
-      },
-      ...(render.index.transitionSheet
-        ? [
-            {
-              file: render.local(render.index.transitionSheet.file),
-              name: `${manifest.campaign.id}-transitions-sheet.png`,
-              what: `Transitions sheet: each row is one transition, before, during (the boundary) and after: ${render.index.transitions
-                .map(
-                  (transition) =>
-                    `${transition.index + 1} ${transition.name} at boundary F${transition.boundary} (${transition.stills.map((still) => `${still.when} F${still.frame}`).join(', ')})`,
-                )
-                .join('; ')}.`,
-            },
-          ]
-        : []),
-      {
-        file: render.local(render.index.phoneSheet.file),
-        name: `${manifest.campaign.id}-phone-sheet.png`,
-        what: `Phone sheet: each scene ${render.index.phoneSheet.widthPx} px wide, the width of a phone held upright (${render.index.phoneSheet.frames
-          .map((entry) => `${entry.scene} F${entry.frame}`)
-          .join(', ')}).`,
-      },
-    ];
-    images.unshift(...sheets.filter((sheet) => existsSync(sheet.file)));
   }
 
   const code = merge(...parts);
@@ -295,13 +357,24 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
   }
 
   let run: ReviewRun | null = null;
-  const blockedEarly =
-    !cut ||
-    code.issues.some((issue) =>
-      ['film-hash', 'campaign-hash', 'stills-from-film'].includes(issue.check),
-    );
+  const blockedEarly = !cut || code.issues.some((issue) => INTEGRITY_CHECKS.includes(issue.check));
   if (options.model && cut && !blockedEarly) {
     const campaign = cut;
+    // Every sheet the agent opens is built here from frames decoded from the film, never taken
+    // from the render folder, so no picture from another render can stand in for this film.
+    say('building the sheets from the film');
+    const sheets = await buildSheets({
+      film: render.film,
+      size: film,
+      cut,
+      campaignId: manifest.campaign.id,
+      index: render.index,
+      rests,
+      framesPerChunk: manifest.settings.framesPerChunk,
+      outliers: frameOutliers(stats, cut),
+      work,
+    });
+    images.unshift(...sheets);
     const budgetMicro = Math.round(
       (options.budgetUsd ?? definition.session.budget_micro_usd / 1e6) * 1e6,
     );
@@ -319,7 +392,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
           height: film.height,
           images: uploaded,
           codeChecks: code.checks,
-          researchSupplied: Boolean(research),
+          researchSupplied: true,
           budgetUsd: budgetMicro / 1e6,
         }),
       budgetMicroUsd: budgetMicro,
@@ -346,12 +419,17 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
     timecode: issue.frame === null ? issue.timecode : timecode(issue.frame, fps),
     source: 'model',
   }));
+  // Measured against every image planned for the agent, not only those that were uploaded.
+  const opened = run
+    ? images.filter((image) => run?.images.some((each) => each.name === image.name && each.viewed))
+        .length
+    : 0;
   const inspected: QcCheck[] = run
     ? [
         {
           id: 'frames-inspected',
-          result: run.images.every((image) => image.viewed) ? 'pass' : 'fail',
-          measured: `${run.images.filter((image) => image.viewed).length} of ${run.images.length} images opened with view_image`,
+          result: opened === images.length && images.length > 0 ? 'pass' : 'fail',
+          measured: `${opened} of ${images.length} images taken from the film opened with view_image`,
           threshold: 'every image taken from the film is opened',
           frames: [],
           source: 'code',
@@ -364,7 +442,13 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
       (a.frame ?? Number.MAX_SAFE_INTEGER) - (b.frame ?? Number.MAX_SAFE_INTEGER),
   );
-  const { verdict, blocked } = finalVerdict(issues, checks, run, options.model);
+  const { verdict, blocked } = finalVerdict(
+    issues,
+    checks,
+    run,
+    options.model,
+    new Set(images.flatMap((image) => image.frames ?? [])),
+  );
 
   const report: QcReport = {
     verdict,
@@ -381,7 +465,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       format: manifest.settings.format,
     },
     campaignFile,
-    researchFile: options.researchFile ?? null,
+    researchFile: options.researchFile,
     checks,
     issues,
     review: run

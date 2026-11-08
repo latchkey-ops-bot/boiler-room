@@ -19,6 +19,8 @@ export interface LocalImage {
   file: string;
   name: string;
   what: string;
+  /** Every frame of the film the image shows. */
+  frames?: number[];
 }
 
 /** Records the file ids every successful `view_image` call opened. */
