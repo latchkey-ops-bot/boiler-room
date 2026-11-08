@@ -5,6 +5,10 @@ const nextConfig: NextConfig = {
   // Workspace packages export TypeScript source.
   transpilePackages: ['@boiler-room/schema'],
   poweredByHeader: false,
+  // `next dev` would otherwise write apps/web/AGENTS.md whenever an AI agent runs it, leaving the
+  // tree dirty, and `pnpm web:deploy:*` deploys only a clean tree. The repo's own agent rules live
+  // in CLAUDE.md and skills/.
+  agentRules: false,
   // Inlined at build time. The deploy script sets BR_BUILD_SHA to the commit it builds.
   env: {
     BR_BUILD_SHA: process.env.BR_BUILD_SHA ?? 'dev',
