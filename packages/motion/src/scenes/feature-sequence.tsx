@@ -249,5 +249,16 @@ export const featureSequence = defineScene<FeatureSequenceProps>({
     >,
     pose: featurePose(frame, featureSteps(featureCount, timing), props),
   }),
+  imageView: ({ stage, imageAspect, props, featureCount }) => {
+    const route: Stop[] = props.stops ?? DEFAULT_STOPS;
+    const zooms = Array.from(
+      { length: featureCount },
+      (_, index) => (route[index % route.length] as Stop).zoom ?? camera.defaultZoom,
+    );
+    return {
+      width: featureLayout(stage, imageAspect).media?.width ?? 0,
+      zoom: Math.max(1, ...zooms),
+    };
+  },
   markAnchor: (stage) => cornerMark(stage),
 });

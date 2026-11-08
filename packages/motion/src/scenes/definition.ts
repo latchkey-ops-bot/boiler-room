@@ -26,6 +26,20 @@ export interface AnchorRequest<Props> {
   featureCount: number;
 }
 
+export interface ImageViewRequest<Props> {
+  props: Props;
+  stage: Stage;
+  imageAspect: number;
+  /** How many text items are not the headline. */
+  featureCount: number;
+}
+
+/** How an image is shown at its largest: its width on screen, and the most the camera zooms in. */
+export interface ImageView {
+  width: number;
+  zoom: number;
+}
+
 export interface RoleCount {
   min: number;
   max: number;
@@ -45,6 +59,8 @@ export interface SceneDefinition<Props> extends SceneLimits {
   /** `required` needs a captured or uploaded image, because a scene must show the real product. */
   image: 'none' | 'optional' | 'required';
   imageAnchor?: (request: AnchorRequest<Props>) => ImageAnchor;
+  /** How large the image is shown, so a capture too small to be shown sharp can be refused. */
+  imageView?: (request: ImageViewRequest<Props>) => ImageView;
   markAnchor: (stage: Stage) => MarkPlacement;
 }
 

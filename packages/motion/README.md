@@ -16,7 +16,9 @@ any brand.
 5. loads the scene images and the logo to learn their size, whether the logo can be seen, and
    whether either animates. An animated GIF, APNG, WebP, AVIF or SVG plays on the browser's clock,
    not the film's, so a scene image that animates, or whose bytes its host will not let be read, is
-   refused, and such a logo is replaced by the wordmark;
+   refused, and such a logo is replaced by the wordmark. A scene image outside 1:3 to 4:1, such
+   as a full-page capture, or one the scene would enlarge more than 1.5 times at its closest zoom
+   in this format, is refused with the size to supply instead;
 6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, and the
    transitions overlaid on scene boundaries.
 

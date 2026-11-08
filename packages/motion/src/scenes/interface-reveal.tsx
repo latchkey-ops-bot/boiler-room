@@ -156,5 +156,9 @@ export const interfaceReveal = defineScene<InterfaceRevealProps>({
     rect: interfaceLayout(stage, imageAspect).media,
     pose: interfacePose(frame, durationInFrames, props),
   }),
+  imageView: ({ stage, imageAspect, props }) => ({
+    width: interfaceLayout(stage, imageAspect).media.width,
+    zoom: Math.max(1, props.zoom ?? camera.defaultZoom),
+  }),
   markAnchor: (stage) => cornerMark(stage),
 });

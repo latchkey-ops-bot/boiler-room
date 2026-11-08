@@ -73,7 +73,8 @@ function carryElement(before: ScenePlan, after: ScenePlan): CarryElement {
   return { kind: 'mark' };
 }
 
-const featureCount = (scene: Scene) => scene.text.filter(({ role }) => role !== 'headline').length;
+export const featureCount = (scene: Scene) =>
+  scene.text.filter(({ role }) => role !== 'headline').length;
 
 function imageAnchor(
   plan: ScenePlan,

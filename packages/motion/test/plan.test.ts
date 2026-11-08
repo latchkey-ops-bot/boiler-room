@@ -161,6 +161,36 @@ describe('prepareFilm', () => {
     ).rejects.toThrow(/FONT_UNAVAILABLE at brand\.fonts\.body\.source: The body font "Inter"/);
   });
 
+  const withShot = (width: number, height: number) =>
+    exampleProbe({ 'dashboard.png': { loaded: true, width, height, animated: false } });
+
+  it('refuses a product image too small for the size it is shown at', async () => {
+    const rejection = prepareFilm({ campaign: novaCopy(), format: '16:9' }, withShot(160, 100));
+    await expect(rejection).rejects.toThrow(/IMAGE_TOO_SMALL at assets\.dashboard-shot\.src/);
+  });
+
+  it.each([
+    ['a full-page capture', 1440, 9000],
+    ['a sliver', 3000, 150],
+  ])('refuses %s, which would be shown as a strip', async (_kind, width, height) => {
+    const rejection = prepareFilm(
+      { campaign: novaCopy(), format: '9:16' },
+      withShot(width, height),
+    );
+    await expect(rejection).rejects.toThrow(/IMAGE_WRONG_SHAPE at assets\.dashboard-shot\.src/);
+  });
+
+  it.each([
+    ['a laptop capture', 1280, 800],
+    ['a phone screenshot', 1170, 2532],
+  ])('takes %s in every format', async (_kind, width, height) => {
+    for (const format of ['16:9', '9:16', '1:1'] as const) {
+      await expect(
+        prepareFilm({ campaign: novaCopy(), format }, withShot(width, height)),
+      ).resolves.toMatchObject({ format });
+    }
+  });
+
   it('sets the name as a wordmark when the logo animates', async () => {
     const logo = { loaded: true, width: 373, height: 112, coverage: 0.4, animated: true };
     const plan = await prepareFilm(

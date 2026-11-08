@@ -3,11 +3,11 @@ import { assetUrl } from '../brand/assets.ts';
 import { type FontProbe, type FontRole, fontUrl, probeFont } from '../brand/fonts.ts';
 import { resolveLogo } from '../brand/logo.ts';
 import { probeImage } from '../brand/probe.ts';
-import type { Format } from '../layout/stage.ts';
-import { sceneRegistry } from '../scenes/registry.ts';
+import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
+import { definitionOf, sceneRegistry } from '../scenes/registry.ts';
 import { type CutSelection, resolveCut } from './cut.ts';
 import { type ImageSize, screenImageId } from './media.ts';
-import { type FilmPlan, planFilm } from './plan.ts';
+import { type FilmPlan, featureCount, planFilm } from './plan.ts';
 import { type FilmIssue, validateFilm } from './validate-film.ts';
 
 /** Thrown when a campaign may not be rendered. It lists every issue, with what to change. */
@@ -63,6 +63,63 @@ async function checkFonts(campaign: Campaign, probe: MediaProbe): Promise<FilmIs
     });
   }
   return issues;
+}
+
+/** An image enlarged more than this, at the camera's closest, is visibly blurred. */
+const MAX_UPSCALE = 1.5;
+/** Outside these aspects a browser frame shows an image as a strip, such as a full-page capture. */
+const MIN_ASPECT = 1 / 3;
+const MAX_ASPECT = 4;
+
+/**
+ * Each scene image against how it is shown in this format: an image of a shape a browser frame
+ * shows as a strip, or one enlarged past what stays sharp, is refused with what to supply instead.
+ */
+function checkImageFit(
+  campaign: Campaign,
+  format: Format,
+  imageSizes: Record<string, ImageSize>,
+): FilmIssue[] {
+  const { width: stageWidth, height: stageHeight } = FORMAT_SIZES[format];
+  const stage = stageFor(stageWidth, stageHeight);
+  const issues = new Map<string, FilmIssue & { upscale: number }>();
+  for (const scene of campaign.scenes) {
+    const id = screenImageId(scene, campaign);
+    const size = id ? imageSizes[id] : undefined;
+    const definition = definitionOf(scene.type);
+    if (!id || !size || !definition?.imageView) continue;
+    const path = `assets.${id}.src`;
+    const aspect = size.width / size.height;
+    const dimensions = `${size.width}×${size.height}`;
+    if (aspect < MIN_ASPECT || aspect > MAX_ASPECT) {
+      issues.set(id, {
+        code: 'IMAGE_WRONG_SHAPE',
+        severity: 'error',
+        path,
+        message: `Image "${id}" is ${dimensions}, an aspect outside 1:3 to 4:1, so its browser frame would show it as a strip in which the product cannot be read.`,
+        fix: `Crop it to the part that matters, such as one screen of a full-page capture, and point ${path} at the cropped file.`,
+        upscale: Number.POSITIVE_INFINITY,
+      });
+      continue;
+    }
+    const view = definition.imageView({
+      props: definition.props.parse(scene.props),
+      stage,
+      imageAspect: aspect,
+      featureCount: featureCount(scene),
+    });
+    const upscale = (view.width * view.zoom) / size.width;
+    if (upscale <= MAX_UPSCALE || upscale <= (issues.get(id)?.upscale ?? 0)) continue;
+    issues.set(id, {
+      code: 'IMAGE_TOO_SMALL',
+      severity: 'error',
+      path,
+      message: `Image "${id}" is ${dimensions}, and a ${scene.type} scene shows it ${Math.round(view.width)} px wide at up to ${view.zoom}× zoom in ${format}, enlarging it ${upscale.toFixed(1)} times, so it would look blurred.`,
+      fix: `Supply a capture at least ${Math.ceil((view.width * view.zoom) / MAX_UPSCALE)} px wide at ${path}, or lower the scene's zoom.`,
+      upscale,
+    });
+  }
+  return [...issues.values()].map(({ upscale: _upscale, ...issue }) => issue);
 }
 
 /**
@@ -126,6 +183,8 @@ export async function prepareFilm(
     imageSizes[id] = { width: seen.width, height: seen.height };
   }
   if (unusable.length > 0) throw new FilmRejected('loading the scene images', unusable);
+  const misfits = checkImageFit(campaign, format, imageSizes);
+  if (misfits.length > 0) throw new FilmRejected('sizing the scene images', misfits);
 
   const logoAsset = campaign.assets[campaign.brand.logoAssetId];
   const logoSrc = logoAsset?.src ?? '';
