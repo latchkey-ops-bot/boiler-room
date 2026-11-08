@@ -83,6 +83,20 @@ export const STATUS_LABELS: Record<FilmStatus, string> = {
   failed: 'Needs a fix',
 };
 
+/** What a working badge says at each station, such as "Rendering" in the dashboard sample. */
+export const WORKING_LABELS: Record<Stage, string> = {
+  research: 'Researching',
+  script: 'Writing',
+  checks: 'Checking',
+  approval: 'Checking',
+  art_direction: 'Designing',
+  motion: 'Animating',
+  audio: 'Adding sound',
+  render: 'Rendering',
+  review: 'Reviewing',
+  delivery: 'Delivering',
+};
+
 export const CREW_LABELS: Record<CrewMember, string> = {
   coordinator: 'Coordinator',
   researcher: 'Researcher',

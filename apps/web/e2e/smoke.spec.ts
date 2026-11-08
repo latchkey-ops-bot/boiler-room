@@ -46,6 +46,15 @@ test('the API refuses a signed-out caller', async ({ request }) => {
   expect((await response.json()).error.code).toBe('unauthorized');
 });
 
+test('the film page and the launch plan need a signed-in founder', async ({ page, request }) => {
+  await page.goto('/films/flm_00000000000000000000');
+  await expect(page).toHaveURL(/\/sign-in/);
+  const response = await request.put('/api/films/flm_00000000000000000000/launch', {
+    data: { date: null, channels: [] },
+  });
+  expect(response.status()).toBe(401);
+});
+
 test('health answers with the database up', async ({ request }) => {
   const response = await request.get('/api/health');
   expect(response.status()).toBe(200);
