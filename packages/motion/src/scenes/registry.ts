@@ -1,8 +1,15 @@
 import { type SceneRegistry, sceneRegistry } from '@boiler-room/schema';
+import { colourEventScene } from './colour-event.tsx';
 import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
+import { logoReveal } from './logo-reveal.tsx';
+import { proofBars } from './proof-bars.tsx';
 import { siteHero } from './site-hero.tsx';
+import { siteScroll } from './site-scroll.tsx';
+import { statCounter } from './stat-counter.tsx';
+import { tileWall } from './tile-wall.tsx';
+import { typeCard } from './type-card.tsx';
 import { wordSlam } from './word-slam.tsx';
 
 /**
@@ -13,8 +20,15 @@ import { wordSlam } from './word-slam.tsx';
  */
 export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> = {
   'word-slam': wordSlam,
+  'logo-reveal': logoReveal,
   'site-hero': siteHero,
+  'type-card': typeCard,
+  'site-scroll': siteScroll,
+  'proof-bars': proofBars,
+  'stat-counter': statCounter,
   'feature-card': featureCard,
+  'tile-wall': tileWall,
+  'colour-event': colourEventScene,
   'end-card': endCard,
 };
 

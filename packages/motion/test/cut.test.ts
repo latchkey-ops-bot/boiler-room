@@ -8,7 +8,7 @@ describe('resolveCut', () => {
     const campaign = novaCopy();
     const cut = resolveCut(campaign, { hookId: 'open-question' });
     expect(at(cut.scenes, 0).id).toBe('open-question');
-    expect(at(cut.scenes, 0).transitionOut).toBe('push');
+    expect(at(cut.scenes, 0).transitionOut).toBe('t3');
     expect(cut.scenes.slice(1)).toEqual(campaign.scenes.slice(1));
   });
 

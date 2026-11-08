@@ -7,7 +7,10 @@
  *    them, so tabs that load fonts and images at the same time race each other.
  *
  * Passes 2 and 3 are compared with pass 1 byte for byte, so a frame that depends on what was
- * rendered before it, on the clock, on which tab loaded first, or on randomness fails.
+ * rendered before it, on the clock, on which tab loaded first, or on randomness fails. One
+ * difference is tolerated and reported: Chrome's known raster variance, where a tab draws a
+ * rounded corner a level apart. A frame that differs by at most 1 level on at most 32 pixels
+ * passes with a note; anything more fails.
  *
  * Beside the examples it runs fixtures that once broke this: a display and body font that share a
  * family name, an animated GIF as the product image, and an animated SVG as the logo. Each must be
@@ -34,7 +37,14 @@ import {
   selectFilm,
 } from './bundle.ts';
 import { animatedSvg, twoFrameGif } from './fixture-files.ts';
-import { pixelDifference, sampleFrames, shuffled } from './sampling.ts';
+import {
+  type PlanShape,
+  pixelDifference,
+  RASTER_VARIANCE,
+  sampleFrames,
+  shuffled,
+  withinRasterVariance,
+} from './sampling.ts';
 
 const samples = Number(argValue('samples') ?? 12);
 const seed = Number(argValue('seed') ?? 20261107);
@@ -159,18 +169,28 @@ const serveUrl = await bundleFilm(publicDir);
 const browser = await openRenderBrowser();
 let failures = 0;
 let compared = 0;
+let tolerated = 0;
 
+/**
+ * Two renders of one frame that are not byte-identical. Within Chrome's raster variance it is
+ * reported and tolerated; beyond it, both images are saved and the run fails.
+ */
 function differs(name: string, frame: number, pass: string, before: Buffer, after: Buffer) {
+  const difference = pixelDifference(PNG.sync.read(before).data, PNG.sync.read(after).data);
+  const { pixels, maxDelta } = difference;
+  if (withinRasterVariance(difference)) {
+    tolerated += 1;
+    console.log(
+      `TOLERATED: ${name} frame ${frame}, ${pass}: ${pixels} pixels differ by ${maxDelta} level, within Chrome's raster variance (at most ${RASTER_VARIANCE.maxDelta} level on at most ${RASTER_VARIANCE.pixels} pixels).`,
+    );
+    return;
+  }
   failures += 1;
   const dir = path.join(OUT, 'determinism');
   mkdirSync(dir, { recursive: true });
   const file = `${name.replace(/[^a-z0-9]+/gi, '-')}-${frame}`;
   writeFileSync(path.join(dir, `${file}-in-order.png`), before);
   writeFileSync(path.join(dir, `${file}-${pass}.png`), after);
-  const { pixels, maxDelta } = pixelDifference(
-    PNG.sync.read(before).data,
-    PNG.sync.read(after).data,
-  );
   console.error(
     `DIFFERENT: ${name} frame ${frame}, ${pass}: ${pixels} pixels differ, by at most ${maxDelta} of 255. Both saved in ${dir}`,
   );
@@ -208,7 +228,13 @@ try {
       console.error(`FAILED: ${name}: ${planProblem}`);
     }
 
-    const frames = sampleFrames(selected.composition.durationInFrames, samples);
+    // Frames spread over the film, and every QC frame of every transition, where a frame most
+    // easily comes to depend on the scene drawn before it.
+    const { plan } = selected.composition.props as { plan?: PlanShape };
+    const seamFrames = (plan?.transitions ?? []).flatMap(({ qc }) => qc);
+    const frames = [
+      ...new Set([...sampleFrames(selected.composition.durationInFrames, samples), ...seamFrames]),
+    ].sort((a, b) => a - b);
     const first = await framesInTabs(serveUrl, selected, frames, 1, browser);
     const firstOf = (frame: number) => {
       const before = first.get(frame);
@@ -263,4 +289,8 @@ if (failures > 0) {
   console.error(`${failures} problem(s): ${compared} frame comparisons were made.`);
   process.exit(1);
 }
-console.log(`All ${compared} frame comparisons were byte-identical, and every fixture behaved.`);
+console.log(
+  tolerated === 0
+    ? `All ${compared} frame comparisons were byte-identical, and every fixture behaved.`
+    : `All ${compared} frame comparisons passed: ${compared - tolerated} byte-identical, ${tolerated} within Chrome's raster variance. Every fixture behaved.`,
+);

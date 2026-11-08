@@ -1,14 +1,15 @@
 import { z } from 'zod';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark, SceneBase } from '../components/scene-base.tsx';
-import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
+import { cornerMark } from '../components/scene-base.tsx';
+import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import { specPx } from '../components/type.tsx';
 import { type Point, WHOLE_IMAGE } from '../core/camera.ts';
 import { arriveN, specFrame } from '../core/curves.ts';
 import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
-import { arrival, drift, hero } from '../tokens.ts';
-import { defineScene, type ImageAnchor, type SceneImage } from './definition.ts';
+import { anchorVelocity, arrival, drift, hero } from '../tokens.ts';
+import { SeamLayer } from '../transitions/seam-layer.tsx';
+import { defineScene, type SceneImage } from './definition.ts';
 
 /** A box on the captured page in source pixels, as the Researcher measured it from the DOM. */
 const captureBox = z.strictObject({
@@ -92,15 +93,18 @@ export function heroFocus(
   };
 }
 
-/** The frame at a spec frame: it rises into place, and pushes in about the focus from the start. */
+/**
+ * The frame at a spec frame: it rises into place, and pushes in about the focus from the start. On
+ * a T1 entry the seam brings it in instead, with no rise of its own.
+ */
 export function heroPlacement(
   f: number,
   stage: Stage,
   layout: HeroLayout,
   origin: Point,
-  carriedIn: boolean,
+  rises: boolean,
 ): { rect: Rect; chrome: number; scale: number } {
-  const rise = carriedIn
+  const rise = !rises
     ? 0
     : specPx(stage, hero.entryTravel) * (1 - arriveN(f, arrival.slow.k, arrival.slow.D));
   const scale = 1 + drift.push * f;
@@ -121,29 +125,25 @@ const addressOf = (text: readonly { role: string; value: string }[]) =>
   text.find(({ role }) => role === 'label')?.value;
 
 const SiteHero = ({ scene, props }: SceneProps<SiteHeroProps>) => {
-  const { frame, fps, stage, timing, image, carriedIn, overlayHides } = useScene();
+  const { stage, image } = useScene();
+  const { f, inT } = useSceneClock();
   if (!image)
     throw new Error(`Scene "${scene.id}" has no image. validateFilm should have said so.`);
-  const f = specFrame(frame - timing.entryAt, fps);
   const layout = heroLayout(stage, image);
   const origin = heroFocus(stage, layout, image, props.focus);
-  const placed = heroPlacement(f, stage, layout, origin, carriedIn === 'image');
+  const placed = heroPlacement(f, stage, layout, origin, inT !== 't1');
   const address = addressOf(scene.text);
-  // Before its entry, the page is still on its way in under the transition, and not drawn.
-  const shown = f >= 0 || carriedIn !== undefined;
+  // No corner mark: the page is the subject, and its push would carry it over the mark.
   return (
-    // No corner mark: the page is the subject, and its push would carry it over the mark.
-    <SceneBase seed={scene.id}>
-      {overlayHides('image') || !shown ? null : (
-        <BrowserFrame
-          rect={placed.rect}
-          src={image.src}
-          pose={WHOLE_IMAGE}
-          chrome={placed.chrome}
-          address={address ? { text: address } : undefined}
-        />
-      )}
-    </SceneBase>
+    <SeamLayer anchor="browser">
+      <BrowserFrame
+        rect={placed.rect}
+        src={image.src}
+        pose={WHOLE_IMAGE}
+        chrome={placed.chrome}
+        address={address ? { text: address } : undefined}
+      />
+    </SeamLayer>
   );
 };
 
@@ -153,19 +153,6 @@ export const siteHero = defineScene<SiteHeroProps>({
   roles: { label: { min: 0, max: 1 } },
   image: 'required',
   maxImages: 1,
-  imageAnchor: ({ props, stage, image, frame, fps, timing, text }): ImageAnchor => {
-    const layout = heroLayout(stage, image);
-    const origin = heroFocus(stage, layout, image, props.focus);
-    const f = specFrame(frame - timing.entryAt, fps);
-    const placed = heroPlacement(f, stage, layout, origin, true);
-    const address = addressOf(text);
-    return {
-      rect: placed.rect,
-      pose: WHOLE_IMAGE,
-      chrome: placed.chrome,
-      ...(address ? { address } : {}),
-    };
-  },
   imageView: ({ stage, image, durationInFrames, fps }) => {
     const layout = heroLayout(stage, image);
     return {
@@ -174,4 +161,20 @@ export const siteHero = defineScene<SiteHeroProps>({
     };
   },
   markAnchor: (stage) => cornerMark(stage),
+  kind: 'product',
+  ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
+  anchors: [
+    {
+      id: 'browser',
+      entry: anchorVelocity.y,
+      exit: anchorVelocity.scale,
+      box: (f, { props, stage, images }) => {
+        const [image] = images;
+        if (!image) return { x: 0, y: 0, width: stage.width, height: stage.height };
+        const layout = heroLayout(stage, image);
+        const origin = heroFocus(stage, layout, image, props.focus);
+        return heroPlacement(f, stage, layout, origin, true).rect;
+      },
+    },
+  ],
 });

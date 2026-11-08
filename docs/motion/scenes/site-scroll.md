@@ -21,10 +21,10 @@ page 2 decays onto its call to action.
 
 ## Text and assets
 
-| Input        | Required                             | Limit                                                                                                                                                                                                                                    |
-| ------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Page assets  | yes, `assetIds[0]` and `assetIds[1]` | Full-page captures, `kind: 'image'`, `provenance: 'captured'` or `'uploaded'`, device scale 2 or more. Tier 2 (docs, changelog, pricing, integrations) or tier 3 (the marketing site). Page 2 must hold a real CTA or heading to land on |
-| `label` text | no, up to 2                          | The URL for each page, shown in the address pill, no scheme, 32 characters                                                                                                                                                               |
+| Input        | Required                             | Limit                                                                                                                                                                                                                                                                                                                             |
+| ------------ | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Page assets  | yes, `assetIds[0]` and `assetIds[1]` | Full-page captures, `kind: 'image'`, `provenance: 'captured'` or `'uploaded'`, device scale 2 or more, cropped from the top to at most three times as tall as wide and never to one screen [N]. Tier 2 (docs, changelog, pricing, integrations) or tier 3 (the marketing site). Page 2 must hold a real CTA or heading to land on |
+| `label` text | no, up to 2                          | The URL for each page, shown in the address pill, no scheme, 32 characters                                                                                                                                                                                                                                                        |
 
 Page 1 needs at least `H + 545` output pixels of height below its start. Page 2's landing point
 `targetY` comes from the CTA's DOM box: `ctaBox.y` minus 0.35 H, in output pixels [N].

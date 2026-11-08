@@ -182,12 +182,12 @@ was aligned. The frame count matched `durationInFrames` exactly in every run.
 Beside `film.mp4`, in `film.quality/`, all taken from the stitched film so the agent judges the
 file that ships:
 
-| File                                            | Shows                                                                                                          |
-| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `contact-sheet.png`                             | One frame a second, each labelled with its time and frame number                                               |
-| `transitions-sheet.png` and `transitions/*.png` | For each transition, the frame before its window, its boundary and the frame after, full size and on one sheet |
-| `phone-sheet.png`                               | Each scene two thirds through, 390 px wide, the width of a phone held upright                                  |
-| `index.json`                                    | Every file, the frames it shows, and the scene and transition each belongs to                                  |
+| File                                            | Shows                                                                                                   |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `contact-sheet.png`                             | One frame a second, each labelled with its time and frame number                                        |
+| `transitions-sheet.png` and `transitions/*.png` | For each transition, its first QC frame, its boundary and its last QC frame, full size and on one sheet |
+| `phone-sheet.png`                               | Each scene two thirds through, 390 px wide, the width of a phone held upright                           |
+| `index.json`                                    | Every file, the frames it shows, and the scene and transition each belongs to                           |
 
 Remotion's FFmpeg has `trim`, `split` and `scale` but no `select`, `tile` or `drawtext`, so frames
 are picked by index with `trim` and the sheets and their labels are drawn here.
