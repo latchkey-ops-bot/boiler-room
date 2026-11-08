@@ -24,13 +24,22 @@ describe('planFilm', () => {
   });
 
   it('carries the product between scenes that share it, and the mark otherwise', () => {
-    const { carries, scenes } = novaPlan();
-    expect(carries.map(({ element }) => element)).toEqual([
+    const nova = novaPlan();
+    expect(nova.carries.map(({ element }) => element)).toEqual([
       { kind: 'image', assetId: 'dashboard-shot' },
+    ]);
+    expect(at(nova.scenes, 1).carriedOut).toEqual({ kind: 'image', assetId: 'dashboard-shot' });
+    const quillhaven = planFilm({
+      campaign: quillhavenCopy(),
+      format: '1:1',
+      logo: { kind: 'wordmark', reason: 'too-small' },
+      imageSizes: { 'editor-shot': { width: 2880, height: 1800 } },
+    });
+    expect(quillhaven.carries.map(({ element }) => element)).toEqual([
+      { kind: 'image', assetId: 'editor-shot' },
       { kind: 'mark' },
     ]);
-    expect(at(scenes, 1).carriedOut).toEqual({ kind: 'image', assetId: 'dashboard-shot' });
-    expect(at(scenes, 3).carriedIn).toEqual({ kind: 'mark' });
+    expect(at(quillhaven.scenes, 3).carriedIn).toEqual({ kind: 'mark' });
   });
 
   it('hands a carried image over exactly where each scene holds it, so nothing jumps', () => {
@@ -68,19 +77,21 @@ describe('planFilm', () => {
     const [open, speed, adoption, close] = scenes;
     // A scene pushed off holds still; the push moves it.
     expect(open?.timing.text.exitFrames).toBe(0);
-    // A pushed scene arrives built, and its words wait for the push.
+    // A pushed scene arrives built: its entry starts with the push, so it builds as it slides on.
     expect(speed?.timing.container.enterAt).toBeLessThan(-(speed?.span.preRoll ?? 0));
-    const pushEnds = (speed?.span.in?.to ?? 0) - (speed?.span.from ?? 0);
-    expect(pushEnds).toBeGreaterThan(0);
-    expect(speed?.timing.text.enterAt).toBeGreaterThan(pushEnds);
-    // Its own entry starts once the push has finished.
-    expect(speed?.timing.entryAt).toBe(pushEnds);
+    expect(speed?.span.preRoll).toBeGreaterThan(0);
+    expect(speed?.timing.entryAt).toBe(-(speed?.span.preRoll ?? 0));
     // Words leave before a carry starts.
-    const out = adoption?.span.out;
-    const clearBy = (out?.from ?? 0) - (adoption?.span.from ?? 0);
-    const { exitAt, exitFrames } = adoption?.timing.text ?? { exitAt: 0, exitFrames: 0 };
+    const out = speed?.span.out;
+    const clearBy = (out?.from ?? 0) - (speed?.span.from ?? 0);
+    const { exitAt, exitFrames } = speed?.timing.text ?? { exitAt: 0, exitFrames: 0 };
     expect(exitAt + exitFrames).toBeLessThanOrEqual(clearBy);
-    // The film ends on a held frame.
+    // A carried image lands before the scene it lands in starts its own entry.
+    expect(adoption?.timing.entryAt).toBe(
+      (adoption?.span.in?.to ?? 0) - (adoption?.span.from ?? 0),
+    );
+    // A dead-stop cut keeps everything to the last frame, and so does the end of the film.
+    expect(adoption?.timing.text.exitFrames).toBe(0);
     expect(close?.timing.container.exitFrames).toBe(0);
   });
 });

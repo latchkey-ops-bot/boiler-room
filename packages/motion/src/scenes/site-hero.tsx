@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark, SceneBase, SceneMark } from '../components/scene-base.tsx';
+import { cornerMark, SceneBase } from '../components/scene-base.tsx';
 import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
 import { specPx } from '../components/type.tsx';
 import { type Point, WHOLE_IMAGE } from '../core/camera.ts';
@@ -132,8 +132,8 @@ const SiteHero = ({ scene, props }: SceneProps<SiteHeroProps>) => {
   // Before its entry, the page is still on its way in under the transition, and not drawn.
   const shown = f >= 0 || carriedIn !== undefined;
   return (
+    // No corner mark: the page is the subject, and its push would carry it over the mark.
     <SceneBase seed={scene.id}>
-      <SceneMark placement={cornerMark(stage)} />
       {overlayHides('image') || !shown ? null : (
         <BrowserFrame
           rect={placed.rect}

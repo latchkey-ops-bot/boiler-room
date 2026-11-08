@@ -1,13 +1,17 @@
 # @boiler-room/motion
 
 Remotion templates that render a validated `campaign.json` as a film, in 16:9, 9:16 or 1:1, for
-any brand.
+any brand. The templates are scene types of the scene library in `docs/motion/scenes`, built to
+those files and to the measured values of `docs/motion/reference-spec.md`.
 
 ## How a film is made
 
 `<CampaignFilm>` takes a campaign, a format, a hook id and a CTA id. Its `calculateMetadata`:
 
-1. runs `validateCampaign` with this package's `sceneRegistry`, and throws on `!ok`;
+1. runs `validateForRender`: `validateCampaign` against the schema's `sceneRegistry` restricted to
+   the types this package has templates for, and throws on `!ok`. A type the library specifies
+   that has no template yet is refused as `SCENE_TYPE_UNBUILT`, naming it and the types that
+   render;
 2. runs `validateFilm`, for the rules only the templates know: props each template accepts, copy
    each one sets, the images it needs, transitions that exist, and the format, hook and CTA chosen;
 3. resolves the hook and CTA into an ordinary campaign with `resolveCut`, and validates that again,
@@ -17,8 +21,9 @@ any brand.
    whether either animates. An animated GIF, APNG, WebP, AVIF or SVG plays on the browser's clock,
    not the film's, so a scene image that animates, or whose bytes its host will not let be read, is
    refused, and such a logo is replaced by the wordmark. A scene image outside 1:3 to 4:1, such
-   as a full-page capture, or one the scene would enlarge more than 1.5 times at its closest zoom
-   in this format, is refused with the size to supply instead;
+   as a full-page capture, or one the scene would enlarge more than 1.5 times by its last frame in
+   this format, is refused with the size to supply instead. A `site-hero` needs a capture at device
+   scale 2, as its scene file says;
 6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, and the
    transitions overlaid on scene boundaries.
 
@@ -40,50 +45,67 @@ the change that fixes it.
 - The determinism check compares bytes. When a frame differs, it saves both images and says how
   many pixels changed and by how much: a level or two on a few edge pixels is Chrome raster
   variance, while a history bug in a template moves whole shapes.
-- Copy comes only from `scene.text`, so numbers do too. Props are parameters such as a focus point.
-  The browser frame draws an empty address bar, since a URL would be copy.
+- Copy comes only from `scene.text`, so numbers do too. Props are parameters such as a focus box.
+  The browser frame's address bar shows a `site-hero`'s `label` text, and is empty otherwise.
 - Colours, fonts, radius and logo come from `campaign.brand`. A muted colour that cannot be read is
   replaced with a readable mix, an accent that would vanish falls back to primary, and a logo that
   is missing, too small, the wrong shape, animated, unreadable or mostly invisible on the
   background is replaced by the brand name set in the display font. A logo on an opaque box of one
   colour, such as a JPEG's white, is judged by the ink on the box and drawn as a plate with the
   brand's corners.
-- Copy reads in its own direction. A block takes the direction of its first letter, and a kinetic
-  headline, which sets each word as a box of its own, marks each box with its word's direction, so
-  Hebrew and Arabic read right to left and a Latin name inside them left to right.
-- Layouts are computed from the composition size, never from a format name, and a browser frame is
-  always sized to show its whole image. Text is measured with `@remotion/layout-utils` and only
-  ever made smaller to fit. Lines break at spaces, after a hyphen inside a compound, and between
-  words of Chinese, Japanese and Thai (`Intl.Segmenter`), never before closing punctuation. A word
-  that would still be set below a third of its role's size is broken between its characters.
+- Copy reads in its own direction. A block takes the direction of its first letter, and the
+  `word-slam`, which places each word itself, lays a right-to-left sentence out from the right, so
+  Hebrew and Arabic read right to left and each word keeps its own direction.
+- Layouts are computed from the composition size, never from a format name. Type is sized from
+  cap height, as the scene files say: the ink of "H" in the loaded font is measured once, and copy
+  is set at the spec's cap height, `capS` for a sentence and `capD` for a display word. Text is
+  measured with `@remotion/layout-utils` and only ever made smaller to fit. Lines break at spaces,
+  after a hyphen inside a compound, and between words of Chinese, Japanese and Thai
+  (`Intl.Segmenter`), never before closing punctuation. A word that would still be set below a
+  third of its size is broken between its characters.
+- Motion is in spec frames, frames at 30 fps, as every measured value is. `core/curves.ts` converts
+  in one place, so a 24 fps campaign keeps the same timing in seconds and decays at the same speed.
+  Type never springs or overshoots: words pop in and rise on `wordRise`, and only a UI node uses
+  `spring.pop`.
 - Transitions take no timeline time. Each scene is mounted for its own frames plus the frames it
   shares with a neighbour, so the film keeps the length the campaign gives it.
 
 ## Layout
 
-| Path               | Contents                                                               |
-| ------------------ | ---------------------------------------------------------------------- |
-| `src/tokens.ts`    | Durations, easing, springs, stagger. Provisional until the motion spec |
-| `src/core/`        | Presence, scene timing, stagger, camera poses                          |
-| `src/brand/`       | Theme from `campaign.brand`, logo checks, font loading                 |
-| `src/layout/`      | Stage and safe areas, per-scene layouts, text fitting                  |
-| `src/scenes/`      | The scene registry and the four scenes                                 |
-| `src/transitions/` | Timeline, push, shared-element carry                                   |
-| `src/film/`        | `<CampaignFilm>`, `calculateMetadata`, `validateFilm`, planning        |
-| `src/root.tsx`     | Remotion entry point                                                   |
-| `scripts/`         | Stills, full renders, the determinism check                            |
+| Path               | Contents                                                           |
+| ------------------ | ------------------------------------------------------------------ |
+| `src/tokens.ts`    | The spec's measured scene values; provisional transition timings   |
+| `src/core/`        | The spec curves, presence, scene timing, stagger, camera poses     |
+| `src/brand/`       | Theme from `campaign.brand`, logo checks, font loading             |
+| `src/layout/`      | Stage and safe areas, text fitting                                 |
+| `src/scenes/`      | The four templates, registered under the schema's scene type names |
+| `src/transitions/` | Timeline, push, shared-element carry                               |
+| `src/film/`        | `<CampaignFilm>`, `calculateMetadata`, the render gate, planning   |
+| `src/root.tsx`     | Remotion entry point                                               |
+| `scripts/`         | Stills, full renders, the determinism check                        |
 
 ## Scenes
 
-| Type               | Copy                                        | Props           | Image                |
-| ------------------ | ------------------------------------------- | --------------- | -------------------- |
-| `kinetic-title`    | headline, optional subhead and label        | `align`         | none                 |
-| `interface-reveal` | headline, optional subhead, body and label  | `focus`, `zoom` | captured or uploaded |
-| `feature-sequence` | headline, then up to four features          | `stops`         | optional             |
-| `cta`              | headline, `cta`, optional subhead and label | none            | none, shows the logo |
+The schema's `sceneRegistry` is the one list of scene types and their text limits. This package
+registers a template against four of its names in `src/scenes/registry.ts`, exports them as
+`IMPLEMENTED_SCENE_TYPES`, and renders only those. Each template sets the roles its scene file
+lists, and `validateFilm` checks the counts.
+
+| Type           | Copy                                                | Props                       | Image                           |
+| -------------- | --------------------------------------------------- | --------------------------- | ------------------------------- |
+| `word-slam`    | `headline`, the hook sentence; its first word slams | `accent`                    | none                            |
+| `site-hero`    | optional `label`, the URL in the address bar        | `frame: 'browser'`, `focus` | 1 captured page, device scale 2 |
+| `feature-card` | `headline`, up to 2 `label`s, the cause and effect  | `demo`, `accent`            | 0 to 2 crops, else chips        |
+| `end-card`     | `cta`, optional `label`, the URL                    | `urlReveal`                 | none, shows the logo            |
+
+`site-hero` refuses `frame: 'plane'`, `layers` and `activeLayer` as not built: plane mode tilts the
+page in 3D, which the determinism check has shown makes a frame depend on render order. Its focus
+blur and light sweep are not built either. Every other type in the library is refused by the
+render gate until it has a template.
 
 Transitions: `push`, and `carry`, which moves the product image between two scenes that show it,
-or the brand mark otherwise.
+or the brand mark otherwise. A cut keeps both scenes as they are to the boundary, as the spec's
+dead-stop cut does. The spec's transition catalog is not built yet.
 
 ## Commands
 
@@ -105,6 +127,5 @@ Routine renders are silent.
 | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | `@remotion/layout-utils`, `@remotion/fonts`, `@remotion/paths`, `@remotion/noise` | MIT                                                                    |
 | `remotion`, `@remotion/cli`, `@remotion/bundler`, `@remotion/renderer`            | Remotion License, which needs a company licence for some organisations |
-| `lucide-react` (the cursor)                                                       | ISC                                                                    |
 | Easing values in `src/tokens.ts`, from IBM Carbon `@carbon/motion`                | Apache-2.0                                                             |
 | Example fonts Sora, Inter, Fraunces, Source Serif 4, from Fontsource              | OFL-1.1, licence files beside each font                                |

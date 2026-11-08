@@ -303,7 +303,7 @@ const NodeLabel = ({
 };
 
 const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
-  const { frame, fps, stage, timing, images, carriedIn, overlayHides } = useScene();
+  const { frame, fps, stage, timing, images, carriedIn, carriedOut, overlayHides } = useScene();
   const { colors, radius } = useBrand();
   const headline = scene.text.find(({ role }) => role === 'headline');
   if (!headline) throw new Error(`Scene "${scene.id}" has no headline. validateFilm checks this.`);
@@ -425,11 +425,14 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
         ) : null}
       </div>
       {causeImage && panelShown && !overlayHides('image') ? (
+        // Drawn above the panel's layer, so that a carry can take it while the rest clears. When
+        // the carry moves the mark instead, it clears with the rest.
         <BrowserFrame
           rect={shift(causeRect, sideways, down)}
           src={causeImage.src}
           pose={WHOLE_IMAGE}
           chrome={0}
+          style={{ opacity: carriedOut === 'image' ? 1 : opacity }}
         />
       ) : null}
       {panelShown && light > 0 && light < 1 ? (

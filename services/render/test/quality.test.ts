@@ -33,7 +33,6 @@ describe('planQuality', () => {
     expect(plan.transitions.map(({ name, boundary }) => [name, boundary])).toEqual([
       ['push', 120],
       ['carry', 270],
-      ['carry', 420],
     ]);
     const push = plan.transitions[0];
     expect(push?.stills).toEqual([

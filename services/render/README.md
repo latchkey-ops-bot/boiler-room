@@ -27,9 +27,11 @@ printed, logged, put in a command or sent to a computer.
 
 ## What a render does
 
-1. **Gate.** `validateCampaign` with `sceneRegistry`, then `validateFilm`, then `validateCampaign`
-   again on the cut with its hook and CTA resolved, the same checks `<CampaignFilm>` makes in
-   `calculateMetadata`. A rejected campaign exits 1 with every issue and its fix, before anything is
+1. **Gate.** `validateForRender`, which is `validateCampaign` against the schema's `sceneRegistry`
+   restricted to the scene types motion has templates for, then `validateFilm`, then
+   `validateForRender` again on the cut with its hook and CTA resolved, the same checks
+   `<CampaignFilm>` makes in `calculateMetadata`. A scene type the library specifies that motion
+   does not draw yet is refused as `SCENE_TYPE_UNBUILT`. A rejected campaign exits 1 with every issue and its fix, before anything is
    bundled or a computer exists. Remotion's `schema` prop is not relied on.
 2. **Estimate.** Frames come from `sceneFrames`. The run is priced (see [Cost](#cost)) and refuses
    to start when the most it could cost is over `maxCostUsd` (exit 3).

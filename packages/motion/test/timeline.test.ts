@@ -18,7 +18,7 @@ describe('buildTimeline', () => {
 
   it('overlays each transition on its boundary, half on either side', () => {
     const { windows, spans } = buildTimeline(novaCopy());
-    expect(windows.map(({ name }) => name)).toEqual(['push', 'carry', 'carry']);
+    expect(windows.map(({ name }) => name)).toEqual(['push', 'carry']);
     for (const window of windows) {
       expect(window.boundary - window.from).toBe(window.to - window.boundary);
       expect(spans.some(({ from }) => from === window.boundary)).toBe(true);

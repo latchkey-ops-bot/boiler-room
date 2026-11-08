@@ -57,7 +57,9 @@ export const BrowserFrame = ({
     <div
       style={{
         ...style,
-        boxShadow: `0 ${rect.width * 0.03}px ${rect.width * 0.09}px ${colors.shadow}`,
+        // On whole pixels too, so a frame that resizes every frame, as in a carry, draws the same
+        // shadow in every tab.
+        boxShadow: `0 ${Math.round(rect.width * 0.03)}px ${Math.round(rect.width * 0.09)}px ${colors.shadow}`,
         borderRadius: radius,
         height: rect.height,
         left: rect.x,

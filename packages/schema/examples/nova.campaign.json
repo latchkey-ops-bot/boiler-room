@@ -149,8 +149,7 @@
         "text": "More than 1,200 teams ship with Nova, and customers deploy 3x more often.",
         "claimIds": ["team-count", "deploy-rate"]
       },
-      "assetIds": ["dashboard-shot"],
-      "transitionOut": "carry"
+      "assetIds": ["dashboard-shot"]
     },
     {
       "id": "close",

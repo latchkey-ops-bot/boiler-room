@@ -72,8 +72,9 @@ export type SceneExit = 'hold' | 'text' | 'all';
 
 export interface SceneTiming {
   /**
-   * The scene frame its own entry starts on: 0, or the frame an incoming transition gives the stage
-   * up. A scene of the library counts its spec frames from here.
+   * The scene frame its own entry starts on, from which a scene of the library counts its spec
+   * frames: 0 after a cut, the frame a carry lands, or for a scene pushed on whole the frame the
+   * push starts, so that it builds as it slides in.
    */
   entryAt: number;
   /** Frames, cards and anything else that holds content. */
@@ -125,7 +126,7 @@ export function sceneTiming({
   // Far enough back that a spring started there has come to rest before the scene is first drawn.
   const settled = framesFor(duration.slower * 2, fps);
   return {
-    entryAt: enterAfter,
+    entryAt: arrivesWhole ? -enterAfter : enterAfter,
     container: {
       enterAt: arrivesWhole ? -durationInFrames - settled : enterAfter,
       enterFrames: containerEnter,

@@ -114,7 +114,8 @@
         { "id": "features-cause", "role": "label", "value": "Every change", "claimIds": [] },
         { "id": "features-effect", "role": "label", "value": "Always kept", "claimIds": [] }
       ],
-      "assetIds": ["editor-shot"]
+      "assetIds": ["editor-shot"],
+      "transitionOut": "carry"
     },
     {
       "id": "close",
