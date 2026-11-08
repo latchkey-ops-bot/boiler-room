@@ -165,23 +165,29 @@ describe('stat-counter motion', () => {
     }
   });
 
-  it('keeps the number box centred at its place, drifting larger about the frame centre', () => {
-    const stage = stages['16:9'];
-    const fit: NumberFit = fitNumber('40%', stage, metrics, evenFace(0.6));
-    const rest = numberBox(fit, stage, 0);
-    expect(rest.x + rest.width / 2).toBeCloseTo(960, 6);
-    expect(rest.y + rest.height / 2).toBeCloseTo(0.42 * 1080, 6);
-    expect(rest.height).toBeCloseTo(fit.cap, 6);
-    const later = numberBox(fit, stage, 95);
-    const drift = 1 + 0.0013 * 95;
-    expect(later.width).toBeCloseTo(rest.width * drift, 6);
-    expect(later.y + later.height / 2).toBeCloseTo(540 + (0.42 * 1080 - 540) * drift, 6);
+  it('keeps the number box on one fixed centre, the T5 headline slot, as it drifts larger', () => {
+    for (const [format, centreY] of [
+      ['16:9', 0.42 * 1080],
+      ['9:16', 0.4 * 1920],
+      ['1:1', 0.42 * 1080],
+    ] as const) {
+      const stage = stages[format];
+      const fit: NumberFit = fitNumber('40%', stage, metrics, evenFace(0.6));
+      const rest = numberBox(fit, 0);
+      expect(rest.height).toBeCloseTo(fit.cap, 6);
+      for (const f of [0, 6, 41, 95]) {
+        const box = numberBox(fit, f);
+        expect(box.x + box.width / 2).toBeCloseTo(stage.width / 2, 6);
+        expect(box.y + box.height / 2).toBeCloseTo(centreY, 6);
+        expect(box.width).toBeCloseTo(rest.width * (1 + 0.0013 * f), 6);
+      }
+    }
   });
 
   it('is a pure function of the frame, whatever order the frames are asked in', () => {
     const stage = stages['9:16'];
     const fit = fitNumber('1,200+', stage, metrics, evenFace(0.6));
-    const value = (f: number) => [popScale(f), numberBox(fit, stage, f), countUpText('$29', f)];
+    const value = (f: number) => [popScale(f), numberBox(fit, f), countUpText('$29', f)];
     const inOrder = frames(-5, 100).map(value);
     const backwards = frames(-5, 100).reverse().map(value).reverse();
     expect(backwards).toEqual(inOrder);

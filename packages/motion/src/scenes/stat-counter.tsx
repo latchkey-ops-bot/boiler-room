@@ -268,25 +268,16 @@ export const popScale = (f: number): number =>
   f >= stat.pop.frames ? 1 : 1 + stat.pop.excess * stat.pop.k ** Math.max(0, f);
 
 /**
- * The number's cap box at a spec frame: centred at its place, as it drifts larger about the frame
- * centre with the label. The pop and the rack are entry moves, not part of the box.
+ * The number's cap box at a spec frame: centred at its place, and drifting larger about that
+ * centre, which the label drifts about too. The centre is one fixed point for the whole scene, so
+ * a stat-counter after a T5 racks into exactly the slot the one before it held. The pop and the
+ * rack are entry moves, not part of the box.
  */
-export function numberBox(number: NumberFit, stage: Pick<Stage, 'width' | 'height'>, f: number) {
+export function numberBox(number: NumberFit, f: number): Rect {
   const scale = typeDrift(f);
-  const cx = stage.width / 2;
-  const cy = stage.height / 2;
-  const box: Rect = {
-    x: number.centreX - number.width / 2,
-    y: number.centreY - number.cap / 2,
-    width: number.width,
-    height: number.cap,
-  };
-  return {
-    x: cx + (box.x - cx) * scale,
-    y: cy + (box.y - cy) * scale,
-    width: box.width * scale,
-    height: box.height * scale,
-  };
+  const width = number.width * scale;
+  const height = number.cap * scale;
+  return { x: number.centreX - width / 2, y: number.centreY - height / 2, width, height };
 }
 
 const NUMBER = /\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/;
@@ -361,11 +352,12 @@ const StatCounter = ({ scene, props }: SceneProps<StatCounterProps>) => {
       lineHeight: specType.lineHeight,
       metrics: numberFace.metrics,
     });
+  // Number and label drift as one, about the number's centre: the headline slot of a T5 group.
   const drift = {
     inset: 0,
     position: 'absolute' as const,
     transform: `scale(${typeDrift(f)})`,
-    transformOrigin: '50% 50%',
+    transformOrigin: `${number.centreX}px ${number.centreY}px`,
   };
 
   return (
@@ -462,7 +454,7 @@ export const statCounter = defineScene<StatCounterProps>({
       box: (f, { stage, text, theme }) => {
         const value = (role: string) => text.find((item) => item.role === role)?.value ?? '';
         const { number } = statLayout(value('headline'), value('label'), stage, theme.fonts);
-        return numberBox(number, stage, f);
+        return numberBox(number, f);
       },
     },
   ],
