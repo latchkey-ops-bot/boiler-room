@@ -92,8 +92,8 @@
         {
           "binding": "DB",
           "database_name": "boiler-room-production",
-          // Written by `pnpm web:provision:production`, which only the founder runs.
-          "database_id": "PROVISION_ME",
+          // Written by `pnpm web:provision:production` (run once by the main session, 2026-11-08).
+          "database_id": "33faeba9-e31b-4681-a2f7-d637708776c8",
           "migrations_dir": "drizzle"
         }
       ],
