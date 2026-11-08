@@ -447,6 +447,10 @@ describe('gate and claims', () => {
 
   it('reports scene types outside the registry once, as a minor issue for motion', async () => {
     const campaign = example();
+    // The example uses registry types only, so give one scene a type the registry lacks.
+    const scene = campaign.scenes[1];
+    if (!scene) throw new Error('the example has no second scene');
+    scene.type = 'stat';
     const plain = await validateCampaign(campaign);
     const withRegistry = await validateCampaign(campaign, { sceneRegistry });
     const { checks, issues } = checkGate(plain, withRegistry, campaign, 30);

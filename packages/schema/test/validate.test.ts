@@ -296,7 +296,10 @@ describe('validateCampaign', () => {
           quote,
           status: 'approved',
         });
-        const [headline, label] = at(campaign.scenes, 1).text;
+        // Exactly two items: the example's scene may hold more, which would be read with them.
+        const scene = at(campaign.scenes, 1);
+        scene.text = scene.text.slice(0, 2);
+        const [headline, label] = scene.text;
         Object.assign(headline as object, { value: first, claimIds: ['split-stat'] });
         Object.assign(label as object, { value: second, claimIds: secondClaims });
         return campaign;

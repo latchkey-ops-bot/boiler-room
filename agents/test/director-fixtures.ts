@@ -31,8 +31,14 @@ export function exampleResearch(): ResearchOutput {
     },
     brief: {
       product_name: 'Fernhook',
-      one_liner: 'Fernhook gives every pull request a live preview.',
-      what_it_is: 'Live previews for pull requests.',
+      one_liner: {
+        text: 'Fernhook gives every pull request a live preview.',
+        claim_ids: [claims[0]?.id ?? 'preview-speed'],
+      },
+      what_it_is: {
+        text: 'Live previews for pull requests.',
+        claim_ids: [claims[0]?.id ?? 'preview-speed'],
+      },
       audiences: [],
       features: [],
       pricing: null,
