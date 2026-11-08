@@ -31,7 +31,8 @@
     "web:rollback:staging": "pnpm --filter @boiler-room/web rollback:staging",
     "web:rollback:production": "pnpm --filter @boiler-room/web rollback:production",
     "web:logs:staging": "pnpm --filter @boiler-room/web logs:staging",
-    "web:logs:production": "pnpm --filter @boiler-room/web logs:production"
+    "web:logs:production": "pnpm --filter @boiler-room/web logs:production",
+    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

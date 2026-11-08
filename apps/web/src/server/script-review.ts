@@ -1,4 +1,4 @@
-import type { Campaign, Scene, TextRole } from '@boiler-room/schema';
+import type { Campaign, Scene, TextItem, TextRole } from '@boiler-room/schema';
 import {
   type BrandLook,
   type BrandSceneData,
@@ -64,7 +64,11 @@ export interface ReviewScene {
   name: string;
   start: number;
   end: number;
-  /** What is on screen, in order. */
+  /**
+   * What is on screen, as the script reads it: the headline first, or the scene's first line when
+   * it has no headline (a site-hero's address, an end-card's button), then the rest in the order
+   * the scene shows them. Empty for a scene with no words, such as a tile wall.
+   */
   lines: ReviewText[];
   voiceover: { text: string; claimIds: string[] } | null;
   /** Cited by any line or the voiceover, first use first. */
@@ -237,7 +241,9 @@ export function buildReviewModel(
 }
 
 function reviewScene(campaign: Campaign, scene: Scene, number: number): ReviewScene {
-  const lines: ReviewText[] = scene.text.map((item) => ({
+  const lead = leadOf(scene);
+  const ordered = lead ? [lead, ...scene.text.filter((item) => item !== lead)] : scene.text;
+  const lines: ReviewText[] = ordered.map((item) => ({
     id: item.id,
     role: item.role,
     label: ROLE_LABELS[item.role],
@@ -290,8 +296,17 @@ function rewriteNote(film: FilmDetail['film'], approvals: ApprovalView[]): strin
     : null;
 }
 
+/**
+ * The line a scene leads with: its headline, or its first line when the scene type has none. Scene
+ * types differ in their roles (`docs/motion/scenes`): a site-hero has only its address label, an
+ * end-card its button and address.
+ */
+function leadOf(scene: Scene): TextItem | undefined {
+  return scene.text.find((item) => item.role === 'headline') ?? scene.text[0];
+}
+
 function headlineOf(scene: Scene): string {
-  return (scene.text.find((item) => item.role === 'headline') ?? scene.text[0])?.value ?? scene.id;
+  return leadOf(scene)?.value ?? scene.id;
 }
 
 /** `hero-shot` reads "Hero shot". */

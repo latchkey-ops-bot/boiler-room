@@ -10,6 +10,7 @@ import type {
   ReviewModel,
   ReviewScene,
   ReviewState,
+  ReviewText,
   UnconfirmedUse,
 } from '../server/script-review.ts';
 import { BrandStage } from './brand-scene.tsx';
@@ -399,8 +400,8 @@ function SceneCard({
   onShow: () => void;
   extra: ReactNode;
 }) {
-  const headline = scene.lines.find((line) => line.role === 'headline');
-  const rest = scene.lines.filter((line) => line !== headline);
+  // The model puts the line the scene leads with first: its headline, or its first line.
+  const [lead, ...rest] = scene.lines;
   const sources = scene.claimIds
     .map((id) => claims.get(id))
     .filter((claim): claim is ReviewClaim => claim !== undefined);
@@ -414,17 +415,16 @@ function SceneCard({
           {selected ? 'In the preview' : 'Show in preview'}
         </button>
       </div>
-      {headline ? (
+      {lead ? (
         <h3>
-          <ClaimText text={headline.value} />
+          <OnScreen line={lead} />
         </h3>
       ) : null}
       {rest.length > 0 ? (
         <ul className="on-screen" aria-label="Also on screen">
           {rest.map((line) => (
             <li key={line.id} className={line.role === 'cta' ? 'is-cta' : undefined}>
-              {line.role === 'cta' ? <span className="label muted">Button </span> : null}
-              <ClaimText text={line.value} />
+              <OnScreen line={line} />
             </li>
           ))}
         </ul>
@@ -446,6 +446,16 @@ function SceneCard({
       ) : null}
       {extra}
     </li>
+  );
+}
+
+/** One line of on-screen copy. A button says it is one. */
+function OnScreen({ line }: { line: ReviewText }) {
+  return (
+    <>
+      {line.role === 'cta' ? <span className="label muted">Button </span> : null}
+      <ClaimText text={line.value} />
+    </>
   );
 }
 

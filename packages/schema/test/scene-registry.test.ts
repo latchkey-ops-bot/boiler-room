@@ -1,5 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import nova from '../examples/nova.campaign.json' with { type: 'json' };
+import quillhaven from '../examples/quillhaven.campaign.json' with { type: 'json' };
 import { sceneRegistry, validateCampaign } from '../src/index.ts';
 import { directorExample } from './director-example.ts';
 
@@ -23,6 +25,15 @@ describe('sceneRegistry', () => {
   it('holds exactly the scene types in docs/motion/scenes', () => {
     expect(Object.keys(sceneRegistry).sort()).toEqual(documentedTypes.sort());
     expect(documentedTypes).toHaveLength(15);
+  });
+
+  it.each([
+    ['nova', nova],
+    ['quillhaven', quillhaven],
+  ])('passes the %s example with no issues', async (_name, example) => {
+    const { ok, issues } = await validateCampaign(structuredClone(example), { sceneRegistry });
+    expect(issues).toEqual([]);
+    expect(ok).toBe(true);
   });
 
   it.each(documentedTypes)('gives %s the text limits its scene file states', (type) => {

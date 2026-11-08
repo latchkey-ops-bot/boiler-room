@@ -1,17 +1,32 @@
-import type { Campaign } from '@boiler-room/schema';
+import { readdirSync, readFileSync } from 'node:fs';
+import {
+  type Campaign,
+  campaignSchema,
+  type Scene,
+  sceneRegistry,
+  type TextRole,
+} from '@boiler-room/schema';
 import { createElement, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { ScriptReview, usedIn } from '../src/components/script-review.tsx';
 import { BRAND_FALLBACK_STACK, brandFontsHrefs, fontStack } from '../src/lib/brand-scene.ts';
 import type { ApprovalView, FilmDetail, FilmEventView, FilmView } from '../src/server/api/films.ts';
-import { SAMPLE_CAMPAIGN } from '../src/server/pipeline/simulated.ts';
 import {
   buildReviewModel as build,
   type ReviewModel,
   sourceLabel,
   words,
 } from '../src/server/script-review.ts';
+import nova from './fixtures/nova.campaign.json';
+
+/**
+ * The tests read a copy of the Nova example pinned here, so a change to the schema's examples
+ * cannot change what they expect. The tests at the end run every example in
+ * `packages/schema/examples` and every scene type in the registry instead.
+ */
+const NOVA: Campaign = campaignSchema.parse(nova);
+const EXAMPLES = new URL('../../../packages/schema/examples/', import.meta.url);
 
 // The screen is a client component. Outside Next there is no router, so stand in for the two
 // Next modules it uses.
@@ -60,7 +75,7 @@ function detail(
 ): FilmDetail & { campaign: Campaign } {
   return {
     film: { ...FILM, ...film },
-    campaign: extra.campaign ?? SAMPLE_CAMPAIGN,
+    campaign: extra.campaign ?? NOVA,
     events: extra.events ?? [event('director', 'decision', 0), event('validator', 'passed', 1)],
     approvals: extra.approvals ?? [],
     deliverables: [],
@@ -103,22 +118,79 @@ describe('the script review model', () => {
     const speed = model.scenes[1];
     expect(speed?.lines.map((line) => [line.label, line.value])).toEqual([
       ['Headline', '40% faster builds'],
-      ['Label', 'in the first month'],
+      ['Label', 'Every commit'],
+      ['Label', 'Built sooner'],
     ]);
     expect(speed?.voiceover?.text).toBe(
       'Teams on Nova cut build times by 40% in their first month.',
     );
     expect(speed?.claimIds).toEqual(['build-times']);
+    // A scene's sources are the claims its voiceover cites as well as its lines.
+    expect(model.scenes[2]?.claimIds).toEqual(['team-count', 'deploy-rate']);
+    expect(model.scenes[3]?.claimIds).toEqual(['pricing']);
+  });
+
+  it('leads each scene with its headline, or its first line when the scene type has none', () => {
+    expect(model.scenes.map((scene) => scene.lines.map((line) => [line.role, line.value]))).toEqual(
+      [
+        [['headline', 'Your builds are waiting.']],
+        [
+          ['headline', '40% faster builds'],
+          ['label', 'Every commit'],
+          ['label', 'Built sooner'],
+        ],
+        // A site-hero has only its address, an end-card its button and address.
+        [['label', 'nova.example.com/product']],
+        [
+          ['cta', 'Start free'],
+          ['label', 'nova.example.com'],
+        ],
+      ],
+    );
+    // A headline leads wherever the scene lists it, and the rest keep their order.
+    const speed = NOVA.scenes[1] as Scene;
+    const [headline, cause, effect] = speed.text;
+    const moved = buildReviewModel(
+      detail(
+        {},
+        {
+          campaign: {
+            ...NOVA,
+            scenes: [{ ...speed, text: [cause, headline, effect] as Scene['text'] }],
+          },
+        },
+      ),
+    );
+    expect(moved.scenes[0]?.lines.map((line) => line.id)).toEqual([
+      'speed-headline',
+      'speed-cause',
+      'speed-effect',
+    ]);
+    // The preview draws the lines as the scene lists them.
+    expect(moved.scenes[0]?.frame.lines.map((line) => line.id)).toEqual([
+      'speed-cause',
+      'speed-headline',
+      'speed-effect',
+    ]);
   });
 
   it('draws each scene for the preview with its alignment and product shot', () => {
-    expect(model.scenes[0]?.frame).toMatchObject({ align: 'center', showsProduct: false });
-    expect(model.scenes[1]?.frame).toMatchObject({ align: 'left', showsProduct: true });
-    expect(model.scenes[3]?.frame.lines.at(-1)).toEqual({
-      id: 'close-cta',
-      role: 'cta',
-      value: 'Start free',
-    });
+    // The motion library's scene types take no align prop, so the preview sets their copy left.
+    expect(model.scenes.map((scene) => [scene.frame.align, scene.frame.showsProduct])).toEqual([
+      ['left', false],
+      ['left', true],
+      ['left', true],
+      ['left', false],
+    ]);
+    const open = NOVA.scenes[0] as Scene;
+    const centred = buildReviewModel(
+      detail({}, { campaign: { ...NOVA, scenes: [{ ...open, props: { align: 'center' } }] } }),
+    );
+    expect(centred.scenes[0]?.frame.align).toBe('center');
+    expect(model.scenes[3]?.frame.lines).toEqual([
+      { id: 'close-cta', role: 'cta', value: 'Start free' },
+      { id: 'close-address', role: 'label', value: 'nova.example.com' },
+    ]);
   });
 
   it('keeps developer detail out of what the customer sees', () => {
@@ -164,7 +236,8 @@ describe('the script review model', () => {
       {
         claimId: 'pricing',
         sceneNumber: 4,
-        says: 'From $29 per seat',
+        // Only the voiceover cites it, so the voiceover is what the founder confirms.
+        says: 'Plans start at $29 per seat. Start free today.',
         figure: '$29',
         hookId: null,
       },
@@ -290,28 +363,80 @@ describe('small helpers', () => {
   });
 });
 
-describe('the script review screen', () => {
-  function render(model: ReviewModel, banner = false) {
-    const html = renderToStaticMarkup(createElement(ScriptReview, { model, banner }));
-    // Text as a reader sees it: tags gone, entities decoded.
-    const text = html
-      .replace(/<[^>]+>/g, '')
-      .replace(/&quot;/g, '"')
-      .replace(/&#x27;/g, "'")
-      .replace(/&amp;/g, '&');
-    return { html, text };
-  }
+/** Text as a reader sees it: tags gone, entities decoded. */
+function plain(html: string): string {
+  return html
+    .replace(/<[^>]+>/g, '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&amp;/g, '&');
+}
 
-  it('shows the whole script: every scene’s headline, voiceover and sources', () => {
-    const { html, text } = render(buildReviewModel(detail()));
-    for (const scene of SAMPLE_CAMPAIGN.scenes) {
-      expect(text).toContain(scene.text.find((item) => item.role === 'headline')?.value);
-      if (scene.voiceover) expect(text).toContain(scene.voiceover.text);
+function render(model: ReviewModel, banner = false) {
+  const html = renderToStaticMarkup(createElement(ScriptReview, { model, banner }));
+  return { html, text: plain(html) };
+}
+
+/** Each scene card in the script, in order: its heading (null without one) and its text. */
+function sceneCards(html: string) {
+  const start = html.indexOf('aria-label="The script"');
+  const list = html.slice(start, html.indexOf('</ol>', start));
+  return list
+    .split('<li class="card scene-card')
+    .slice(1)
+    .map((card) => {
+      const heading = /<h3>(.*?)<\/h3>/s.exec(card)?.[1];
+      return {
+        html: card,
+        text: plain(card),
+        heading: heading === undefined ? null : plain(heading),
+      };
+    });
+}
+
+/** The heading a scene's card should lead with: its headline, else its first line. */
+function expectedHeading(scene: Scene): string | null {
+  const lead = scene.text.find((item) => item.role === 'headline') ?? scene.text[0];
+  if (!lead) return null;
+  return lead.role === 'cta' ? `Button ${lead.value}` : lead.value;
+}
+
+/**
+ * Every scene card shows all of its scene's words, led by the right line, its voiceover, and the
+ * quote and source of every claim it cites.
+ */
+function expectWholeScript(campaign: Campaign, html: string) {
+  const cards = sceneCards(html);
+  expect(cards).toHaveLength(campaign.scenes.length);
+  const claims = new Map(campaign.claims.map((claim) => [claim.id, claim]));
+  campaign.scenes.forEach((scene, index) => {
+    const card = cards[index];
+    expect(card?.heading, `scene ${scene.id} (${scene.type})`).toBe(expectedHeading(scene));
+    for (const item of scene.text) expect(card?.text).toContain(item.value);
+    if (scene.voiceover) expect(card?.text).toContain(scene.voiceover.text);
+    const cited = new Set([
+      ...scene.text.flatMap((item) => item.claimIds),
+      ...(scene.voiceover?.claimIds ?? []),
+    ]);
+    for (const id of cited) {
+      const claim = claims.get(id);
+      expect(claim, `claim ${id} in scene ${scene.id}`).toBeDefined();
+      expect(card?.text).toContain(claim?.quote);
+      expect(card?.html).toContain(`href="${claim?.sourceUrl}"`);
     }
-    for (const claim of SAMPLE_CAMPAIGN.claims) {
-      expect(text).toContain(claim.quote);
-      expect(html).toContain(`href="${claim.sourceUrl}"`);
-    }
+  });
+}
+
+describe('the script review screen', () => {
+  it('shows the whole script: every scene’s words, voiceover and sources', () => {
+    const { html } = render(buildReviewModel(detail()));
+    expectWholeScript(NOVA, html);
+    expect(sceneCards(html).map((card) => card.heading)).toEqual([
+      'Your builds are waiting.',
+      '40% faster builds',
+      'nova.example.com/product',
+      'Button Start free',
+    ]);
     // Links to customer pages open apart from the app, without handing it the opener.
     expect(html).toContain('rel="noopener noreferrer"');
     expect((html.match(/class="card scene-card/g) ?? []).length).toBe(4);
@@ -347,16 +472,16 @@ describe('the script review screen', () => {
     expect(text).not.toContain('Request changes');
     expect(text).not.toContain('Send to the Director');
     // The decision comes after the last scene.
-    expect(html.indexOf('aria-label="Your decision"')).toBeGreaterThan(
-      html.indexOf('Ship with Nova.'),
-    );
+    const lastScene = html.lastIndexOf('class="card scene-card');
+    expect(lastScene).toBeGreaterThan(-1);
+    expect(html.indexOf('aria-label="Your decision"')).toBeGreaterThan(lastScene);
     expect(html).toContain('class="card changes-dialog"');
   });
 
   it('asks the founder to confirm the unchecked number, in pink, with yes and remove', () => {
     const { html, text } = render(buildReviewModel(detail()));
     expect(text).toContain('One number to confirm');
-    expect(text).toContain('Scene 4 says "From $29 per seat"');
+    expect(text).toContain('Scene 4 says "Plans start at $29 per seat. Start free today."');
     expect(text).toContain('Yes, $29 is right');
     expect(text).toContain('Remove it');
     expect(html).toContain('card confirm confirm-needs');
@@ -400,5 +525,73 @@ describe('the script review screen', () => {
     expect(text).toContain('You approved version 1.');
     expect(text).toContain('You confirmed: Plans start at $29 per seat.');
     expect(text).toContain('Back to the video');
+  });
+});
+
+describe('every scene type in the motion library', () => {
+  // One scene per type in the registry, with a line for each role its spec in docs/motion/scenes
+  // gives it. The roles go in reverse, so a headline is never listed first and has to be moved up.
+  const types = Object.entries(sceneRegistry);
+  const scenes: Scene[] = types.map(([type, limits], index) => {
+    const claim = NOVA.claims[index % NOVA.claims.length];
+    const roles = Object.keys(limits.text ?? {}).reverse() as TextRole[];
+    return {
+      id: `${type}-scene`,
+      type,
+      start: index,
+      end: index + 1,
+      props: {},
+      text: roles.map((role, at) => ({
+        id: `${type}-${role}`,
+        role,
+        value: `${type} ${role}`,
+        claimIds: at === roles.length - 1 && claim ? [claim.id] : [],
+      })),
+      voiceover: { text: `The ${type} voiceover.`, claimIds: claim ? [claim.id] : [] },
+      assetIds: [],
+    };
+  });
+  const campaign: Campaign = { ...NOVA, durationSeconds: scenes.length, scenes };
+  const model = buildReviewModel(detail({}, { campaign }));
+
+  it('covers all of them', () => {
+    expect(types.length).toBe(15);
+    expect(model.scenes).toHaveLength(types.length);
+  });
+
+  it('shows each scene’s words led by its headline, its voiceover and its sources', () => {
+    const { html } = render(model);
+    expectWholeScript(campaign, html);
+    for (const scene of model.scenes) {
+      const roles = new Set(scene.lines.map((line) => line.role));
+      if (roles.has('headline')) expect(scene.lines[0]?.role).toBe('headline');
+    }
+    // A scene with no words, such as a tile wall, still shows its voiceover and source.
+    const tiles = sceneCards(html)[types.findIndex(([type]) => type === 'tile-wall')];
+    expect(tiles?.heading).toBeNull();
+    expect(tiles?.text).toContain('The tile-wall voiceover.');
+  });
+});
+
+describe('every campaign in the schema’s examples', () => {
+  const files = readdirSync(EXAMPLES).filter((file) => file.endsWith('.campaign.json'));
+
+  it('includes the Nova sample the simulated films serve', () => {
+    expect(files).toContain('nova.campaign.json');
+  });
+
+  it.each(files)('%s shows every scene’s words, voiceover and sources', (file) => {
+    const campaign = campaignSchema.parse(
+      JSON.parse(readFileSync(new URL(file, EXAMPLES), 'utf8')),
+    );
+    const model = buildReviewModel(detail({}, { campaign }));
+    for (const [index, scene] of campaign.scenes.entries()) {
+      expect(model.scenes[index]?.lines.map((line) => line.value).sort()).toEqual(
+        scene.text.map((item) => item.value).sort(),
+      );
+    }
+    const { html, text } = render(model);
+    expectWholeScript(campaign, html);
+    for (const hook of model.hooks) expect(text).toContain(hook.headline);
   });
 });
