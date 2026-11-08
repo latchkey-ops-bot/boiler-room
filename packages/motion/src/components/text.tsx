@@ -136,6 +136,23 @@ const Lines = ({ lines }: LinesProps) =>
     </div>
   ));
 
+/** How far below its place a word starts, as a share of its own height. */
+export const REVEAL_TRAVEL = 120;
+/** Past this a word's spring has moved it less than a pixel's fraction, so it counts as still. */
+const STILL = 0.999;
+
+/**
+ * The mask a word rises out of, as a `clip-path`. While the word is low the mask's lower edge sits
+ * just below the line, which hides it. The edge sinks as the word lands, so the word's descenders
+ * are never cut as it settles, and once it is still there is no mask: a deep descender, such as the
+ * dots under an Arabic yeh, is never cut flat in a frame that holds.
+ */
+export function revealMask(landed: number): string | undefined {
+  if (landed >= STILL) return undefined;
+  const bottom = 14 + 46 * Math.min(1, Math.max(0, landed));
+  return `inset(-25% -12% ${-bottom}% -12%)`;
+}
+
 /** Words rise out of a mask one after another, each on its own spring. */
 export const WordReveal = ({
   text,
@@ -179,14 +196,14 @@ export const WordReveal = ({
                   {mark}
                   <span
                     style={{
-                      clipPath: 'inset(-25% -12% -14% -12%)',
+                      clipPath: revealMask(landed),
                       display: 'inline-block',
                     }}
                   >
                     <span
                       style={{
                         display: 'inline-block',
-                        transform: `translateY(${(1 - landed) * 120}%)`,
+                        transform: `translateY(${(1 - landed) * REVEAL_TRAVEL}%)`,
                       }}
                     >
                       {token}
