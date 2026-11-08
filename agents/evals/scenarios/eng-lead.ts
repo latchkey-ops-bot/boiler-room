@@ -439,7 +439,7 @@ Files: those two only.`,
       seed: {
         key: 'ship',
         title: 'SHIP: {slug}',
-        body: 'Ship {slug}: review and merge the pull request its ENG card names, then deploy staging.',
+        body: 'Ship {slug}: review and merge the pull request its ENG card names, then deploy staging. On this practice board the pull request targets {pr_base}, which stands in for dev: merge into it, then go on to the staging deploy step as you would after a merge into dev.',
         assignee: 'eng-lead',
         blocked_by: ['eng'],
       },
