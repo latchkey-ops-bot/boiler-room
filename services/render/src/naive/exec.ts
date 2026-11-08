@@ -37,9 +37,13 @@ export class Aborted extends Error {
 export interface CommandResult {
   stdout: string;
   stderr: string;
-  /** -1 when the stream ended without an exit frame, so the command's status is not known. */
+  /** -1 when the command's status is not known: the stream had no exit frame, or a null code. */
   exitCode: number;
-  /** False when the stream ended without an exit frame. */
+  /**
+   * False when the command's status is not known. Naive ends some streams without an exit frame,
+   * and ends others with an exit frame whose `exit_code` is null, seen on renders that had printed
+   * `done` and on renders that had failed alike, so neither says how the command ended.
+   */
   exited: boolean;
   timedOut: boolean;
   durationMs: number;
@@ -102,6 +106,12 @@ export async function runCommand(
         exit = frame.exit;
       }
     }
+  } catch (error) {
+    // What the command printed before its stream broke can say why it failed.
+    if (error instanceof Error && !(error instanceof Aborted)) {
+      Object.assign(error, { output: { stdout, stderr } });
+    }
+    throw error;
   } finally {
     if (signal?.aborted) void frames.return(undefined).catch(() => undefined);
   }
@@ -110,12 +120,20 @@ export async function runCommand(
     stdout,
     stderr,
     exitCode: exit?.exit_code ?? -1,
-    exited: exit !== undefined,
+    exited: exit !== undefined && exit.exit_code !== null,
     timedOut: exit?.timed_out ?? false,
     durationMs: performance.now() - started,
   };
   if (check && (result.exitCode !== 0 || result.timedOut)) throw failure(computerId, result);
   return result;
+}
+
+/** What a command printed before its stream broke, as `runCommand` attaches it to the error. */
+export function outputOf(error: unknown): { stdout: string; stderr: string } | undefined {
+  const output = (error as { output?: { stdout?: unknown; stderr?: unknown } } | null)?.output;
+  return typeof output?.stdout === 'string' && typeof output.stderr === 'string'
+    ? { stdout: output.stdout, stderr: output.stderr }
+    : undefined;
 }
 
 /** The error for a command that did not exit 0, with the tail of what it printed. */
