@@ -40,6 +40,8 @@ export interface CapturedPage {
   ui: RawUiCandidate[];
   hidden_overlays: number;
   error: string | null;
+  /** True when the load was refused: it left the site or reached a private address. */
+  refused?: boolean;
   /** Characters of visible text read, so an empty capture is told from a page with no text. */
   text_chars?: number;
 }
@@ -177,6 +179,30 @@ function needs(manifest: CaptureManifest, status: string): NeedUpload[] {
 }
 
 /**
+ * What the capture checked for public product UI, in plain words for `brief.product_ui.notes`:
+ * every probe and its verdict, and the sign-in links the home page has. It says only what was
+ * checked: sign-in pages are never loaded, so it never says a sign-in does not exist.
+ */
+export function productUiNote(manifest: CaptureManifest): string {
+  const probes = manifest.probes
+    .map(
+      (probe) =>
+        `${probe.path} ${probe.found ? `found${probe.final_url ? ` at ${probe.final_url}` : ''}` : 'not found'}`,
+    )
+    .join(', ');
+  const rendered = manifest.probes.some((probe) => probe.rendered)
+    ? ', judged on the page a browser rendered where the server answers every path alike'
+    : '';
+  const links = [
+    ...new Map(manifest.login_links.map((link) => [link.url, link.text || link.url])),
+  ].slice(0, 4);
+  const signIn = links.length
+    ? `The home page links to sign-in or app pages: ${links.map(([url, text]) => `${text} (${url})`).join(', ')}. Sign-in pages are never loaded, so nothing behind them was seen.`
+    : 'The home page shows no sign-in or app link the capture saw; sign-in pages are never loaded, so whether the product has one was not checked.';
+  return `Probed ${probes}${rendered}. ${signIn}`;
+}
+
+/**
  * The result the agent starts from. Everything code can measure is filled in: brand tokens, fonts,
  * logo, screenshots as assets, pages read, calls to action seen and likely gaps. The agent replaces
  * every `PUBLISH:` placeholder with the `fil_` id `publish_file` gives that file, writes the claims
@@ -284,13 +310,13 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
       notes: [
         ...colors.notes,
         ...brand.fonts.filter((item) => item.method === 'substitute').map(describeSubstitute),
-        ...(display ? [] : ['No heading was found, so the display font is the body font.']),
+        ...(display ? [] : ['The home page has no heading, so the display font is the body font.']),
       ],
     },
     brief: {
       product_name: brand.name,
-      one_liner: TODO,
-      what_it_is: TODO,
+      one_liner: { text: TODO, claim_ids: [] },
+      what_it_is: { text: TODO, claim_ids: [] },
       audiences: [],
       features: [],
       pricing: null,
@@ -315,7 +341,7 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
         })),
       product_ui: {
         status,
-        notes: TODO,
+        notes: productUiNote(manifest),
         asset_ids: manifest.pages.flatMap((page) =>
           page.shots
             .filter((shot) => shot.ui.some((ui) => showsProduct(ui, page.kind)))
@@ -364,20 +390,35 @@ export function brandNameGuess(
     .split(/\s+[|–—·:-]\s+/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0 && part.length <= 40);
-  const matching = segments.find((part) =>
-    part.toLowerCase().replace(/\s+/g, '').includes(label.toLowerCase()),
-  );
-  if (matching) return { name: matching, source: 'title' };
+  const squash = (part: string) => part.toLowerCase().replace(/\s+/g, '');
+  const matching = segments.find((part) => squash(part).includes(label.toLowerCase()));
+  if (matching) return { name: nameWithin(matching, label), source: 'title' };
   const alt = logoAlt.replace(/\blogo\b/gi, '').trim();
   if (alt && alt.length <= 40) return { name: alt, source: 'logo' };
   const shortest = [...segments].sort((a, b) => a.length - b.length)[0];
   if (shortest && shortest.length <= 30) return { name: shortest, source: 'title' };
   const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const written = new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').exec(
-    text,
-  )?.[0];
+  // The name as the page writes it, with the domain's ending when it writes one: "danluu.com".
+  const written = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?:\\.[a-z]{2,24}(?![\\p{L}\\p{N}]))?(?![\\p{L}\\p{N}])`,
+    'iu',
+  ).exec(text)?.[0];
   if (written) return { name: written, source: 'text' };
   return { name: label, source: 'domain' };
+}
+
+/**
+ * A title part without the words before the domain's name: "About danluu.com" is "danluu.com".
+ * Words after it stay, since a name can run on ("Example Domain", "Product Hunt").
+ */
+function nameWithin(part: string, label: string): string {
+  const words = part.split(/\s+/).filter(Boolean);
+  const want = label.toLowerCase();
+  for (let start = words.length - 1; start >= 0; start--) {
+    const span = words.slice(start);
+    if (span.join('').toLowerCase().includes(want)) return span.join(' ');
+  }
+  return part;
 }
 
 /** The name `brandNameGuess` gives. */

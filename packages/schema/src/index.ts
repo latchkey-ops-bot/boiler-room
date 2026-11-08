@@ -47,5 +47,6 @@ export {
   MIN_CONTRAST,
   SUPERLATIVE_WORDS,
   superlativeForms,
+  unbackedNumbers,
   validateCampaign,
 } from './validate.ts';

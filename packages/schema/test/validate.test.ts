@@ -11,6 +11,7 @@ import {
 import { negativeFixtures, novaCopy } from './negative-fixtures.ts';
 
 const at = <T>(list: T[], index: number): T => list[index] as T;
+const registry = { 'word-slam': {}, 'feature-card': {}, 'site-hero': {}, 'end-card': {} };
 const codes = async (campaign: Campaign) =>
   (await validateCampaign(campaign)).issues.map((issue) => issue.code);
 
@@ -22,8 +23,7 @@ describe('validateCampaign', () => {
 
   it('passes Nova with every option supplied', async () => {
     const assetExists = vi.fn(async () => true);
-    const sceneRegistry = { hero: {}, stat: {}, outro: {} };
-    const result = await validateCampaign(nova, { assetExists, sceneRegistry });
+    const result = await validateCampaign(nova, { assetExists, sceneRegistry: registry });
     expect(result.issues).toEqual([]);
     expect(assetExists).toHaveBeenCalledTimes(Object.keys(nova.assets).length);
     expect(assetExists).toHaveBeenCalledWith('assets/nova/logo.svg');
@@ -163,9 +163,9 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(campaign.scenes, 0).type = 'carousel';
       const { issues } = await validateCampaign(campaign, {
-        sceneRegistry: { hero: {}, stat: {}, outro: {} },
+        sceneRegistry: registry,
       });
-      expect(issues[0]?.fix).toContain('hero, stat, outro');
+      expect(issues[0]?.fix).toContain('word-slam, feature-card, site-hero, end-card');
     });
 
     it('reports why an asset check failed', async () => {
@@ -263,7 +263,7 @@ describe('validateCampaign', () => {
 
     it('checks the cited quote and ignores the other claims in the campaign', async () => {
       const campaign = novaCopy();
-      at(at(campaign.scenes, 2).text, 0).claimIds = ['deploy-rate'];
+      at(at(campaign.scenes, 1).text, 0).claimIds = ['deploy-rate'];
       expect(await codes(campaign)).toEqual(['CLAIM_UNBACKED']);
     });
 
@@ -341,8 +341,11 @@ describe('validateCampaign', () => {
 
       it('does not join a voiceover to the text', async () => {
         const campaign = novaCopy();
-        at(at(campaign.scenes, 0).text, 1).value = 'Ship it';
-        Object.assign(at(campaign.scenes, 0).voiceover as object, { text: 'percent faster' });
+        const effect = at(at(campaign.scenes, 1).text, 2);
+        effect.value = '1,200';
+        effect.claimIds = ['team-count'];
+        // Joined to the text, this voiceover would make the cited count read as 1,200%.
+        Object.assign(at(campaign.scenes, 1).voiceover as object, { text: 'percent faster' });
         expect(await codes(campaign)).toEqual([]);
       });
     });
@@ -372,6 +375,9 @@ describe('validateCampaign', () => {
         ['10x', '10x faster builds'],
         ['Nova 10x', 'Nova 10x faster builds'],
         ['Nova, 73% faster', 'Nova, 73% faster'],
+        ['Saves 300 hours a month', 'Saves 300 hours a month'],
+        ['Loved by 300 teams', 'Loved by 300 teams'],
+        ['Ships in 5 Minutes', 'Ships in 5 Minutes'],
       ])('does not hide a statistic behind the name %s', async (name, value) => {
         const campaign = novaCopy();
         campaign.brand.name = name;
@@ -414,12 +420,30 @@ describe('validateCampaign', () => {
         expect(issues[0]?.fix).toContain('add a claim that quotes it');
       });
 
-      it.each(['Nova', 'Nova 2', 'Nova (Mk.2)', '3M', 'Web3 Labs', 'Zero Downtime'])(
-        'accepts %s as a name',
-        async (name) => {
+      it.each([
+        'Nova',
+        'Nova 2',
+        'Nova (Mk.2)',
+        '3M',
+        'Web3 Labs',
+        'Zero Downtime',
+        'Nova 2 Pro',
+        'Area 51 Studios',
+        '37signals',
+        '1Password',
+      ])('accepts %s as a name', async (name) => {
+        const campaign = novaCopy();
+        campaign.brand.name = name;
+        at(at(campaign.scenes, 0).text, 0).value = `Meet ${name}.`;
+        expect(await codes(campaign)).toEqual([]);
+      });
+
+      it.each(['Meet Nova 9.', 'Nova 9 is here', 'Try Nova 9 today', 'Nova 9 users love it'])(
+        'still reads a name that ends in a number as a name in "%s"',
+        async (value) => {
           const campaign = novaCopy();
-          campaign.brand.name = name;
-          at(at(campaign.scenes, 0).text, 0).value = `Meet ${name}.`;
+          campaign.brand.name = 'Nova 9';
+          at(at(campaign.scenes, 0).text, 0).value = value;
           expect(await codes(campaign)).toEqual([]);
         },
       );
@@ -513,7 +537,7 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(at(campaign.scenes, 0).text, 0).value = 'x'.repeat(DEFAULT_TEXT_LIMITS.headline + 1);
       const { issues } = await validateCampaign(campaign, {
-        sceneRegistry: { hero: { text: { headline: 200 } }, stat: {}, outro: {} },
+        sceneRegistry: { ...registry, 'word-slam': { text: { headline: 200 } } },
       });
       expect(issues).toEqual([]);
     });

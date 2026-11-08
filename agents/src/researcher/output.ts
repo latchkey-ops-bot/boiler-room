@@ -82,13 +82,21 @@ const slug = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be a lowercase slug such as "pricing-page"');
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'must be an opaque #RRGGBB colour');
-const claim_ids = z.array(slug).describe('Ids of claims in `claims` that back this item.');
+const claim_ids = z
+  .array(slug)
+  .min(1)
+  .describe(
+    'Ids of claims in `claims` that back this item, at least one. Every number in the item must be in the quote of a claim it cites.',
+  );
+/** A brief fact in plain words, with the claims whose quotes back it. */
+const cited = (what: string) =>
+  z.strictObject({ text: z.string().min(1).describe(what), claim_ids });
 const fileId = z.string().regex(FILE_ID, 'must be a Naive file id such as "fil_abc123"');
 
 const brief = z.strictObject({
   product_name: z.string().min(1),
-  one_liner: z.string().min(1).describe('What the product is, in one plain sentence.'),
-  what_it_is: z.string().min(1).describe('A short paragraph in plain words, from the live site.'),
+  one_liner: cited('What the product is, in one plain sentence.'),
+  what_it_is: cited('A short paragraph in plain words, from the live site.'),
   audiences: z.array(z.strictObject({ who: z.string().min(1), claim_ids })),
   features: z.array(
     z.strictObject({ name: z.string().min(1), what_it_does: z.string().min(1), claim_ids }),
@@ -96,7 +104,9 @@ const brief = z.strictObject({
   pricing: z
     .strictObject({
       summary: z.string().min(1),
-      free_trial: z.string().min(1).nullable(),
+      free_trial: cited('The free trial, as the site states it.')
+        .nullable()
+        .describe('Null when the site offers no free trial.'),
       plans: z.array(
         z.strictObject({
           name: z.string().min(1),
@@ -122,11 +132,11 @@ const brief = z.strictObject({
     )
     .describe('Calls to action, verbatim.'),
   headline_claim_id: slug.nullable().describe('The claim that quotes the home page headline.'),
-  positioning_note: z
-    .string()
-    .min(1)
+  positioning_note: cited(
+    'How the live site differs from any description you were given, citing what the site says.',
+  )
     .nullable()
-    .describe('How the live site differs from any description you were given, or null.'),
+    .describe('Null when you were given no description, or the site matches it.'),
   non_claims: z
     .array(
       z.strictObject({ text: z.string().min(1), source_url: httpUrl, reason: z.string().min(1) }),

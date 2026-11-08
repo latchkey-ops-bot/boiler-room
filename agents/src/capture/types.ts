@@ -25,8 +25,15 @@ export interface RawCta {
 }
 
 export interface RawStyles {
-  /** The colour painted behind the body: its own, the root element's, or the canvas white. */
+  /** The page background html and body paint: the body's opaque colour, else html's, else white. */
   root: string;
+  /**
+   * Whether html or body paints an opaque colour. False when both are transparent, so `root` is
+   * only the browser's white canvas. Absent in captures from before it was measured.
+   */
+  rootSet?: boolean;
+  /** Cookie banners, dialogs, scrims and fixed overlays hidden before the colours were measured. */
+  overlays?: number;
   /** The painted background at sample points across the first screens, weighted by count. */
   backgrounds: WeightedColor[];
   /**
@@ -115,14 +122,27 @@ export interface RawLink {
   where: 'nav' | 'header' | 'footer' | 'body';
 }
 
+/**
+ * A control that sets the billing period prices are shown for, as the page loads: a switch, tab,
+ * radio or toggle button whose label names a year or a month, and whether it is on (checked,
+ * selected or pressed).
+ */
+export interface RawControl {
+  role: string;
+  label: string;
+  on: boolean;
+}
+
 export interface RawPage {
   url: string;
   title: string;
   lang: string;
   /**
-   * `rendered` is what a visitor sees, `dom` all text, `clean` the text outside mockups and outside
-   * concealed text, `illustrative` the mockup text, and `concealed` text styled so nobody can see
-   * it: the colour of what is behind it, too small, or in a box too small to show it.
+   * `rendered` is what a visitor sees, `dom` all text, `clean` the visible text outside mockups,
+   * `illustrative` the mockup text, `concealed` text styled so nobody can see it (the colour of
+   * what is behind it, too small, or in a box too small to show it), and `hidden` text the page
+   * does not show as it loads: aria-hidden, not displayed or not visible, in a closed `<details>`
+   * or a collapsed accordion panel.
    */
   text: {
     rendered: string;
@@ -131,12 +151,17 @@ export interface RawPage {
     clean: string;
     illustrative: string;
     concealed: string;
+    hidden: string;
   };
   headings: { level: number; text: string }[];
   links: RawLink[];
   external: RawLink[];
   ctas: RawCta[];
   loginLinks: RawLink[];
+  /** Billing-period controls and their state as the page loads. */
+  controls: RawControl[];
+  /** Visible fields that ask for an email address or a phone number: a form, not a product. */
+  contactFields: number;
   ui: RawUiCandidate[];
   media: { kind: 'video' | 'iframe'; src: string }[];
   meta: Record<string, string>;

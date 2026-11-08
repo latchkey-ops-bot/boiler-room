@@ -39,6 +39,7 @@ describe('@boiler-room/schema', () => {
         'tintedGround',
         'toFrame',
         'toOklch',
+        'unbackedNumbers',
         'validateCampaign',
         'validateResearchParts',
       ].sort(),

@@ -4,6 +4,7 @@ import {
   buildTemplate,
   type CaptureManifest,
   guessBrandName,
+  productUiNote,
 } from '../src/capture/manifest.ts';
 import { checkResearch } from '../src/researcher/gate.ts';
 import { bundle, SITE } from './fixtures.ts';
@@ -322,8 +323,11 @@ describe('buildTemplate', () => {
       asset.src = `naive://files/${ids.get(id)}`;
     filled.evidence.pages_file_id = 'fil_pages1';
     filled.evidence.capture_file_id = 'fil_capture1';
-    filled.brief.one_liner = 'Orbitly plans social media posts for small teams.';
-    filled.brief.what_it_is = 'A social media scheduler.';
+    filled.brief.one_liner = {
+      text: 'Orbitly plans social posts.',
+      claim_ids: ['plan-speed'],
+    };
+    filled.brief.what_it_is = { text: 'Social scheduling.', claim_ids: ['plan-speed'] };
     filled.brief.product_ui.notes = 'Only an HTML mockup with sample data.';
     filled.claims = [
       {
@@ -345,6 +349,8 @@ describe('guessBrandName', () => {
     [{}, 'Orbitly | Social scheduling for teams', 'orbitly.example.org', '', 'Orbitly'],
     [{}, 'Social scheduling for teams - Orbitly', 'www.orbitly.example.org', '', 'Orbitly'],
     [{}, 'Example Domain', 'example.com', '', 'Example Domain'],
+    // danluu.com: its about page is titled "About danluu.com", and the site writes its name so.
+    [{}, 'About danluu.com', 'danluu.com', '', 'danluu.com'],
     [
       {},
       'Welcome to the best scheduling tool for every team on the planet',
@@ -365,5 +371,55 @@ describe('guessBrandName', () => {
       source: 'text',
     });
     expect(brandNameGuess({}, '', 'zq.example', '', 'The zqx project').source).toBe('domain');
+    expect(brandNameGuess({}, '', 'zq.example', '', 'About zq.example, the blog')).toEqual({
+      name: 'zq.example',
+      source: 'text',
+    });
+  });
+});
+
+// allbirds.com: the brief said "No login, demo or sign-in page was found", but the home page has
+// no sign-in link and sign-in pages are never loaded, so the capture could not know.
+describe('productUiNote', () => {
+  it('says what was probed and which sign-in links were seen, and nothing it did not check', () => {
+    const probes = [
+      {
+        path: '/demo',
+        url: `${SITE}demo`,
+        status: 200,
+        final_url: `${SITE}demo/team/eng`,
+        content_type: 'text/html',
+        title: 'Engineering',
+        length: 900,
+        found: true,
+        reason: 'rendered in a browser: HTTP 200',
+        rendered: true,
+      },
+      {
+        path: '/tour',
+        url: `${SITE}tour`,
+        status: 404,
+        final_url: null,
+        content_type: null,
+        title: '',
+        length: 0,
+        found: false,
+        reason: 'HTTP 404',
+      },
+    ];
+    const linked = productUiNote(
+      manifest({
+        probes,
+        login_links: [
+          { url: 'https://app.orbitly.example.org/login', text: 'Log in', where: 'nav' },
+        ],
+      }),
+    );
+    expect(linked).toBe(
+      `Probed /demo found at ${SITE}demo/team/eng, /tour not found, judged on the page a browser rendered where the server answers every path alike. The home page links to sign-in or app pages: Log in (https://app.orbitly.example.org/login). Sign-in pages are never loaded, so nothing behind them was seen.`,
+    );
+    const none = productUiNote(manifest({ probes: probes.slice(1), login_links: [] }));
+    expect(none).toContain('whether the product has one was not checked');
+    expect(none).not.toMatch(/no (login|sign-in) (page )?(was|is) found/i);
   });
 });

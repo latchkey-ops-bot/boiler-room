@@ -1,0 +1,1 @@
+ALTER TABLE `approvals` ADD `confirmed_claims_json` text;

@@ -15,6 +15,8 @@ export interface Candidate {
   hex: string;
   score: number;
   sources: string[];
+  /** How many elements paint it: buttons, links and runs of text. A custom property is none. */
+  count?: number;
 }
 
 export interface DerivedColors {
@@ -54,14 +56,17 @@ function tally<T extends { hex: string; score: number }>(
   return item;
 }
 
-/** Share of samples the body colour needs to count as the page background. */
+/** Below this share of the samples, the body colour may be painted over by a wrapper. */
 const ROOT_SHARE = 0.25;
+/** The share of the samples one other surface needs to count as a wrapper painted over the body. */
+const WRAPPER_SHARE = 0.5;
 
 /**
- * The colour the page is painted with. The body's own colour wins when it covers at least a
- * quarter of the first screens, so a large dark product shot does not turn a light site dark.
- * Otherwise the most sampled colour wins, which handles a site that paints a wrapper instead of
- * the body.
+ * The colour the page is painted with: what html and body paint. A large dark product shot or a
+ * dialog's scrim does not turn a light site dark. Only a site that paints a wrapper over the body
+ * overrides it, seen as one other surface on at least half of the samples across the first screens
+ * while the body's colour is on less than a quarter. With html and body both transparent, the most
+ * sampled surface wins.
  */
 export function pickBackground(styles: RawStyles): { hex: string; surfaces: string[] } {
   const totals: { hex: string; score: number }[] = [];
@@ -79,8 +84,11 @@ export function pickBackground(styles: RawStyles): { hex: string; surfaces: stri
   const rootShare = root
     ? (totals.find((item) => distance(item.hex, root) < SAME)?.score ?? 0) / (all || 1)
     : 0;
-  if (root && (all === 0 || rootShare >= ROOT_SHARE)) return { hex: root, surfaces };
-  return { hex: totals[0]?.hex ?? root ?? '#FFFFFF', surfaces };
+  const top = totals[0];
+  if (!root || styles.rootSet === false) return { hex: top?.hex ?? root ?? '#FFFFFF', surfaces };
+  if (all === 0 || rootShare >= ROOT_SHARE) return { hex: root, surfaces };
+  const wrapper = top && distance(top.hex, root) >= SAME && top.score >= all * WRAPPER_SHARE;
+  return { hex: wrapper ? top.hex : root, surfaces };
 }
 
 function textTotals(texts: WeightedColor[], background: string): { hex: string; score: number }[] {
@@ -129,10 +137,14 @@ export function pickForeground(styles: RawStyles, background: string): string | 
   return main.sort((a, b) => contrast(b.hex, background) - contrast(a.hex, background))[0]?.hex;
 }
 
+/** Muted text has at most this share of the foreground's contrast: visibly quieter. */
+const MUTED_SHARE = 0.7;
+
 /**
  * Secondary text: the most used grey of the body copy that is clearly a different colour from the
- * foreground, still clears 3:1, and has less contrast than the foreground. Muted is quieter than
- * the text colour by definition, so it can never be the brighter of the two.
+ * foreground, still clears 3:1, and has at most 70% of the foreground's contrast. Muted is quieter
+ * than the text colour by definition, so it is never the brighter of the two, nor a second shade
+ * of the text colour itself, as a near-black beside black or a light grey beside white is.
  */
 export function pickMuted(
   styles: RawStyles,
@@ -146,7 +158,7 @@ export function pickMuted(
         distance(item.hex, foreground) >= 40 &&
         chroma(item.hex) < MIN_BRAND_CHROMA &&
         contrast(item.hex, background) >= MIN_PRIMARY &&
-        contrast(item.hex, background) < strongest,
+        contrast(item.hex, background) <= strongest * MUTED_SHARE,
     )?.hex ?? null
   );
 }
@@ -229,13 +241,14 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
     .filter(
       (hex) => chroma(hex) < MIN_BRAND_CHROMA && fills.some((fill) => distance(fill, hex) < SAME),
     );
-  const add = (color: SeenColor | null, weight: number, source: string) => {
+  const add = (color: SeenColor | null, weight: number, source: string, elements = 1) => {
     if (!color || color.alpha < 0.5) return;
     const hex = opaque(color, background);
     if (distance(hex, background) < SAME || BROWSER_DEFAULTS.has(hex)) return;
     const neutralBrand = declaredNeutral.some((item) => distance(item, hex) < SAME);
     if (chroma(hex) < MIN_BRAND_CHROMA && !neutralBrand) return;
-    const item = tally(list, hex, weight, () => ({ hex, score: 0, sources: [] }));
+    const item = tally(list, hex, weight, () => ({ hex, score: 0, sources: [], count: 0 }));
+    item.count = (item.count ?? 0) + elements;
     if (!item.sources.includes(source)) item.sources.push(source);
   };
   for (const cta of styles.ctas) {
@@ -250,7 +263,7 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
       add(cta.color, 2 * prominence, `${cta.placement} button text`);
     }
   }
-  for (const link of styles.links) add(link, Math.min(link.weight, 8), 'links');
+  for (const link of styles.links) add(link, Math.min(link.weight, 8), 'links', link.weight);
   for (const text of styles.texts) {
     add(
       text,
@@ -258,12 +271,46 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
       text.heading ? 'headings' : 'text',
     );
   }
+  // A custom property only declares a colour; it counts for the colour a visitor sees on the
+  // page, never for one no element paints.
+  const painted = list.map((item) => item.hex);
   for (const variable of styles.colorVariables) {
     const role = variableRole(variable.name);
-    if (role) add(variable, role.weight, `var ${variable.name}`);
+    if (!role || variable.alpha < 0.5) continue;
+    const hex = opaque(variable, background);
+    if (painted.some((seen) => distance(seen, hex) < SAME))
+      add(variable, role.weight, `var ${variable.name}`, 0);
   }
   return list.sort((a, b) => b.score - a.score);
 }
+
+/**
+ * The grey or black the site's drawn buttons are filled with: a monochrome brand's buttons are
+ * its brand colour, as a near-black #212121 is even where the text is pure black. The most used
+ * neutral fill outside the footer that clears 3:1 on the background, on a button in the
+ * navigation or the first screen, or on two buttons further down.
+ */
+export function buttonFill(styles: RawStyles, background: string): string | undefined {
+  const fills: { hex: string; score: number }[] = [];
+  for (const cta of styles.ctas) {
+    if (cta.placement === 'footer' || !cta.background || cta.background.alpha < 0.5) continue;
+    const hex = opaque(cta.background, background);
+    if (chroma(hex) >= MIN_BRAND_CHROMA || distance(hex, background) < SAME) continue;
+    if (contrast(hex, background) < MIN_PRIMARY) continue;
+    const prominence = cta.placement === 'nav' || cta.placement === 'hero' ? 2 : 1;
+    tally(fills, hex, prominence, () => ({ hex, score: 0 }));
+  }
+  // One button in the body, as a chip in another company's colours, is not the brand's fill.
+  return fills.filter((item) => item.score >= 2).sort((a, b) => b.score - a.score)[0]?.hex;
+}
+
+/**
+ * A colour the site uses widely: painted by at least two elements, with at least a quarter of the
+ * top candidate's score. One tab's or one badge's colour is not the brand's.
+ */
+const WIDELY_USED = 0.25;
+const widelyUsed = (item: Candidate, top: number) =>
+  (item.count ?? 2) >= 2 && item.score >= top * WIDELY_USED;
 
 /**
  * The radius of the brand's buttons, or of its cards when it has no drawn buttons. 999 means pill.
@@ -307,6 +354,10 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   let { hex: background, surfaces } = pickBackground(styles);
   if (styles.backgrounds.length === 0)
     notes.push('No painted background was sampled, so white was assumed.');
+  if (styles.overlays)
+    notes.push(
+      `${styles.overlays} cookie banner(s), dialog(s), scrim(s) or fixed overlay(s) were hidden before the colours were measured.`,
+    );
 
   const candidates = brandCandidates(styles, background);
   let primary = candidates[0]?.hex;
@@ -315,7 +366,12 @@ export function deriveColors(styles: RawStyles): DerivedColors {
 
   if (primary && contrast(primary, background) < MIN_PRIMARY) {
     const measured = primary;
-    const alternative = candidates.find((item) => contrast(item.hex, background) >= MIN_PRIMARY);
+    const top = candidates[0]?.score ?? 0;
+    // The next brand colour must be one the site uses widely: a single tab's or badge's colour is
+    // not the brand's because the brand's own colour is too light to be primary.
+    const alternative = candidates.find(
+      (item) => contrast(item.hex, background) >= MIN_PRIMARY && widelyUsed(item, top),
+    );
     const surface = surfaces.find(
       (hex) =>
         hex !== background && contrast(measured, hex) >= MIN_PRIMARY && chooseForeground(hex),
@@ -332,7 +388,7 @@ export function deriveColors(styles: RawStyles): DerivedColors {
       primary = alternative.hex;
     } else {
       notes.push(
-        `The brand colour ${measured} has only ${contrast(measured, background).toFixed(2)}:1 on ${background} and no other site colour clears 3:1, so the text colour is primary. ${measured} is kept as an accent.`,
+        `The brand colour ${measured} has only ${contrast(measured, background).toFixed(2)}:1 on ${background} and no other colour the site uses widely clears 3:1, so ${buttonFill(styles, background) ? 'the fill of its buttons' : 'the text colour'} is primary. ${measured} is kept as an accent.`,
       );
       primary = undefined;
     }
@@ -346,8 +402,13 @@ export function deriveColors(styles: RawStyles): DerivedColors {
     );
   }
   if (!primary) {
-    primary = foreground;
-    if (candidates.length === 0) {
+    const fill = buttonFill(styles, background);
+    primary = fill ?? foreground;
+    if (fill && candidates.length === 0)
+      notes.push(
+        `The site uses no saturated colour; its buttons are filled with ${fill}, so that is primary.`,
+      );
+    else if (candidates.length === 0) {
       const defaults = [...styles.links, ...styles.texts]
         .map((item) => item.hex.toUpperCase())
         .filter((hex, index, list) => BROWSER_DEFAULTS.has(hex) && list.indexOf(hex) === index);

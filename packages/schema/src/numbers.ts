@@ -113,6 +113,8 @@ const SCALES = new Map(
   }),
 );
 
+const SCALE_WORDS = [...SCALES.keys()].sort((a, b) => b.length - a.length).join('|');
+
 const CURRENCIES = new Map(
   Object.entries({
     $: 'USD',
@@ -345,6 +347,27 @@ function countedPhrase(words: readonly string[]): string[] {
     .map(singular);
 }
 
+const UNIT_OR_CURRENCY_WORDS = [...UNIT_WORDS, ...CURRENCY_WORDS]
+  .sort((a, b) => b.length - a.length)
+  .join('|');
+
+/**
+ * Text that, right after a number, changes what the number states: a percent sign, a multiplier,
+ * a scale, a unit or a currency. "Nova 9" names a product, and "Nova 9%" or "Nova 9 times" does not.
+ */
+const STATES_MORE = new RegExp(
+  `^[\\s-]*(?:%|per[\\s-]?cent\\b|percent\\b|pct\\b|[x×](?![\\p{L}\\p{N}])|times\\b|fold\\b|` +
+    `(?:${SCALE_WORDS})(?![\\p{L}\\p{N}])|(?:${UNIT_OR_CURRENCY_WORDS})(?!\\p{L})|[$€£¥₹₩])`,
+  'iu',
+);
+/** A sign before a number that makes it money or a rank, such as the "$" of "$3M". */
+const MONEY_OR_RANK_BEFORE = /(?:[$€£¥₹₩#]|\bno\.)\s?$/iu;
+
+/** True when the text after a number, `after`, or before it, `before`, would make it a statistic. */
+export function changesNumber(before: string, after: string): boolean {
+  return STATES_MORE.test(spelledToDigits(after, 'strict')) || MONEY_OR_RANK_BEFORE.test(before);
+}
+
 /** What may sit between the bounds of a range. */
 const RANGE_GAP = /^\s*(?:-|–|—|to)\s*$/i;
 
@@ -382,9 +405,47 @@ function readMultiples(text: string, mode: ReadMode): string {
     .replace(MULTIPLES, multiple);
 }
 
+/** A decimal digit of any script but Latin. NFKC folds full width digits, and not these. */
+const OTHER_DIGIT = /[^\P{Nd}0-9]/gu;
+const IS_DIGIT = /\p{Nd}/u;
+
+/**
+ * A digit's value. Unicode encodes every script's decimal digits as runs of ten, 0 to 9, some runs
+ * back to back, so the value is the distance from where the run starts, modulo ten.
+ */
+function digitValue(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  let start = code;
+  while (start > 0 && IS_DIGIT.test(String.fromCodePoint(start - 1))) start -= 1;
+  return (code - start) % 10;
+}
+
+/** Arabic's own percent sign and separators, which NFKC leaves as they are. */
+const ARABIC_PUNCTUATION: Record<string, string> = { '٪': '%', '٫': '.', '٬': ',' };
+
+/** Latin digits for every script's, so "٧٠٪" and "७०%" read as 70%. */
+const latinDigits = (text: string) =>
+  text
+    .replace(OTHER_DIGIT, (char) => String(digitValue(char)))
+    .replace(/[٪٫٬]/g, (char) => ARABIC_PUNCTUATION[char] ?? char);
+
+const SIGNS = '[$€£¥₹₩#]';
+const STATEMENT_SUFFIX = `\\s?(?:${SCALE_WORDS})?\\s?(?:%|per[\\s-]?cent\\b|pct\\b|[x×](?![\\p{L}\\p{N}])|times\\b|fold\\b)`;
+/**
+ * A number glued to the letter before it, where it reads as a percentage, a multiplier, money or
+ * a rank: "by40%", "l0x", "Get$50", "Rated#1". A space is put before it, so it is read. A plain
+ * number glued to letters, as in "Web3" or "B2B", is still part of a name.
+ */
+// Not inside a prefixed dollar sign, such as the "CA" of "CA$10", which is its own currency.
+const NOT_DOLLAR_PREFIX = '(?!(?<=(?<![\\p{L}\\p{N}_])(?:us|ca|au|nz|hk|a|c|s|r))\\$)';
+const GLUED_STATEMENT = new RegExp(
+  `(?<=\\p{L})${NOT_DOLLAR_PREFIX}(?:(?=(?:${SIGNS}\\s?)?\\.?\\d[\\d,]*(?:\\.\\d+)?${STATEMENT_SUFFIX})|(?=${SIGNS}\\s?\\.?\\d))`,
+  'giu',
+);
+
 function spelledToDigits(text: string, mode: ReadMode): string {
-  const digits = text
-    .normalize('NFKC')
+  const digits = latinDigits(text.normalize('NFKC'))
+    .replace(GLUED_STATEMENT, ' ')
     .replace(/\bnumber[\s-]one\b/gi, '#1')
     .replace(new RegExp(`\\b(${CARDINAL}|${MAGNITUDE})fold\\b`, 'gi'), '$1 fold')
     .replace(
@@ -505,6 +566,26 @@ function readToken(match: RegExpExecArray, normalized: string): NumericToken {
     noun: unit === undefined ? trailing?.word : undefined,
     nouns: unit === undefined || unit === VAGUE_UNIT ? countedPhrase(counted) : [],
   };
+}
+
+/**
+ * True when the text states a count or a measure: a plain number with a unit after it ("300 hours",
+ * "5min"), or with a lower case word after it ("300 teams"). A word joined to a number that is not
+ * a unit ("37signals", "1Password") and a capitalised word after one ("Nova 2 Pro", "Area 51
+ * Studios") read as parts of a name.
+ */
+export function statesQuantity(text: string): boolean {
+  const normalized = spelledToDigits(text, 'strict');
+  return [...normalized.matchAll(TOKEN)].some((match) => {
+    if (readToken(match, normalized).kind !== 'number') return false;
+    const rest = normalized.slice(match.index + match[0].length);
+    const { attached, spaced, next } = TRAILING_WORDS.exec(rest)?.groups ?? {};
+    if (attached) return UNITS.has(attached.toLowerCase());
+    if (!spaced) return false;
+    const isUnit = (word: string | undefined) =>
+      word !== undefined && UNITS.has(word.toLowerCase());
+    return isUnit(spaced) || isUnit(next) || /^\p{Ll}/u.test(spaced);
+  });
 }
 
 /** True when the text is one number and nothing else, such as "1,200", "10K", "#1" or "Ten". */

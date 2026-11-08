@@ -25,6 +25,7 @@ function page(
       meta: text.meta ?? '',
       clean: text.clean ?? dom,
       illustrative: text.illustrative ?? '',
+      ...(text.hidden === undefined ? {} : { hidden: text.hidden }),
     },
   };
 }
@@ -37,7 +38,13 @@ const HOME_RENDERED = [
   'Start free trial',
   'Followers this week: 12,480',
   'Trusted by 3,200 small teams.',
+  'Is there a free plan?',
+  'Yes, the Solo plan is free for one account.',
+  'Can I pay monthly?',
 ].join('\n');
+
+/** A collapsed FAQ answer: in the document, not shown until the question is opened. */
+export const HIDDEN_ANSWER = 'Yes, Team is $30 per month when billed monthly.';
 
 export function bundle(): PagesBundle {
   return {
@@ -49,9 +56,10 @@ export function bundle(): PagesBundle {
         '/',
         {
           rendered: HOME_RENDERED,
-          dom: `${HOME_RENDERED.replace(/\n/g, ' ')} Is there a free plan? Yes, the Solo plan is free for one account.`,
-          clean: `${HOME_RENDERED.replace('Followers this week: 12,480', '').replace(/\n/g, ' ')} Is there a free plan? Yes, the Solo plan is free for one account.`,
+          dom: `${HOME_RENDERED.replace(/\n/g, ' ')} ${HIDDEN_ANSWER}`,
+          clean: HOME_RENDERED.replace('Followers this week: 12,480', '').replace(/\n/g, ' '),
           illustrative: 'Followers this week: 12,480',
+          hidden: HIDDEN_ANSWER,
           meta: 'Orbitly | Social scheduling\nOrbitly helps small teams plan social posts.',
         },
         'Orbitly | Social scheduling',
@@ -127,7 +135,7 @@ export function output(): ResearchOutput {
         id: 'team-price',
         text: 'The Team plan costs $24 a month billed yearly',
         sourceUrl: 'https://orbitly.example.org/pricing',
-        quote: '$24 per month, billed yearly',
+        quote: 'Team $24 per month, billed yearly',
         status: 'extracted',
       },
       {
@@ -135,6 +143,13 @@ export function output(): ResearchOutput {
         text: 'The Solo plan is free',
         sourceUrl: SITE,
         quote: 'Yes, the Solo plan is free for one account.',
+        status: 'extracted',
+      },
+      {
+        id: 'small-teams',
+        text: 'Orbitly is trusted by 3,200 small teams',
+        sourceUrl: SITE,
+        quote: 'Trusted by 3,200 small teams.',
         status: 'extracted',
       },
     ],
@@ -155,9 +170,15 @@ export function output(): ResearchOutput {
     },
     brief: {
       product_name: 'Orbitly',
-      one_liner: 'Orbitly plans social media posts for small teams.',
-      what_it_is: 'A social media scheduler.',
-      audiences: [{ who: 'Small teams', claim_ids: [] }],
+      one_liner: {
+        text: 'Orbitly plans social posts for small teams.',
+        claim_ids: ['plan-speed', 'small-teams'],
+      },
+      what_it_is: {
+        text: 'Social scheduling that plans a month of posts in 10 minutes.',
+        claim_ids: ['plan-speed'],
+      },
+      audiences: [{ who: 'Small teams', claim_ids: ['small-teams'] }],
       features: [
         {
           name: 'Planning',
@@ -166,13 +187,13 @@ export function output(): ResearchOutput {
         },
       ],
       pricing: {
-        summary: 'A free Solo plan and a paid Team plan',
-        free_trial: 'Start free trial',
+        summary: 'A free Solo plan, and Team at $24 per month billed yearly',
+        free_trial: null,
         plans: [
           { name: 'Solo', price: 'Free', claim_ids: ['free-plan'] },
           { name: 'Team', price: '$24 per month', claim_ids: ['team-price'] },
         ],
-        claim_ids: [],
+        claim_ids: ['free-plan', 'team-price'],
       },
       ctas: [
         {

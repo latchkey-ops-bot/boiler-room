@@ -108,6 +108,11 @@ export interface ProbeResult {
   length: number;
   found: boolean;
   reason: string;
+  /**
+   * Judged on the page a browser rendered, because the server sends every path the same app shell.
+   * The probed address is then the one to capture: it routes to the page in the browser.
+   */
+  rendered?: boolean;
 }
 
 export interface ProbeResponse {
@@ -119,6 +124,21 @@ export interface ProbeResponse {
   /** The first `<h1>` the server sent. */
   heading?: string;
 }
+
+/** The probes for a public demo. Once one is found, the others need no rendering. */
+export const DEMO_PROBES: ReadonlySet<string> = new Set([
+  '/demo',
+  '/tour',
+  '/playground',
+  '/sandbox',
+]);
+
+/** Whether a probe's server answer was the site's answer for a missing page. */
+export function answeredAsMissing(probe: ProbeResult): boolean {
+  return probe.reason.startsWith(SOFT_404);
+}
+
+const SOFT_404 = 'same as the answer for a missing page';
 
 /**
  * Whether a probed path is a real page. A status code is not enough (trap: soft 404s answer 200
@@ -158,8 +178,7 @@ export function judgeProbe(
     const sameTitle = baseline.title.trim() === response.title.trim();
     const close =
       baseline.length > 0 && Math.abs(baseline.length - response.length) / baseline.length < 0.05;
-    if (sameTitle && close)
-      return verdict(false, 'same as the answer for a missing page (soft 404)');
+    if (sameTitle && close) return verdict(false, `${SOFT_404} (soft 404)`);
   }
   if (!linked && !namesProbe(path, response))
     return verdict(
@@ -263,10 +282,12 @@ export function duplicateOf<T extends PageIdentity>(
 /** A page that loaded as HTML but gave no text, or failed: the capture may load it once more. */
 export function needsRecapture(page: {
   error: string | null;
+  refused?: boolean;
   status: number | null;
   content_type: string | null;
   text_chars?: number;
 }): boolean {
+  if (page.refused) return false;
   if (page.error) return true;
   const html = page.status !== null && page.status < 400 && /html/.test(page.content_type ?? '');
   return html && (page.text_chars ?? 1) === 0;
@@ -331,9 +352,12 @@ export function suggestPages(
     if (first) take(first);
   }
   for (const probe of probes) {
+    // A probe judged on the rendered page routes there in the browser from the probed address,
+    // which discover already loaded: capturing that address loads the same page, counted once.
+    const url = probe.rendered ? probe.url : (probe.final_url ?? probe.url);
     if (probe.found)
       take({
-        url: probe.final_url ?? probe.url,
+        url,
         text: probe.path,
         where: 'probe',
         kind: classifyLink(probe.final_url ?? probe.url) === 'product' ? 'product' : 'demo',
