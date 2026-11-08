@@ -81,7 +81,7 @@ export function breakPieces(text: string): Piece[] {
 
 const joined = (pieces: readonly Piece[]) =>
   pieces
-    .map(({ text, space }, index) => (index > 0 && pieces[index - 1]?.space ? ` ${text}` : text))
+    .map(({ text }, index) => (index > 0 && pieces[index - 1]?.space ? ` ${text}` : text))
     .join('');
 
 /** Fills lines in order. Undefined when one piece is wider than a line on its own. */
