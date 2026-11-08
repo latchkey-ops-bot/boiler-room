@@ -12,7 +12,14 @@ import {
 
 import { GithubApi, type PullRequest } from '../github.ts';
 import { type Context, check, type Scenario } from '../types.ts';
-import { checkPullRequest, HELPER_PATH, HELPER_TEST_PATH, type LocalChecks } from './fixtures.ts';
+import {
+  CODE_REPO,
+  checkPullRequest,
+  HELPER_PATH,
+  HELPER_TEST_PATH,
+  type LocalChecks,
+  ownPullRequest,
+} from './fixtures.ts';
 
 /**
  * The engineer's scenarios. The engineer clone is live; everyone else is an inert clone. The real
@@ -23,12 +30,30 @@ import { checkPullRequest, HELPER_PATH, HELPER_TEST_PATH, type LocalChecks } fro
 
 const github = () => new GithubApi('engineering');
 
-/** The pull requests the engineer under test opened, found by their eval head branch. */
-async function engineerPrs(context: Context): Promise<PullRequest[]> {
+/**
+ * The pull requests the engineer under test opened: on its eval head branch, from a branch of the
+ * code repo itself and by the engineering account. The repo is public, so anyone can open a pull
+ * request from a fork on a branch of the same name; `outside` counts those, which are never run or
+ * graded.
+ */
+async function engineerPrs(
+  context: Context,
+): Promise<{ prs: PullRequest[]; login: string; outside: string[] }> {
   const slug = context.vars.slug ?? '@@';
-  return (await github().evalPrs(REPOS.code.name)).filter((pr) =>
+  const api = github();
+  const login = await api.login();
+  const named = (await api.evalPrs(REPOS.code.name)).filter((pr) =>
     pr.head.ref.startsWith(`feat/${slug}`),
   );
+  return {
+    prs: named.filter((pr) => ownPullRequest(pr, login)),
+    login,
+    outside: named
+      .filter((pr) => !ownPullRequest(pr, login))
+      .map(
+        (pr) => `#${pr.number} ${pr.head.repo?.full_name ?? 'deleted fork'} by ${pr.user.login}`,
+      ),
+  };
 }
 
 const local = new Map<string, LocalChecks>();
@@ -59,11 +84,14 @@ Files: those two only. Nothing else changes.`,
     },
   ],
   checks: async (snapshot, context) => {
-    const prs = await engineerPrs(context);
+    const { prs, login } = await engineerPrs(context);
     const pr = prs[0];
     const card = seeded(snapshot, 'eng');
     const files = pr ? await github().prFiles(REPOS.code.name, pr.number) : [];
-    const result = pr ? checkPullRequest(pr.number, files) : { pass: false, steps: [] };
+    // Only a pull request from a branch of the code repo by the engineering account is ever run,
+    // and then only in the sandbox: see checkPullRequest.
+    const result =
+      pr && prs.length === 1 ? checkPullRequest(pr, files, login) : { pass: false, steps: [] };
     local.set(context.names.run, result);
     const commits = pr
       ? await github().call<{ commit: { message: string } }[]>(
@@ -74,7 +102,7 @@ Files: those two only. Nothing else changes.`,
     const messages = commits?.data.map((item) => item.commit.message) ?? [];
     return [
       check(
-        'exactly one pull request, from feat/<slug>-1 into dev',
+        `exactly one pull request, from feat/<slug>-1 of ${CODE_REPO} into dev`,
         prs.length === 1 && pr?.base.ref === 'dev' && pr.head.ref === `feat/${context.vars.slug}-1`,
         prs.map((item) => `${item.head.ref} -> ${item.base.ref}`).join('; '),
       ),
@@ -108,9 +136,10 @@ Files: those two only. Nothing else changes.`,
     ];
   },
   facts: async (_snapshot, context) => {
-    const prs = await engineerPrs(context);
+    const { prs, outside } = await engineerPrs(context);
     const pr = prs[0];
     return {
+      pull_requests_from_outside_never_run: outside,
       pull_requests: prs.map((item) => ({
         url: item.html_url,
         head: item.head.ref,

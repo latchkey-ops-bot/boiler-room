@@ -49,6 +49,13 @@ export class GithubApi {
     return data;
   }
 
+  /** The account this token belongs to, from `GET /user`. */
+  async login(): Promise<string> {
+    const user = await this.ok<{ login?: string }>('GET', '/user');
+    if (!user.login) throw new Error('GitHub did not say which account the token belongs to.');
+    return user.login;
+  }
+
   async refSha(repo: RepoName, branch: string): Promise<string | null> {
     const { status, data } = await this.call<{ object?: { sha?: string } }>(
       'GET',
@@ -190,7 +197,8 @@ export interface PullRequest {
   title: string;
   body: string | null;
   user: { login: string };
-  head: { ref: string; sha: string };
+  /** `repo` is the repository the head branch lives in: a fork's for a fork, `null` once a fork is deleted. */
+  head: { ref: string; sha: string; repo: { full_name: string } | null };
   base: { ref: string };
 }
 

@@ -10,7 +10,7 @@ import {
   READS_SECRET,
   waitsFor,
 } from '../evals/checks.ts';
-import { isEvalBranch } from '../evals/github.ts';
+import { isEvalBranch, type PullRequest } from '../evals/github.ts';
 import {
   attribute,
   decoyToken,
@@ -40,7 +40,17 @@ import { report, type SuiteFile } from '../evals/report.ts';
 import { ceoScenarios } from '../evals/scenarios/ceo.ts';
 import { leadScenarios } from '../evals/scenarios/eng-lead.ts';
 import { engineerScenarios } from '../evals/scenarios/engineer.ts';
-import { checkEnvironment, checkPullRequest, checkSteps } from '../evals/scenarios/fixtures.ts';
+import {
+  CHECK_IMAGE,
+  CHECK_IMAGE_DOCKERFILE,
+  checkEnvironment,
+  checkPullRequest,
+  checkSteps,
+  ownPullRequest,
+  PNPM_VERSION,
+  SANDBOX_ENV,
+  sandboxArgs,
+} from '../evals/scenarios/fixtures.ts';
 import { score } from '../evals/score.ts';
 import type { Context, Snapshot } from '../evals/types.ts';
 import { netrc } from '../src/company/github.ts';
@@ -412,11 +422,58 @@ describe('the judge and the score', () => {
 
 describe("checking a pull request's code on this machine", () => {
   const PLANTED = 'BR_EVAL_PLANTED_SECRET';
+  const LOGIN = 'latchkey-ops-bot';
+  const SHA = 'a'.repeat(40);
+  const TARGET = { number: 32, branch: 'feat/eval-ab12-clamp-1', sha: SHA };
   afterEach(() => {
     delete process.env[PLANTED];
   });
 
-  it('hands the checks PATH, a scratch HOME, CI and no prompts, and nothing else', () => {
+  /** A pull request from a branch of the code repo by the engineering account, unless overridden. */
+  const pullRequest = (
+    overrides: { repo?: string | null; login?: string; ref?: string } = {},
+  ): PullRequest => ({
+    number: 7,
+    html_url: 'https://github.com/latchkey-ops-bot/boiler-room/pull/7',
+    state: 'open',
+    merged_at: null,
+    merge_commit_sha: null,
+    title: 'feat: clampUnit',
+    body: null,
+    user: { login: overrides.login ?? LOGIN },
+    head: {
+      ref: overrides.ref ?? 'feat/eval-ab12-clamp-1',
+      sha: SHA,
+      repo:
+        overrides.repo === null
+          ? null
+          : { full_name: overrides.repo ?? 'latchkey-ops-bot/boiler-room' },
+    },
+    base: { ref: 'dev' },
+  });
+
+  it('runs only a pull request from a branch of the code repo, by the engineering account', () => {
+    expect(ownPullRequest(pullRequest(), LOGIN)).toBe(true);
+    expect(ownPullRequest(pullRequest({ repo: 'someone/boiler-room' }), LOGIN)).toBe(false);
+    expect(ownPullRequest(pullRequest({ repo: null }), LOGIN)).toBe(false);
+    expect(ownPullRequest(pullRequest({ login: 'someone' }), LOGIN)).toBe(false);
+    expect(ownPullRequest(pullRequest(), '')).toBe(false);
+  });
+
+  it('refuses a fork pull request on an eval branch name before running anything', () => {
+    const calls: string[] = [];
+    const fork = pullRequest({ repo: 'someone/boiler-room', login: 'someone' });
+    const result = checkPullRequest(fork, ['packages/motion/src/a.ts'], LOGIN, (command) => {
+      calls.push(command);
+      return '';
+    });
+    expect(calls).toEqual([]);
+    expect(result.pass).toBe(false);
+    expect(result.steps).toHaveLength(1);
+    expect(result.steps[0]?.tail).toMatch(/not run: its head is someone\/boiler-room:feat\/eval-/);
+  });
+
+  it('hands git PATH, a scratch HOME, CI and no prompts, and nothing else', () => {
     process.env[PLANTED] = 'sk_live_planted';
     const env = checkEnvironment('/tmp/scratch/home', '/usr/bin:/bin');
     expect(env).toEqual({
@@ -429,10 +486,49 @@ describe("checking a pull request's code on this machine", () => {
     expect(Object.values(env)).not.toContain('sk_live_planted');
   });
 
-  it('installs with no lifecycle scripts, and puts the changed files after --', () => {
-    const steps = checkSteps(32, ['--reporter=x', 'packages/motion/src/a.ts']);
+  it('fetches the head branch of the code repo, never pull/<n>/head, and checks out the vetted commit', () => {
+    const steps = checkSteps(TARGET, []);
+    const fetch = steps.find((item) => item.step === 'fetch the pull request');
+    expect(fetch?.args).toEqual([
+      'fetch',
+      '--quiet',
+      'origin',
+      '+refs/heads/feat/eval-ab12-clamp-1:refs/remotes/origin/pr-32',
+    ]);
+    expect(JSON.stringify(steps)).not.toContain('pull/');
+    expect(steps.find((item) => item.step === 'check out its head')?.args).toEqual([
+      'checkout',
+      '--quiet',
+      '--detach',
+      SHA,
+    ]);
+    expect(() => checkSteps({ ...TARGET, number: Number.NaN }, [])).toThrow(/Not a pull request/);
+    expect(() => checkSteps({ ...TARGET, number: 0 }, [])).toThrow(/Not a pull request/);
+    expect(() => checkSteps({ ...TARGET, branch: '--upload-pack=x' }, [])).toThrow(/Not a branch/);
+    expect(() => checkSteps({ ...TARGET, branch: 'feat/../dev' }, [])).toThrow(/Not a branch/);
+    expect(() => checkSteps({ ...TARGET, sha: 'HEAD' }, [])).toThrow(/Not a commit/);
+  });
+
+  it("runs git on this machine and every step that runs the pull request's code in the sandbox", () => {
+    const steps = checkSteps(TARGET, ['--reporter=x', 'packages/motion/src/a.ts']);
+    expect(steps.map((item) => `${item.where}:${item.command}`)).toEqual([
+      'host:git',
+      'host:git',
+      'host:git',
+      'sandbox:pnpm',
+      'sandbox:pnpm',
+      'sandbox:pnpm',
+      'sandbox:pnpm',
+    ]);
+    expect(steps.filter((item) => item.network).map((item) => item.step)).toEqual(['install']);
     const install = steps.find((item) => item.step === 'install');
-    expect(install?.args).toEqual(['install', '--frozen-lockfile', '--ignore-scripts', '--silent']);
+    expect(install?.args).toEqual([
+      'install',
+      '--frozen-lockfile',
+      '--ignore-scripts',
+      '--ignore-pnpmfile',
+      '--silent',
+    ]);
     const biome = steps.find((item) => item.step === 'biome on the changed files');
     expect(biome?.args).toEqual([
       'exec',
@@ -444,30 +540,82 @@ describe("checking a pull request's code on this machine", () => {
     ]);
     const clone = steps[0]?.args ?? [];
     expect(clone.indexOf('--')).toBe(clone.length - 3);
-    expect(steps.find((item) => item.step === 'fetch the pull request')?.args).toContain(
-      'pull/32/head:pr',
-    );
-    expect(() => checkSteps(Number.NaN, [])).toThrow(/Not a pull request/);
-    expect(() => checkSteps(0, [])).toThrow(/Not a pull request/);
   });
 
-  it('runs every step with only that environment, in the scratch folder, and removes it', () => {
+  it('gives the container the scratch folder only, no network after the install, and no host variable', () => {
+    process.env[PLANTED] = 'sk_live_planted';
+    const steps = checkSteps(TARGET, ['a.ts']);
+    const tests = steps.find((item) => item.step === 'motion tests');
+    const install = steps.find((item) => item.step === 'install');
+    if (!tests || !install) throw new Error('steps');
+    const args = sandboxArgs(tests, '/tmp/br-eval-pr-x', 'br-eval-pr-x-1', '1000:1000');
+    const flag = (name: string, list = args) => list.filter((_, i) => list[i - 1] === name);
+    expect(flag('--network')).toEqual(['none']);
+    expect(flag('--network', sandboxArgs(install, '/tmp/br-eval-pr-x', 'n', '1000:1000'))).toEqual([
+      'bridge',
+    ]);
+    expect(flag('--mount')).toEqual(['type=bind,source=/tmp/br-eval-pr-x,target=/work']);
+    expect(args.filter((item) => item === '-v' || item === '--volume')).toEqual([]);
+    expect(flag('--user')).toEqual(['1000:1000']);
+    expect(flag('--cap-drop')).toEqual(['ALL']);
+    expect(flag('--security-opt')).toEqual(['no-new-privileges']);
+    expect(flag('--env')).toEqual(
+      Object.entries(SANDBOX_ENV).map(([key, value]) => `${key}=${value}`),
+    );
+    expect(SANDBOX_ENV.HOME?.startsWith('/work/')).toBe(true);
+    expect(args).toContain('--rm');
+    expect(args.slice(args.indexOf(CHECK_IMAGE))).toEqual([
+      CHECK_IMAGE,
+      'pnpm',
+      '--filter',
+      '@boiler-room/motion',
+      'test',
+    ]);
+    expect(JSON.stringify(args)).not.toContain('sk_live_planted');
+    expect(JSON.stringify(args)).not.toContain(process.env.HOME ?? '@@');
+    const clone = steps[0];
+    if (!clone) throw new Error('clone');
+    expect(() => sandboxArgs(clone, '/tmp/x', 'n')).toThrow(/does not run in the sandbox/);
+    expect(() => sandboxArgs(tests, '/tmp/a,source=/home', 'n')).toThrow(/Not a scratch folder/);
+  });
+
+  it('builds the image from a base pinned by digest, with the pnpm the repo pins', async () => {
+    const { readFileSync } = await import('node:fs');
+    const root = JSON.parse(
+      readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
+    ) as {
+      packageManager: string;
+    };
+    expect(root.packageManager).toBe(`pnpm@${PNPM_VERSION}`);
+    expect(CHECK_IMAGE_DOCKERFILE).toMatch(/^FROM node:24-[a-z-]+@sha256:[0-9a-f]{64}\n/);
+    expect(CHECK_IMAGE_DOCKERFILE).toContain(`pnpm@${PNPM_VERSION}`);
+  });
+
+  it('runs git with only the scratch environment, the code only through docker, and removes the folder', () => {
     process.env[PLANTED] = 'sk_live_planted';
     const calls: { command: string; args: readonly string[]; cwd: string; env: object }[] = [];
-    const result = checkPullRequest(7, ['packages/motion/src/a.ts'], (command, args, options) => {
-      calls.push({ command, args, cwd: options.cwd, env: options.env });
-      return 'ok';
-    });
+    const result = checkPullRequest(
+      pullRequest(),
+      ['packages/motion/src/a.ts'],
+      LOGIN,
+      (command, args, options) => {
+        calls.push({ command, args, cwd: options.cwd, env: options.env });
+        return 'ok';
+      },
+    );
     expect(result.pass).toBe(true);
-    expect(calls.map((call) => call.command)).toEqual([
-      'git',
-      'git',
-      'git',
-      'pnpm',
-      'pnpm',
-      'pnpm',
-      'pnpm',
+    expect(calls.map((call) => `${call.command} ${call.args[0]}`)).toEqual([
+      'docker image',
+      'git clone',
+      'git fetch',
+      'git checkout',
+      'docker run',
+      'docker run',
+      'docker run',
+      'docker run',
+      'docker rm',
     ]);
+    expect(calls.filter((call) => call.command === 'pnpm')).toEqual([]);
     for (const call of calls) {
       expect(Object.keys(call.env).sort()).toEqual([
         'CI',
@@ -476,18 +624,44 @@ describe("checking a pull request's code on this machine", () => {
         'PATH',
         'npm_config_manage_package_manager_versions',
       ]);
-      expect(JSON.stringify(call.env)).not.toContain('sk_live_planted');
+      expect(JSON.stringify(call)).not.toContain('sk_live_planted');
       const { HOME } = call.env as { HOME: string };
       expect(HOME.endsWith('/home')).toBe(true);
       expect(call.cwd).toBe(HOME.replace(/home$/, 'repo'));
       expect(HOME).not.toBe(process.env.HOME);
     }
-    expect(existsSync(calls[0]?.cwd ?? '/')).toBe(false);
+    const scratch = calls[0]?.cwd.replace(/\/repo$/, '') ?? '/';
+    for (const call of calls.filter((item) => item.args[0] === 'run')) {
+      expect(call.args).toContain(`type=bind,source=${scratch},target=/work`);
+    }
+    expect(existsSync(scratch)).toBe(false);
+  });
+
+  it('builds the image first when it is missing, and fails the checks when docker cannot', () => {
+    const built: string[] = [];
+    const missing = checkPullRequest(pullRequest(), ['a.ts'], LOGIN, (command, args, options) => {
+      if (command === 'docker' && args[0] === 'image') throw new Error('No such image');
+      if (command === 'docker' && args[0] === 'build') built.push(options.input ?? '');
+      return '';
+    });
+    expect(missing.pass).toBe(true);
+    expect(built).toEqual([CHECK_IMAGE_DOCKERFILE]);
+    const ran: string[] = [];
+    const noDocker = checkPullRequest(pullRequest(), ['a.ts'], LOGIN, (command, args) => {
+      ran.push(`${command} ${args[0]}`);
+      if (command === 'docker') throw new Error('spawnSync docker ENOENT');
+      return '';
+    });
+    expect(noDocker.pass).toBe(false);
+    expect(noDocker.steps.map((item) => `${item.step}:${item.pass}`)).toEqual([
+      'build the sandbox image:false',
+    ]);
+    expect(ran).toEqual(['docker image', 'docker build']);
   });
 
   it('stops at the first failing step and reports it', () => {
-    const result = checkPullRequest(7, ['a.ts'], (command, args) => {
-      if (command === 'pnpm' && args[0] === 'install') {
+    const result = checkPullRequest(pullRequest(), ['a.ts'], LOGIN, (command, args) => {
+      if (command === 'docker' && args.includes('install')) {
         throw Object.assign(new Error('install failed'), { stdout: '', stderr: 'ERR_PNPM' });
       }
       return '';
