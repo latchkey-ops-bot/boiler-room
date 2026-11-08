@@ -49,12 +49,6 @@ export const stagger = {
   maxSpread: 0.7,
 } as const;
 
-/** How long each transition straddles its boundary. */
-export const transition = {
-  push: 0.6,
-  carry: 0.8,
-} as const;
-
 /** How far an entering element travels, in stage units. */
 export const travel = {
   text: 2.4,
@@ -92,6 +86,56 @@ export const arrival = {
   slow: { k: 0.82, D: 23 },
   long: { k: 0.88, D: 35 },
 } as const;
+
+/** `depart` constants: speed multiplies by `r` each frame over `n` frames, ending at peak speed. */
+export const departure = {
+  whip: { r: 1.2, n: 9 },
+  long: { r: 1.4, n: 11 },
+  short: { r: 2, n: 6 },
+  drag: { r: 1.11, n: 26 },
+  slowBuild: { r: 1.037, n: 55 },
+} as const;
+
+/**
+ * The in-out and camera curves of the reference spec, section 3, as cubic beziers for
+ * `Easing.bezier`, with the frames each runs over. [M] `step`, `step.short`, `hop`; [F] the rest.
+ */
+export const inOut = {
+  step: { curve: [0.85, 0, 0.15, 1], frames: 30 },
+  stepShort: { curve: [0.76, 0, 0.24, 1], frames: 21 },
+  hop: { curve: [0.9, 0, 0.1, 1], frames: 11 },
+  lift: { curve: [0.68, -0.06, 0.34, 1.06], frames: 11 },
+  collapse: { curve: [0.94, 0.12, 0.34, 0.82], frames: 13 },
+  cameraSkew: { curve: [0.66, 0.25, 0.04, 0.98], frames: 26 },
+  cameraGrow: { curve: [0.56, 0.33, 0.21, 0.89], frames: 20 },
+  linear: { curve: [0, 0, 1, 1], frames: 1 },
+} as const satisfies Record<string, { curve: CubicBezier; frames: number }>;
+
+/**
+ * The catalog transitions this package draws, in spec frames, from `docs/motion/transitions.md`.
+ * T1 is `depart.long` out and `arrive.fast` in, with `k` 0.70 on the x axis [N, from the [M]
+ * lateral fit]. T5 blanks 2 frames, or 5 for the chapter blink into a pivot card [M].
+ */
+export const seams = {
+  t1: { n: 11, r: 1.4, k: 0.72, kX: 0.7, D: 14, speedRatio: 1.5, carryFrames: 11 },
+  t3: { settle: 13 },
+  t5: { blank: 2, chapterBlank: 5, rack: 4 },
+} as const;
+
+/** The default velocity anchors of `docs/motion/transitions.md`, T1, in spec px per frame. [N] */
+export const anchorVelocity = {
+  x: { axis: 'x', sign: 1, v: 46 },
+  y: { axis: 'y', sign: -1, v: 36 },
+  scale: { axis: 'scale', sign: 1, v: 0.03 },
+} as const;
+
+/** `MorphBox`, T8: content leaves, the width moves, then the height, then content returns. */
+export const morph = {
+  exitFrames: 6,
+  width: { from: 6, to: 18 },
+  height: { from: 18, to: 45 },
+  curve: [0.76, 0, 0.24, 1],
+} as const satisfies { curve: CubicBezier } & Record<string, unknown>;
 
 /** Word rises: `rise` px below rest on the first frame, closing by `k` a frame, 1 frame apart. */
 export const rise = {

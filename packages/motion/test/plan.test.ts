@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { planFilm } from '../src/film/plan.ts';
 import { FilmRejected, prepareFilm } from '../src/film/prepare.ts';
-import { stageFor } from '../src/layout/stage.ts';
-import { sceneImplementations } from '../src/scenes/registry.ts';
 import { at, exampleProbe, novaCopy, quillhavenCopy } from './fixtures.ts';
 
 const novaPlan = () =>
@@ -23,76 +21,49 @@ describe('planFilm', () => {
     expect(novaPlan()).toMatchObject({ width: 1920, height: 1080, fps: 30, durationInFrames: 600 });
   });
 
-  it('carries the product between scenes that share it, and the mark otherwise', () => {
-    const nova = novaPlan();
-    expect(nova.carries.map(({ element }) => element)).toEqual([
-      { kind: 'image', assetId: 'dashboard-shot' },
+  it('plans the transition the resolver chose on each boundary', () => {
+    expect(novaPlan().transitions.map(({ name, boundary }) => [name, boundary])).toEqual([
+      ['t3', 120],
+      ['t3', 270],
+      ['t3', 420],
     ]);
-    expect(at(nova.scenes, 1).carriedOut).toEqual({ kind: 'image', assetId: 'dashboard-shot' });
+  });
+
+  it('takes the skin and ground from the brand: dark Nova is on the plate', () => {
+    const plan = novaPlan();
+    expect(plan.skin).toBe('kinetic-plate');
+    expect(plan.scenes.map(({ ground }) => ground)).toEqual(['plate', 'plate', 'plate', 'plate']);
     const quillhaven = planFilm({
       campaign: quillhavenCopy(),
       format: '1:1',
       logo: { kind: 'wordmark', reason: 'too-small' },
       imageSizes: { 'editor-shot': { width: 2880, height: 1800 } },
     });
-    expect(quillhaven.carries.map(({ element }) => element)).toEqual([
-      { kind: 'image', assetId: 'editor-shot' },
-      { kind: 'mark' },
-    ]);
-    expect(at(quillhaven.scenes, 3).carriedIn).toEqual({ kind: 'mark' });
+    expect(quillhaven.skin).toBe('neutral-cut');
+    expect(new Set(quillhaven.scenes.map(({ ground }) => ground))).toEqual(new Set(['base']));
   });
 
-  it('hands a carried image over exactly where each scene holds it, so nothing jumps', () => {
+  it("stops the film's clock, the ground included, where the end card holds", () => {
     const plan = novaPlan();
-    const carry = at(plan.carries, 0);
-    const before = at(plan.scenes, carry.outgoing);
-    const after = at(plan.scenes, carry.incoming);
-    const { campaign } = plan;
-    const stage = stageFor(plan.width, plan.height);
-    const image = { width: 2880, height: 1800, aspect: 1.6 };
-    const anchor = (index: number, frame: number, scenePlan: typeof before) => {
-      const scene = at(campaign.scenes, index);
-      const definition = sceneImplementations[scene.type];
-      return definition?.imageAnchor?.({
-        props: definition.props.parse(scene.props),
-        stage,
-        image,
-        durationInFrames: scenePlan.span.durationInFrames,
-        fps: plan.fps,
-        timing: scenePlan.timing,
-        frame,
-        text: scene.text,
-      });
-    };
-    // From the cause node of the feature card to the site hero's browser frame and its address.
-    expect(carry.image?.from).toEqual(anchor(1, carry.window.from - before.span.from, before));
-    expect(carry.image?.to).toEqual(anchor(2, carry.window.to - after.span.from, after));
-    expect(carry.image?.from.chrome).toBe(0);
-    expect(carry.image?.to).toMatchObject({ address: 'nova.example.com/product' });
-    expect(carry.image?.to.chrome).toBeGreaterThan(0);
+    const close = at(plan.scenes, 3);
+    expect(plan.stillFrom).toBe(close.span.from + close.span.durationInFrames - 69);
   });
 
-  it('times each scene for the transitions on either side of it', () => {
-    const { scenes } = novaPlan();
-    const [open, speed, adoption, close] = scenes;
-    // A scene pushed off holds still; the push moves it.
-    expect(open?.timing.text.exitFrames).toBe(0);
-    // A pushed scene arrives built: its entry starts with the push, so it builds as it slides on.
-    expect(speed?.timing.container.enterAt).toBeLessThan(-(speed?.span.preRoll ?? 0));
-    expect(speed?.span.preRoll).toBeGreaterThan(0);
-    expect(speed?.timing.entryAt).toBe(-(speed?.span.preRoll ?? 0));
-    // Words leave before a carry starts.
-    const out = speed?.span.out;
-    const clearBy = (out?.from ?? 0) - (speed?.span.from ?? 0);
-    const { exitAt, exitFrames } = speed?.timing.text ?? { exitAt: 0, exitFrames: 0 };
-    expect(exitAt + exitFrames).toBeLessThanOrEqual(clearBy);
-    // A carried image lands before the scene it lands in starts its own entry.
-    expect(adoption?.timing.entryAt).toBe(
-      (adoption?.span.in?.to ?? 0) - (adoption?.span.from ?? 0),
-    );
-    // A dead-stop cut keeps everything to the last frame, and so does the end of the film.
-    expect(adoption?.timing.text.exitFrames).toBe(0);
-    expect(close?.timing.container.exitFrames).toBe(0);
+  it('times each scene to keep everything to its last frame, and a blinked scene after its blank', () => {
+    for (const scenePlan of novaPlan().scenes) {
+      expect(scenePlan.timing.text.exitFrames).toBe(0);
+      expect(scenePlan.timing.container.exitFrames).toBe(0);
+      expect(scenePlan.timing.container.enterAt).toBe(0);
+    }
+    const quillhaven = planFilm({
+      campaign: quillhavenCopy(),
+      format: '16:9',
+      logo: { kind: 'wordmark', reason: 'too-small' },
+      imageSizes: { 'editor-shot': { width: 2880, height: 1800 } },
+    });
+    // The second card follows a T5: 2 spec frames of ground, which are 2 frames at 24 fps.
+    expect(at(quillhaven.scenes, 3).timing.container.enterAt).toBe(2);
+    expect(at(quillhaven.scenes, 3).span.in).toMatchObject({ name: 't5', blank: 2 });
   });
 });
 

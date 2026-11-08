@@ -1,6 +1,7 @@
 import { sceneRegistry } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
 import { validateForRender } from '../src/film/validate-render.ts';
+import { anchorVelocities, groundOf } from '../src/scenes/definition.ts';
 import {
   IMPLEMENTED_SCENE_TYPES,
   renderSceneRegistry,
@@ -28,6 +29,56 @@ describe('scene templates', () => {
       expect(limited).toEqual(expect.arrayContaining(Object.keys(definition.roles)));
     },
   );
+
+  it('declare the kind, ground and anchors each scene file gives', () => {
+    const declared = Object.fromEntries(
+      Object.entries(sceneImplementations).map(([type, definition]) => [
+        type,
+        {
+          kind: definition.kind,
+          ground:
+            groundOf(definition, {}, 'neutral-cut') +
+            ' ' +
+            groundOf(definition, {}, 'kinetic-plate'),
+          anchors: anchorVelocities(definition, {}),
+        },
+      ]),
+    );
+    expect(declared).toEqual({
+      'word-slam': {
+        kind: 'type',
+        ground: 'base plate',
+        anchors: [{ id: 'headline', entry: undefined, exit: undefined }],
+      },
+      'site-hero': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'browser',
+            entry: { axis: 'y', sign: -1, v: 36 },
+            exit: { axis: 'scale', sign: 1, v: 0.03 },
+          },
+        ],
+      },
+      'feature-card': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
+      'end-card': {
+        kind: 'mark',
+        ground: 'base plate',
+        anchors: [{ id: 'logo', entry: { axis: 'y', sign: -1, v: 36 }, exit: undefined }],
+      },
+    });
+  });
 
   it('give every template a component and a props schema that needs no props', () => {
     for (const definition of Object.values(sceneImplementations)) {

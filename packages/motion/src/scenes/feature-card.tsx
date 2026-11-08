@@ -1,20 +1,28 @@
-import type { CSSProperties } from 'react';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
 import { withAlpha } from '../brand/color.ts';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark, SceneBase, SceneMark } from '../components/scene-base.tsx';
-import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
-import { baselineOffset, lineBox, type SpecFit, specPx, useSpecFit } from '../components/type.tsx';
+import { RisingWords } from '../components/rising-words.tsx';
+import { cornerMark, SceneMark } from '../components/scene-base.tsx';
+import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
+import {
+  baselineOffset,
+  lineBox,
+  type SpecFit,
+  type SpecTypeStyle,
+  specFit,
+  specPx,
+  useSpecFit,
+} from '../components/type.tsx';
 import { WHOLE_IMAGE } from '../core/camera.ts';
-import { arriveN, rack, specFrame, springPop, typeDrift, wordRise } from '../core/curves.ts';
-import { presence } from '../core/presence.ts';
+import { arriveN, blink, springPop, typeDrift } from '../core/curves.ts';
 import { textDirection } from '../layout/bidi.ts';
 import { fitContain, type Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
-import { arrival, card, drift, rise, specType, type as typography } from '../tokens.ts';
+import { anchorVelocity, arrival, card, drift, specType, type as typography } from '../tokens.ts';
+import { SeamLayer } from '../transitions/seam-layer.tsx';
 import { type Accent, accentSchema, isAccented } from './accent.ts';
-import { defineScene, type ImageAnchor, type SceneImage } from './definition.ts';
+import { defineScene, type SceneImage } from './definition.ts';
 
 const propsSchema = z.strictObject({
   /** `crop` shows the scene's captured crops, `chips` greeked shapes. */
@@ -105,20 +113,17 @@ const chipRect = (node: CardNode): Rect => {
   };
 };
 
-/** How far the panel is below its rest at a spec frame. It does not rise under a carried image. */
-export const panelOffset = (f: number, stage: Stage, carriedIn: boolean): number =>
-  carriedIn
+/**
+ * How far the panel is below its rest at a spec frame. On a T1 entry it arrives with the headline
+ * on the seam instead, so it does not rise.
+ */
+export const panelOffset = (f: number, stage: Stage, seamedIn: boolean): number =>
+  seamedIn
     ? 0
     : specPx(stage, card.panelTravel) *
       (1 - arriveN(f - card.beats.panel, arrival.snap.k, arrival.snap.D));
 
 const nodeDrift = (f: number, stage: Stage) => specPx(stage, drift.node * Math.max(0, f));
-
-const shift = (rect: Rect, x: number, y: number): Rect => ({
-  ...rect,
-  x: rect.x + x,
-  y: rect.y + y,
-});
 
 const Chip = ({ rect, fill, bars }: { rect: Rect; fill: string; bars: string }) => {
   const { radius } = useBrand();
@@ -150,87 +155,53 @@ const Chip = ({ rect, fill, bars }: { rect: Rect; fill: string; bars: string }) 
   );
 };
 
-/** Words rise one frame apart, `rise.short` px, from their start frame. */
-const RisingWords = ({
-  fit,
-  box,
-  f,
-  start,
-  color,
-  style,
-}: {
-  fit: SpecFit;
-  box: Rect;
-  f: number;
-  start: number;
-  color: string;
-  style: CSSProperties;
-}) => {
-  const { stage } = useScene();
-  let index = -1;
-  return (
-    <div
-      style={{
-        ...style,
-        color,
-        fontSize: fit.fontSize,
-        left: box.x,
-        lineHeight: fit.lineHeight,
-        position: 'absolute',
-        textAlign: 'center',
-        top: box.y,
-        width: box.width,
-      }}
-    >
-      {fit.lines.map((line) => (
-        <div key={line} style={{ direction: textDirection(line), whiteSpace: 'pre' }}>
-          {line.split(' ').map((word, position) => {
-            index += 1;
-            const { visible, y } = wordRise(f - start, index, 1, rise.short.rise, rise.short.k);
-            return (
-              <span key={`${word}-${index}`}>
-                {position > 0 ? ' ' : ''}
-                <span
-                  style={{
-                    display: 'inline-block',
-                    opacity: visible ? 1 : 0,
-                    transform: `translateY(${specPx(stage, y)}px)`,
-                  }}
-                >
-                  {word}
-                </span>
-              </span>
-            );
-          })}
-        </div>
-      ))}
-    </div>
-  );
+const headlineStyle: SpecTypeStyle = {
+  font: 'display',
+  weight: typography.weight.display,
+  cap: specType.capS,
 };
+
+/** The top of the headline's line box: its cap top sits on the slot, the same on every card. */
+const headlineLineTop = (fit: SpecFit, top: number) =>
+  top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
+
+/**
+ * The headline anchor's box at a spec frame: the fitted line, centred in the slot, as it drifts
+ * larger about its centre. Its rack offset is an entry move, not part of the box.
+ */
+export function headlineBox(fit: SpecFit, stage: Stage, top: number, f: number): Rect {
+  const scale = typeDrift(f);
+  const height = fit.fontSize * fit.lineHeight;
+  const lineTop = headlineLineTop(fit, top);
+  const centreY = lineTop + height / 2;
+  return {
+    x: stage.width / 2 - (fit.width * scale) / 2,
+    y: centreY - (height * scale) / 2,
+    width: fit.width * scale,
+    height: height * scale,
+  };
+}
 
 const Headline = ({
   id,
   value,
   top,
   f,
+  rack,
   accent,
 }: {
   id: string;
   value: string;
   top: number;
   f: number;
+  rack: { blur: number; y: number };
   accent: Accent | undefined;
 }) => {
   const { stage } = useScene();
   const { colors, fonts } = useBrand();
-  const fit = useSpecFit(
-    value,
-    { font: 'display', weight: typography.weight.display, cap: specType.capS },
-    stage,
-    { width: lineBox(stage), maxLines: 1 },
-  );
-  const lineTop = top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
-  const { blur, y } = rack(f);
+  const fit = useSpecFit(value, headlineStyle, stage, { width: lineBox(stage), maxLines: 1 });
+  const lineTop = headlineLineTop(fit, top);
+  const { blur, y } = rack;
   let index = -1;
   return (
     <div
@@ -291,30 +262,41 @@ const NodeLabel = ({
   );
   if (f < start) return null;
   return (
-    <RisingWords
-      fit={fit}
-      box={node.label}
-      f={f}
-      start={start}
-      color={colors.foreground}
-      style={{ fontFamily: fonts.body, fontWeight: fit.weight, letterSpacing: fit.letterSpacing }}
-    />
+    <div
+      style={{
+        color: colors.foreground,
+        fontFamily: fonts.body,
+        fontSize: fit.fontSize,
+        fontWeight: fit.weight,
+        left: node.label.x,
+        letterSpacing: fit.letterSpacing,
+        lineHeight: fit.lineHeight,
+        position: 'absolute',
+        textAlign: 'center',
+        top: node.label.y,
+        width: node.label.width,
+      }}
+    >
+      <RisingWords lines={fit.lines} f={f} start={start} />
+    </div>
   );
 };
 
 const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
-  const { frame, fps, stage, timing, images, carriedIn, carriedOut, overlayHides } = useScene();
+  const { stage, images } = useScene();
+  const { f, b, inT } = useSceneClock();
   const { colors, radius } = useBrand();
   const headline = scene.text.find(({ role }) => role === 'headline');
   if (!headline) throw new Error(`Scene "${scene.id}" has no headline. validateFilm checks this.`);
   const labels = scene.text.filter(({ role }) => role === 'label');
-  const f = specFrame(frame - timing.entryAt, fps);
   const layout = cardLayout(stage);
   const demo = demoOf(props, images.length);
-  const arrived = carriedIn === 'image';
-  const opacity = 1 - presence(frame, timing.text).exit;
-  const panelShown = arrived || f >= card.beats.panel;
-  const down = panelOffset(f, stage, arrived);
+  // On T1 the headline and panel enter together on the seam. After T3 and T5 the headline is at
+  // full ink from its first frame, racking into focus, and the panel rises on frame 6.
+  const seamedIn = inT === 't1';
+  const racked = seamedIn ? { blur: 0, y: 0 } : blink(f, b);
+  const panelShown = seamedIn || f >= card.beats.panel;
+  const down = panelOffset(f, stage, seamedIn);
   const sideways = nodeDrift(f, stage);
   const [causeImage, effectImage] = demo === 'crop' ? images : [];
   const { beats } = card;
@@ -339,19 +321,20 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
   const light = (f - beats.causeLight) / beats.lightFrames;
 
   return (
-    <SceneBase seed={scene.id}>
+    <>
       <SceneMark placement={cornerMark(stage)} />
-      <div style={{ inset: 0, opacity, position: 'absolute' }}>
-        {f >= 0 ? (
-          <Headline
-            id={headline.id}
-            value={headline.value}
-            top={layout.headlineTop}
-            f={f}
-            accent={props.accent}
-          />
-        ) : null}
-        {panelShown ? (
+      <SeamLayer anchor="headline">
+        <Headline
+          id={headline.id}
+          value={headline.value}
+          top={layout.headlineTop}
+          f={f}
+          rack={racked}
+          accent={props.accent}
+        />
+      </SeamLayer>
+      {panelShown ? (
+        <SeamLayer>
           <div style={{ inset: 0, position: 'absolute', transform: `translateY(${down}px)` }}>
             <div
               style={{
@@ -366,9 +349,24 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
               }}
             />
             <div style={{ inset: 0, position: 'absolute', transform: `translateX(${sideways}px)` }}>
-              {causeImage ? null : (
+              {causeImage ? (
+                <BrowserFrame rect={causeRect} src={causeImage.src} pose={WHOLE_IMAGE} chrome={0} />
+              ) : (
                 <Chip rect={causeRect} fill={colors.chrome} bars={colors.hairline} />
               )}
+              {light > 0 && light < 1 ? (
+                <div
+                  style={{
+                    background: `linear-gradient(100deg, transparent ${light * 140 - 40}%, ${withAlpha(colors.accent, 0.42)} ${light * 140 - 20}%, transparent ${light * 140}%)`,
+                    borderRadius: radius,
+                    height: causeRect.height,
+                    left: causeRect.x,
+                    position: 'absolute',
+                    top: causeRect.y,
+                    width: causeRect.width,
+                  }}
+                />
+              ) : null}
               <div
                 style={{
                   background: colors.muted,
@@ -422,33 +420,9 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
               ) : null}
             </div>
           </div>
-        ) : null}
-      </div>
-      {causeImage && panelShown && !overlayHides('image') ? (
-        // Drawn above the panel's layer, so that a carry can take it while the rest clears. When
-        // the carry moves the mark instead, it clears with the rest.
-        <BrowserFrame
-          rect={shift(causeRect, sideways, down)}
-          src={causeImage.src}
-          pose={WHOLE_IMAGE}
-          chrome={0}
-          style={{ opacity: carriedOut === 'image' ? 1 : opacity }}
-        />
+        </SeamLayer>
       ) : null}
-      {panelShown && light > 0 && light < 1 ? (
-        <div
-          style={{
-            background: `linear-gradient(100deg, transparent ${light * 140 - 40}%, ${withAlpha(colors.accent, 0.42)} ${light * 140 - 20}%, transparent ${light * 140}%)`,
-            borderRadius: radius,
-            height: causeRect.height,
-            left: causeRect.x + sideways,
-            position: 'absolute',
-            top: causeRect.y + down,
-            width: causeRect.width,
-          }}
-        />
-      ) : null}
-    </SceneBase>
+    </>
   );
 };
 
@@ -460,15 +434,6 @@ export const featureCard = defineScene<FeatureCardProps>({
   maxImages: 2,
   imagesShown: (props) => (props.demo === 'chips' ? 0 : 2),
   imageNeeded: (props) => props.demo === 'crop',
-  imageAnchor: ({ stage, image, frame, fps, timing }): ImageAnchor => {
-    const f = specFrame(frame - timing.entryAt, fps);
-    const layout = cardLayout(stage);
-    return {
-      rect: shift(cropRect(layout.cause, image), nodeDrift(f, stage), 0),
-      pose: WHOLE_IMAGE,
-      chrome: 0,
-    };
-  },
   imageView: ({ stage, image, index }) => {
     const layout = cardLayout(stage);
     const node = index === 0 ? layout.cause : layout.effect;
@@ -476,4 +441,24 @@ export const featureCard = defineScene<FeatureCardProps>({
     return { width: cropRect(node, image).width, zoom: index === 0 ? 1 : 1.07 };
   },
   markAnchor: (stage) => cornerMark(stage),
+  kind: 'product',
+  ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
+  anchors: [
+    {
+      id: 'headline',
+      entry: anchorVelocity.x,
+      exit: anchorVelocity.x,
+      box: (f, { stage, text, theme }) => {
+        const value = text.find(({ role }) => role === 'headline')?.value ?? '';
+        const fit = specFit(
+          value,
+          headlineStyle,
+          stage,
+          { width: lineBox(stage), maxLines: 1 },
+          theme.fonts,
+        );
+        return headlineBox(fit, stage, cardLayout(stage).headlineTop, f);
+      },
+    },
+  ],
 });

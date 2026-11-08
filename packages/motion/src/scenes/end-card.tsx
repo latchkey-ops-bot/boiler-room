@@ -1,15 +1,16 @@
 import { toFrame } from '@boiler-room/schema';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
-import { BrandMark, type MarkPlacement } from '../components/brand-mark.tsx';
-import { SceneBase } from '../components/scene-base.tsx';
-import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
+import { BrandMark, logoRect, type MarkPlacement } from '../components/brand-mark.tsx';
+import { RisingWords } from '../components/rising-words.tsx';
+import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import { baselineOffset, lineBox, specPx, useSpecFit } from '../components/type.tsx';
-import { arriveN, SPEC_FPS, specFrame, wordRise } from '../core/curves.ts';
+import { arriveN, SPEC_FPS, specFrame } from '../core/curves.ts';
 import { textDirection } from '../layout/bidi.ts';
 import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
-import { arrival, lockup, rise, specType, type as typography } from '../tokens.ts';
+import { anchorVelocity, arrival, lockup, specType, type as typography } from '../tokens.ts';
+import { SeamLayer } from '../transitions/seam-layer.tsx';
 import { defineScene } from './definition.ts';
 
 const propsSchema = z.strictObject({
@@ -43,6 +44,10 @@ export const logoPlacement = (stage: Stage): MarkPlacement => ({
   box: endCardLayout(stage).logo,
   align: 'center',
 });
+
+/** How far below its rest the logo is on its native entry: 200 px on `arrive.slow`. */
+export const logoOffset = (f: number, stage: Stage): number =>
+  specPx(stage, lockup.logoTravel) * (1 - arriveN(f, arrival.slow.k, arrival.slow.D));
 
 const LETTER = /^[a-zA-Z]$/;
 
@@ -79,15 +84,16 @@ export const holdStart = (durationInFrames: number, fps: number): number =>
   durationInFrames - toFrame(lockup.hold / SPEC_FPS, fps);
 
 const EndCard = ({ scene, props }: SceneProps<EndCardProps>) => {
-  const { frame, fps, stage, timing, durationInFrames, carriedIn, overlayHides } = useScene();
+  const { frame, fps, stage, durationInFrames } = useScene();
+  const { inT } = useSceneClock();
   const { colors, fonts } = useBrand();
   const cta = scene.text.find(({ role }) => role === 'cta');
   if (!cta) throw new Error(`Scene "${scene.id}" has no CTA. validateFilm checks this.`);
   const url = scene.text.find(({ role }) => role === 'label')?.value;
   const layout = endCardLayout(stage);
   // Everything is at rest by the hold, and from its first frame nothing moves at all.
-  const still = Math.min(frame, Math.max(timing.entryAt, holdStart(durationInFrames, fps)));
-  const f = specFrame(still - timing.entryAt, fps);
+  const still = Math.min(frame, Math.max(0, holdStart(durationInFrames, fps)));
+  const f = specFrame(still, fps);
 
   const ctaFit = useSpecFit(
     cta.value,
@@ -102,23 +108,20 @@ const EndCard = ({ scene, props }: SceneProps<EndCardProps>) => {
     { width: lineBox(stage), maxLines: 1 },
   );
 
-  const logoRise =
-    carriedIn === 'mark'
-      ? 0
-      : specPx(stage, lockup.logoTravel) * (1 - arriveN(f, arrival.slow.k, arrival.slow.D));
+  // On a T1 entry the seam brings the logo in, with no rise of its own.
+  const logoRise = inT === 't1' ? 0 : logoOffset(f, stage);
   const reveal = props.urlReveal ?? 'decode';
-  let word = -1;
   const caretHeight = urlFit.fontSize * 0.78;
 
   return (
-    <SceneBase seed={scene.id} clock={still}>
-      {overlayHides('mark') || frame < timing.entryAt ? null : (
+    <>
+      <SeamLayer anchor="logo">
         <BrandMark
           placement={logoPlacement(stage)}
           unit={stage.unit}
           style={{ transform: `translateY(${logoRise}px)` }}
         />
-      )}
+      </SeamLayer>
       {f >= 0 ? (
         <div
           style={{
@@ -138,30 +141,7 @@ const EndCard = ({ scene, props }: SceneProps<EndCardProps>) => {
             width: stage.width,
           }}
         >
-          {(ctaFit.lines[0] ?? cta.value).split(' ').map((value, position) => {
-            word += 1;
-            const { visible, y } = wordRise(
-              f - lockup.ctaAt,
-              word,
-              1,
-              rise.short.rise,
-              rise.short.k,
-            );
-            return (
-              <span key={`${value}-${word}`}>
-                {position > 0 ? ' ' : ''}
-                <span
-                  style={{
-                    display: 'inline-block',
-                    opacity: visible ? 1 : 0,
-                    transform: `translateY(${specPx(stage, y)}px)`,
-                  }}
-                >
-                  {value}
-                </span>
-              </span>
-            );
-          })}
+          <RisingWords lines={[ctaFit.lines[0] ?? cta.value]} f={f} start={lockup.ctaAt} />
         </div>
       ) : null}
       {url && f >= lockup.urlAt ? (
@@ -201,7 +181,7 @@ const EndCard = ({ scene, props }: SceneProps<EndCardProps>) => {
           )}
         </div>
       ) : null}
-    </SceneBase>
+    </>
   );
 };
 
@@ -212,4 +192,18 @@ export const endCard = defineScene<EndCardProps>({
   image: 'none',
   maxImages: 0,
   markAnchor: (stage) => logoPlacement(stage),
+  kind: 'mark',
+  ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
+  anchors: [
+    {
+      id: 'logo',
+      entry: anchorVelocity.y,
+      // The logo's box at rest. A wordmark is measured inside the same box, so this is its box.
+      box: (_f, { stage, theme }) => {
+        const placement = logoPlacement(stage);
+        return theme.logo.kind === 'image' ? logoRect(theme.logo, placement) : placement.box;
+      },
+    },
+  ],
+  holdFrom: (durationInFrames, fps) => Math.max(0, holdStart(durationInFrames, fps)),
 });
