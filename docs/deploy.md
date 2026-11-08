@@ -189,37 +189,39 @@ sequenceDiagram
   W->>N: destroy the computer, delete the checkpoint
 ```
 
-| Piece                                                                         | Where                                                                                                                                                                                                                                                                                          |
-| ----------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| The contract with the runner: signatures, events, uploads, the launch command | One file, `services/film-runner/src/contract.ts`, which the runner runs on the computer and the website imports as `@boiler-room/film-runner/contract` (through `apps/web/src/server/runner/contract.ts`). `apps/web/test/runner-contract.test.ts` runs the real runner against the website's routes |
+| Piece                                                                         | Where                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The contract with the runner: signatures, events, uploads, the launch command | One file, `services/film-runner/src/contract.ts`, which the runner runs on the computer and the website imports as `@boiler-room/film-runner/contract` (through `apps/web/src/server/runner/contract.ts`). `apps/web/test/runner-contract.test.ts` runs the real runner against the website's routes                                                              |
 | Signed routes the runner calls: `hello`, `instructions`, `events`, `files`    | `/api/runner/v1/films/{filmId}/…`, served by `worker.ts` before OpenNext, which would read every body whole first; an upload streams into R2. Every call carries an HMAC-SHA256 signature with a key for its own film and run, a timestamp within 5 minutes and a fresh nonce. The website derives each key from `RUNNER_SIGNING_SECRET`; D1 holds nothing secret |
-| What a film is doing                                                          | D1 `film_runs` and `run_events`, read by `NaivePipeline`. No page poll calls Naive                                                                                                                                                                                                             |
-| Files                                                                         | R2, under keys the website picks. Each upload streams in with its signed SHA-256, which R2 checks                                                                                                                                                                                              |
-| The watchdog                                                                  | A cron every minute on staging (`worker.ts`) calls the signed `/api/runner/v1/watchdog` route. It destroys computers whose runner is silent for 5 minutes, that never start, that pass their phase deadline or the film's cost cap, that wait 72 hours for approval, or that no live film owns |
+| What a film is doing                                                          | D1 `film_runs` and `run_events`, read by `NaivePipeline`. No page poll calls Naive                                                                                                                                                                                                                                                                                |
+| Files                                                                         | R2, under keys the website picks. Each upload streams in with its signed SHA-256, which R2 checks                                                                                                                                                                                                                                                                 |
+| The watchdog                                                                  | A cron every minute on staging (`worker.ts`) calls the signed `/api/runner/v1/watchdog` route. It destroys computers whose runner is silent for 5 minutes, that never start, that pass their phase deadline or the film's cost cap, that wait 72 hours for approval, or that no live film owns                                                                    |
 
 **Caps.** Every one is checked in the single statement that reserves a film's row, so parallel
 requests cannot all pass, and a refused start never reaches Naive.
 
-| Cap                                                                                              | Staging                                   | Var                                        |
-| ------------------------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------------ |
-| One film, crew and compute                                                                       | $2.50, of which $0.50 is kept for compute | `FILM_CAP_USD`, `FILM_COMPUTE_RESERVE_USD` |
-| Real films at work per founder (a paused one waiting for approval does not count, and is checked again when it is approved) | 1 | `MAX_REAL_PER_ACCOUNT` |
-| Real films holding the crew's one Researcher, across staging                                     | 1                                         | `MAX_REAL_GLOBAL`                          |
-| Per founder per rolling 24 hours, films at work at their full cap, a script waiting at what it spent (its approval reserves the rest) | $5.00 | `ACCOUNT_DAILY_CAP_USD` |
-| All of staging per rolling 24 hours                                                              | $5.25                                     | `GLOBAL_DAILY_CAP_USD`                     |
-| The balance tripwire: the Naive balance down more than the staging cap in a day, from any source | halts every real film                     | `runner_control` row in D1                 |
+| Cap                                                                                                                                   | Staging                                   | Var                                        |
+| ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------ |
+| One film, crew and compute                                                                                                            | $2.50, of which $0.50 is kept for compute | `FILM_CAP_USD`, `FILM_COMPUTE_RESERVE_USD` |
+| Real films at work per founder (a paused one waiting for approval does not count, and is checked again when it is approved)           | 1                                         | `MAX_REAL_PER_ACCOUNT`                     |
+| Real films holding the crew's one Researcher, across staging                                                                          | 1                                         | `MAX_REAL_GLOBAL`                          |
+| Per founder per rolling 24 hours, films at work at their full cap, a script waiting at what it spent (its approval reserves the rest) | $5.00                                     | `ACCOUNT_DAILY_CAP_USD`                    |
+| All of staging per rolling 24 hours                                                                                                   | $5.25                                     | `GLOBAL_DAILY_CAP_USD`                     |
+| The balance tripwire: the Naive balance down more than the staging cap in a day, from any source                                      | halts every real film                     | `runner_control` row in D1                 |
 
 **Settings.**
 
-| Name                                                        | Kind   | From the env file                    | Notes                                                                                                             |
-| ----------------------------------------------------------- | ------ | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| `NAIVE_WEB_KEY`                                             | secret | `STAGING_NAIVE_WEB_KEY` only         | A key with exactly `computers:write` and `billing:read`. The sync checks it with Naive, and refuses the admin key |
-| `RUNNER_SIGNING_SECRET`                                     | secret | `STAGING_RUNNER_SIGNING_SECRET` only | At least 32 random characters                                                                                     |
-| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | Optional. The film command's key, sent in each launch's bootstrap; the snapshot holds none. Sessions and `agents:read` only; the sync refuses more, the admin key or the website's key |
-| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. Staging only, until the snapshot runs the real film command |
-| `REAL_FILM_USERS`                                           | secret | `STAGING_REAL_FILM_USERS`            | Comma-separated Clerk user ids. A secret, so no id is committed to the public repo                                |
-| `RUNNER_SNAPSHOT_ID`, `RUNNER_COMMIT`, `RUNNER_FILM_COMMIT` | vars   | `wrangler.jsonc`                     | The base snapshot and the two commits it holds, committed by pull request after a build                           |
-| `RUNNER_PUBLIC_URL`                                         | var    | `wrangler.jsonc`                     | The callback base. The cron has no request to read it from                                                        |
+| Name                                                        | Kind   | From the env file                    | Notes                                                                                                                                                                                                        |
+| ----------------------------------------------------------- | ------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NAIVE_WEB_KEY`                                             | secret | `STAGING_NAIVE_WEB_KEY` only         | A key with exactly `computers:write` and `billing:read`. The sync checks it with Naive, and refuses the admin key                                                                                            |
+| `RUNNER_SIGNING_SECRET`                                     | secret | `STAGING_RUNNER_SIGNING_SECRET` only | At least 32 random characters                                                                                                                                                                                |
+| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | Optional. The film command's key, sent in each launch's bootstrap; the snapshot holds none. Sessions and `agents:read` only; the sync refuses more, the admin key or the website's key                       |
+| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. Staging only, until the snapshot runs the real film command                                                       |
+| `REAL_FILM_USERS`                                           | secret | `STAGING_REAL_FILM_USERS`            | Comma-separated Clerk user ids. A secret, so no id is committed to the public repo                                                                                                                           |
+| `RUNNER_SNAPSHOT_ID`, `RUNNER_COMMIT`, `RUNNER_FILM_COMMIT` | vars   | `wrangler.jsonc`                     | The base snapshot and the two commits it holds, committed by pull request after a build                                                                                                                      |
+| `RUNNER_PUBLIC_URL`                                         | var    | `wrangler.jsonc`                     | The callback base. The cron has no request to read it from                                                                                                                                                   |
+| `GTM_SERVICE_TOKEN`                                         | secret | `STAGING_GTM_SERVICE_TOKEN` only     | Optional. The GTM executor's bearer token for `/api/gtm/v1/`, at least 32 characters and no other secret's value. Unset, the GTM routes answer 503. The executor holds the same value as `GTM_SERVICE_TOKEN` |
+| `BR_HOUSE_ACCOUNT_ID`                                       | var    | `wrangler.jsonc`                     | Boiler Room's own account (`acc_…`). Every GTM sample film belongs to it; empty, no sample can be ordered                                                                                                    |
 
 Missing any of the three secrets or the snapshot id, nobody gets a real film. Production has none
 of them and keeps answering 503.
@@ -241,6 +243,17 @@ of them and keeps answering 503.
    refused at its hello.
 4. Add your Clerk user id (from `accounts.clerk_user_id` after you sign in to staging once) to
    `STAGING_REAL_FILM_USERS`, and run `pnpm web:secrets:sync:staging` again.
+
+**GTM sample films.** The GTM executor orders free sample films of startups' sites through
+`/api/gtm/v1/` (`apps/web/src/server/gtm/`), served by `worker.ts` before OpenNext and outside
+Clerk. A sample is a real film of `BR_HOUSE_ACCOUNT_ID` in the runner's `sample` mode: no approval
+pause, every real-film cap above, and a cap of the executor's budget or the film cap, whichever is
+lower. Once delivered it gets an unlisted, `noindex` film page at `/f/<share_id>`, labelled a free
+sample, which answers 410 once withdrawn and lets anyone remove the film. To turn it on:
+`pnpm web:runner:keys:staging mint --gtm-token` writes `STAGING_GTM_SERVICE_TOKEN` and, when unset,
+the same value as `GTM_SERVICE_TOKEN` for the executor; set `BR_HOUSE_ACCOUNT_ID` in
+`env.staging.vars` by pull request; migrate, sync the secrets and deploy as above; and put the
+staging URL in the env file as `GTM_APP_URL`.
 
 Naive keys have no resource binding: the website's `computers:write` reaches every computer and
 snapshot in the organization, the company's agent computers included. Keep no secret on any of
