@@ -97,7 +97,7 @@ describe('quotes', () => {
     // sentence went on "leaving your machine." on the next line.
     const url = 'https://quillbox.example/';
     const parsed = parseHtml(
-      '<html><body><p>No account, and no video<br>leaving your machine.</p><h2>Caption-first screen communication for Mac</h2><p>Make demos clear.</p></body></html>',
+      '<html><body><p>No account, and no video<br>leaving your machine.</p><h2>Caption-first screen communication for Mac</h2><p>Make demos clear.</p><h2>Notes that keep growing</h2><p>ivyNote is a calm, fast Markdown notes app.</p></body></html>',
       url,
     );
     const page = { id: 'p1', path: '/', label: 'homepage', url, final_url: url, parsed };
@@ -125,6 +125,8 @@ describe('quotes', () => {
     expect(quoteProblem(one, 'p1', 'leaving your machine.')).toBe('not_at_boundary');
     expect(quoteProblem(one, 'p1', 'Caption-first screen communication for Mac')).toBeNull();
     expect(quoteProblem(one, 'p1', 'Make demos clear.')).toBeNull();
+    // A lower-case brand after a heading starts a sentence; it does not continue one.
+    expect(quoteProblem(one, 'p1', 'ivyNote is a calm, fast Markdown notes app.')).toBeNull();
   });
 
   it('refuses hidden text, text on another page, digits and invented words', () => {

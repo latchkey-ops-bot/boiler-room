@@ -72,10 +72,15 @@ export function quoteProblem(
   return 'not_at_boundary';
 }
 
-/** Whether `next` reads as the rest of a sentence `previous` left open: no end mark, then lower case. */
+/**
+ * Whether `next` reads as the rest of a sentence `previous` left open: no end mark, then a lower-case
+ * word. A first word with a capital inside it ("ivyNote", "iPhone") is a name that starts a sentence.
+ */
 function continues(previous: string | undefined, next: string | undefined): boolean {
   if (!previous || !next) return false;
-  return !/[.!?:;]["'”’)]*$/.test(previous) && /^\p{Ll}/u.test(next);
+  return (
+    !/[.!?:;]["'”’)]*$/.test(previous) && /^\p{Ll}/u.test(next) && !/^\p{Ll}+\p{Lu}/u.test(next)
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
