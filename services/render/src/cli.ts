@@ -2,12 +2,14 @@
  *   pnpm render <campaign.json> [--format 16:9] [--hook id] [--cta id] [--workers N]
  *
  * Renders a campaign on Naive computers and writes the MP4, its manifest and its quality artifacts.
- * Ctrl-C stops the render and destroys every computer before the process exits.
+ * Ctrl-C, SIGTERM, SIGHUP, a closed output pipe or a parent that goes away stops the render, and
+ * every computer is destroyed before the process exits.
  */
 import { parseArgs } from 'node:util';
 import { FilmRejected, type Format } from '@boiler-room/motion';
 import { FORMATS } from '@boiler-room/schema';
 import { CostLimitExceeded } from './cost.ts';
+import { guardRun } from './guard.ts';
 import { Aborted } from './naive/exec.ts';
 import {
   DEFAULT_MAX_COST_USD,
@@ -93,32 +95,9 @@ const memoryMb = whole('memory-mb', values['memory-mb'], 1024);
 const failChunk = whole('simulate-chunk-failure', values['simulate-chunk-failure']);
 
 const controller = new AbortController();
-let interrupts = 0;
-let lastInterrupt = 0;
-const interrupt = (signalName: string) => {
-  // One Ctrl-C reaches this process more than once under pnpm and tsx: from the terminal to the
-  // whole process group, and again as each parent passes it on. Copies that close together are
-  // one press, so a single Ctrl-C never skips the cleanup.
-  const now = Date.now();
-  if (now - lastInterrupt < 1500) return;
-  lastInterrupt = now;
-  interrupts += 1;
-  if (interrupts === 1) {
-    console.error(
-      `\n${signalName}: stopping, and destroying every computer of this run. Wait for it.`,
-    );
-    controller.abort(new Aborted(`Stopped by ${signalName}.`));
-  } else if (interrupts === 2) {
-    console.error('Still destroying computers. Press Ctrl-C again to leave without waiting.');
-  } else {
-    console.error(
-      'Leaving without confirming. List computers named br-render-* and destroy any left.',
-    );
-    process.exit(130);
-  }
-};
-process.on('SIGINT', () => interrupt('SIGINT'));
-process.on('SIGTERM', () => interrupt('SIGTERM'));
+// From here on, every way the process can be stopped aborts the run, so its computers are destroyed:
+// Ctrl-C, SIGTERM, SIGHUP, a closed stdout or stderr, a parent that goes away, or an uncaught error.
+const guard = guardRun(controller);
 
 const options: RenderCampaignOptions = {
   campaignFile: positionals[0] as string,
@@ -142,31 +121,33 @@ const options: RenderCampaignOptions = {
   dryRun: values['dry-run'] ?? false,
   keepWork: values['keep-work'] ?? false,
   signal: controller.signal,
-  log: (line) => console.error(`[${new Date().toISOString().slice(11, 19)}] ${line}`),
+  log: (line) => guard.log(`[${new Date().toISOString().slice(11, 19)}] ${line}`),
 };
 
 try {
   const result = await renderCampaign(options);
-  console.log(
-    JSON.stringify(
+  guard.print(
+    `${JSON.stringify(
       'dryRun' in result ? result : { output: result.output, manifest: result.manifestFile },
       null,
       2,
-    ),
+    )}\n`,
   );
-  process.exitCode = 0;
+  process.exitCode ??= 0;
 } catch (error) {
   if (error instanceof FilmRejected) {
-    console.error(error.message);
+    guard.log(error.message);
     process.exitCode = 1;
   } else if (error instanceof CostLimitExceeded) {
-    console.error(error.message);
+    guard.log(error.message);
     process.exitCode = 3;
   } else if (error instanceof Aborted || controller.signal.aborted) {
-    console.error(error instanceof Error ? error.message : String(error));
+    guard.log(error instanceof Error ? error.message : String(error));
     process.exitCode = 130;
   } else {
-    console.error(error instanceof Error ? (error.stack ?? error.message) : String(error));
+    guard.log(error instanceof Error ? (error.stack ?? error.message) : String(error));
     process.exitCode = 1;
   }
+} finally {
+  guard.dispose();
 }

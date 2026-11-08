@@ -56,12 +56,18 @@ printed, logged, put in a command or sent to a computer.
    are compared with it (see [Seams](#seams)).
 8. **Quality artifacts** from the stitched film, and the **manifest**.
 
-Every computer is destroyed when the run ends, by success, failure, a cost stop or Ctrl-C. The
+Every computer is destroyed when the run ends, by success, failure, a cost stop or a stop. The
 pool then lists the org's computers and destroys any still named for the run (`br-render-<run>-`),
 which also catches a computer whose create answered after an abort. The manifest records what was
-left, which is always nothing on success. A second Ctrl-C says it is still cleaning up; only a
-third leaves without waiting. One press reaches the process several times under `pnpm` and `tsx`,
-and those copies count once.
+left, which is always nothing on success.
+
+The CLI turns every way it can be stopped into that cleanup (`src/guard.ts`): Ctrl-C, SIGTERM,
+Ctrl-\\, SIGHUP from a closed terminal or dropped SSH session, a closed stdout or stderr (output
+piped to `head`, or a reader that goes away), its parent process exiting, and an uncaught error.
+Node's default for a hangup or a broken pipe is to exit at once, which left computers billing. A
+second press says it is still cleaning up; only a third leaves without waiting, and a hangup,
+closed pipe or lost parent never does. One press reaches the process several times under `pnpm`
+and `tsx`, and those copies count once.
 
 ## Naive
 
