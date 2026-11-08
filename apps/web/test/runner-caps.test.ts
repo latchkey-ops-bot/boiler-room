@@ -153,9 +153,21 @@ describe('real-film caps', () => {
     await expectRefused(createFilm(ctx, { url: 'again.com' }), 429, 'daily_cap');
     // A day later it no longer counts.
     harness.clock.advance(24 * 3600 + 60);
-    expect(
-      (await createFilm(await harness.context(user), { url: 'tomorrow.com' })).film.pipeline,
-    ).toBe('naive');
+    const tomorrow = await createFilm(await harness.context(user), { url: 'tomorrow.com' });
+    expect(tomorrow.film.pipeline).toBe('naive');
+    await harness.flush();
+    await toApproval(harness, tomorrow.film.id);
+    // Still waiting for approval two days on, it counts at its full cap: $2.50 + $2.50 fits the
+    // $5.00 day, and a third would not.
+    harness.clock.advance(2 * 24 * 3600);
+    const next = await createFilm(await harness.context(user), { url: 'later.com' });
+    await harness.flush();
+    await toApproval(harness, next.film.id);
+    await expectRefused(
+      createFilm(await harness.context(user), { url: 'third.com' }),
+      429,
+      'daily_cap',
+    );
   });
 
   it('refuses every new real film while the tripwire holds', async () => {

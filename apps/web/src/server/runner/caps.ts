@@ -39,13 +39,15 @@ const holdingResearcher = ({ now }: CapScope) => sql`((select count(*) from film
 
 /**
  * What real films have cost in the last 24 hours, in micro-USD. A run still live counts at its
- * full cap, so the daily caps hold even if every live film spends all it may.
+ * full cap, however long ago it started (one may wait days for approval), so the daily caps hold
+ * even if every live film spends all it may.
  */
 const daySpend = (config: RunnerConfig, { now }: CapScope, scope: SQL | null) => sql`(
   (select coalesce(sum(max(r.cost_crew_micro_usd + r.cost_compute_micro_usd,
       case when r.state in ('done', 'failed', 'ended') then 0 else r.cost_cap_micro_usd end)), 0)
     from film_runs r join films f on f.id = r.film_id
-    where r.created_at > ${now - DAY_MS} ${scope ? sql`and ${scope}` : sql``})
+    where (r.created_at > ${now - DAY_MS} or r.state not in ('done', 'failed', 'ended'))
+      ${scope ? sql`and ${scope}` : sql``})
   + (select count(*) * ${config.filmCapMicroUsd} from films f
     where f.pipeline = 'naive' and f.pipeline_run_id is null and f.created_at > ${now - RESERVED_MS}
       ${scope ? sql`and ${scope}` : sql``}))`;
