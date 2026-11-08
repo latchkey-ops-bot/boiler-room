@@ -1,4 +1,11 @@
 import {
+  checkImageFit,
+  type FilmIssue,
+  type Format,
+  sceneImplementations,
+  validateFilm,
+} from '@boiler-room/motion';
+import {
   type Campaign,
   campaignSchema,
   extractNumericTokens,
@@ -17,6 +24,12 @@ import type { ResearchOutput } from '../researcher/output.ts';
 import { normaliseUrl } from '../researcher/text.ts';
 import { canonicalJson } from '../sync.ts';
 import { type DirectorBrief, directorOutputSchema, type Handoff } from './output.ts';
+import {
+  heroScreens,
+  type SiteScrollSupport,
+  scrollCaptures,
+  siteScrollSupport,
+} from './site-scroll.ts';
 import { frameSeconds, PROOF_TYPES, rowStarts, type Template, templateFor } from './templates.ts';
 
 /** Who must act on an issue. Only the Director's own issues are sent back to it. */
@@ -191,10 +204,12 @@ const WORDS: Record<string, Partial<Record<TextItem['role'], [number, number]>>>
   'end-card': { cta: [1, 4] },
 };
 
-/** Props that carry the Researcher's DOM capture data, which research.json does not hold. */
+/**
+ * Props that carry the Researcher's DOM capture data, which research.json does not hold. A
+ * `site-scroll`'s `pages` are checked against what the research supports, in `checkSiteScroll`.
+ */
 const CAPTURE_PROPS: Record<string, readonly string[]> = {
   'site-hero': ['frame', 'layers', 'focus', 'activeLayer'],
-  'site-scroll': ['pages'],
 };
 
 type Push = (
@@ -257,7 +272,9 @@ function checkTemplate(campaign: Campaign, template: Template, push: Push): void
           ? ['iso-chain', 'cell-type']
           : expected.slot === 'tiles'
             ? ['tile-wall', 'feature-card']
-            : [expected.type];
+            : expected.slot === 'tour'
+              ? ['site-scroll', 'site-hero']
+              : [expected.type];
     if (!allowed.includes(scene.type)) {
       push(
         'TEMPLATE_ROWS',
@@ -325,6 +342,10 @@ export function expectedSeams(campaign: Campaign, template: Template): (string |
     if (isProof(5) && !isProof(6) && !isProof(7)) seams[5] = 't1';
   }
   if (template.name === 'short' && !isProof(6)) seams[5] = 't5';
+  // A site-hero in the tour row leaves on scale, so no t1 can join it to the next row's x entry.
+  for (const [index, each] of template.rows.entries()) {
+    if (each.slot === 'tour' && campaign.scenes[index]?.type === 'site-hero') seams[index] = 't3';
+  }
   return seams;
 }
 
@@ -797,7 +818,8 @@ function checkHandoff(campaign: Campaign, handoff: Handoff, template: Template, 
     if (!expected) continue;
     const substituted =
       (expected.slot === 'proof' && !(PROOF_TYPES as readonly string[]).includes(scene.type)) ||
-      (expected.slot === 'tiles' && scene.type !== 'tile-wall');
+      (expected.slot === 'tiles' && scene.type !== 'tile-wall') ||
+      (expected.slot === 'tour' && scene.type !== 'site-scroll');
     if (substituted && !handoff.substitutions.some((each) => each.row === index + 1)) {
       push(
         'HANDOFF',
@@ -820,6 +842,178 @@ function checkHandoff(campaign: Campaign, handoff: Handoff, template: Template, 
   }
 }
 
+/** What the Director must write for a `site-scroll` row, given what the research supports. */
+export interface TourPlan {
+  support: SiteScrollSupport;
+  /** Captured screens a site-hero in the tour row can show, best first. */
+  screens: string[];
+}
+
+export function tourPlan(research: ResearchOutput, brief: DirectorBrief): TourPlan {
+  return {
+    support: siteScrollSupport(scrollCaptures(research), brief.formats),
+    screens: heroScreens(research, brief.formats),
+  };
+}
+
+/**
+ * A `site-scroll` only where the research supports one, with the pages it gives, never invented.
+ * Otherwise the row is a `site-hero` on the best captured screen that another site-hero does not
+ * already show, keeping the row's frames.
+ */
+function checkSiteScroll(
+  campaign: Campaign,
+  research: ResearchOutput,
+  brief: DirectorBrief,
+  plan: TourPlan,
+  template: Template | undefined,
+  push: Push,
+): Set<number> {
+  const flagged = new Set<number>();
+  const heroAssets = new Set(
+    campaign.scenes.flatMap((scene) => (scene.type === 'site-hero' ? scene.assetIds : [])),
+  );
+  for (const [index, scene] of campaign.scenes.entries()) {
+    if (scene.type !== 'site-scroll') continue;
+    const path = `scenes[${index}]`;
+    const { support } = plan;
+    if (support.ok) {
+      const pages = scene.props.pages;
+      const same =
+        canonicalJson(pages) === canonicalJson(support.pages) &&
+        canonicalJson(scene.assetIds.slice(0, 2)) === canonicalJson(support.assetIds);
+      if (!same) {
+        flagged.add(index);
+        push(
+          'SITE_SCROLL',
+          `${path}.props.pages`,
+          `${path} must scroll the pages the research supports, with their capture data copied unchanged.`,
+          `Set ${path}.assetIds to ${JSON.stringify(support.assetIds)} and ${path}.props.pages to ${JSON.stringify(support.pages)}.`,
+        );
+      }
+      continue;
+    }
+    flagged.add(index);
+    const [screen] = heroScreens(research, brief.formats, heroAssets);
+    const row = template?.rows[index]?.slot === 'tour' ? index + 1 : undefined;
+    push(
+      'SITE_SCROLL',
+      `${path}.type`,
+      `${path} is a site-scroll, but the research cannot support one: ${support.reasons.join('; ')}. Motion would refuse the film.`,
+      [
+        `Write ${path} as a site-hero instead: set type "site-hero", keep start ${scene.start} and end ${scene.end}`,
+        screen
+          ? `set assetIds to ["${screen}"], the best captured screen no other site-hero shows`
+          : 'set assetIds to one captured page screenshot',
+        'remove props.pages',
+        'keep at most one label, the page URL with no scheme',
+        `set transitionOut to "t3"${row ? `, and add {row: ${row}, from: "site-scroll", to: "site-hero"} to handoff.substitutions` : ''}.`,
+      ].join(', '),
+    );
+  }
+  return flagged;
+}
+
+/** Fit issues are about a capture; any other film issue is about what the Director wrote. */
+const FIT_CODES = new Set(['IMAGE_TOO_SMALL', 'IMAGE_WRONG_SHAPE']);
+
+/**
+ * What motion's render gate would refuse, run on the submission before it is handed off:
+ * `validateFilm` for each format, and the fit check on the sizes the research recorded for each
+ * capture. A refusal the Director can fix is its own error. A capture too small or the wrong
+ * shape outside a site-scroll is the Researcher's, and the handoff must list it in issuesLeft.
+ * Issues in a site-scroll scene already sent back by `checkSiteScroll` are not repeated.
+ */
+function checkFilm(
+  campaign: Campaign,
+  formats: readonly Format[],
+  skip: ReadonlySet<number>,
+): DirectorIssue[] {
+  const sizes = Object.fromEntries(
+    Object.entries(campaign.assets).flatMap(([id, asset]) =>
+      asset.width && asset.height ? [[id, { width: asset.width, height: asset.height }]] : [],
+    ),
+  );
+  const skipped = (issue: FilmIssue) => {
+    const scene = /^scenes\[(\d+)\]/.exec(issue.path)?.[1];
+    if (scene !== undefined) return skip.has(Number(scene));
+    const asset = /^assets\.([^.]+)\.src$/.exec(issue.path)?.[1];
+    if (asset === undefined) return false;
+    const users = campaign.scenes.flatMap((each, index) =>
+      each.assetIds.includes(asset) ? [index] : [],
+    );
+    return users.length > 0 && users.every((index) => skip.has(index));
+  };
+  // The fit check parses each scene's props, as the gate does once validateFilm has passed, so a
+  // scene whose props its template refuses is left out of it: validateFilm reports that scene.
+  const refused = (scene: Scene) =>
+    Object.hasOwn(sceneImplementations, scene.type) &&
+    !sceneImplementations[scene.type]?.props.safeParse(scene.props).success;
+  const fittable: Campaign = {
+    ...campaign,
+    scenes: campaign.scenes.map((scene) =>
+      refused(scene) ? { ...scene, type: 'refused-props', assetIds: [] } : scene,
+    ),
+  };
+  const seen = new Map<string, DirectorIssue>();
+  for (const format of formats) {
+    let found: FilmIssue[];
+    try {
+      found = [...validateFilm(campaign, format), ...checkImageFit(fittable, format, sizes)];
+    } catch (cause) {
+      found = [
+        {
+          code: 'PROPS_INVALID',
+          severity: 'error',
+          path: 'scenes',
+          message: `Motion could not check this campaign in ${format}: ${cause instanceof Error ? cause.message : String(cause)}`,
+          fix: 'Fix the scene the message names so its template accepts its props.',
+        },
+      ];
+    }
+    for (const issue of found) {
+      if (skipped(issue)) continue;
+      const key = `${issue.code} ${issue.path}`;
+      if (seen.has(key)) continue;
+      const researcher = FIT_CODES.has(issue.code) && issue.path.startsWith('assets.');
+      seen.set(key, {
+        code: issue.code,
+        severity: issue.severity,
+        path: `campaign.${issue.path}`,
+        message: formats.length > 1 ? `In ${format}: ${issue.message}` : issue.message,
+        fix: researcher
+          ? `${issue.fix} Until the Researcher supplies it, use another captured asset that is large enough, or list {code: "${issue.code}", path: "${issue.path}", owner: "researcher"} in handoff.issuesLeft.`
+          : issue.fix,
+        owner: researcher ? 'researcher' : 'director',
+      });
+    }
+  }
+  return [...seen.values()];
+}
+
+/**
+ * A film error the Director leaves to another agent must be in handoff.issuesLeft, so a handoff
+ * never says nothing is left while motion would refuse a scene.
+ */
+function checkIssuesLeft(film: readonly DirectorIssue[], handoff: Handoff, push: Push): void {
+  const listed = (issue: DirectorIssue) =>
+    handoff.issuesLeft.some(
+      (left) =>
+        left.code === issue.code &&
+        (`campaign.${left.path}` === issue.path || left.path === issue.path),
+    );
+  for (const issue of film) {
+    if (issue.owner === 'director' || issue.severity !== 'error' || listed(issue)) continue;
+    const path = issue.path.replace(/^campaign\./, '');
+    push(
+      'HANDOFF',
+      'handoff.issuesLeft',
+      `Motion would refuse the film for ${issue.code} at ${path}, and handoff.issuesLeft does not list it.`,
+      `Add {code: "${issue.code}", path: "${path}", owner: "${issue.owner}", note: "${issue.message.replace(/"/g, "'").slice(0, 160)}"} to handoff.issuesLeft, or fix it by using a capture that fits.`,
+    );
+  }
+}
+
 export interface Verdict {
   /** The Director's own errors. A submission passes when this is empty. */
   blocking: DirectorIssue[];
@@ -832,12 +1026,16 @@ export interface Verdict {
 /**
  * Checks one submission: `validateCampaign` with `sceneRegistry`, then the checks of §10 of the
  * director skill that the validator does not make, and the rules of this pipeline: the brand,
- * claims and assets are the research's, unchanged, and the template is the one §1 picks.
+ * claims and assets are the research's, unchanged, the template is the one §1 picks, a
+ * site-scroll only where the research supports one, and nothing motion's render gate would refuse
+ * (`validateFilm` and the fit check, in every format of the brief) unless the handoff leaves it,
+ * by name, to its owner.
  */
 export async function checkSubmission(
   raw: unknown,
   research: ResearchOutput,
   brief: DirectorBrief,
+  plan: TourPlan = tourPlan(research, brief),
 ): Promise<Verdict> {
   const issues: DirectorIssue[] = [];
   const push: Push = (code, path, message, fix, severity = 'error') =>
@@ -897,8 +1095,13 @@ export async function checkSubmission(
     }
     checkVariants(campaign, brief, facts, push);
     checkSources(campaign, research, brief, facts, push);
+    const sentBack = checkSiteScroll(campaign, research, brief, plan, template, push);
+    // Checked even beside validator errors, so one round names everything the gate would refuse.
+    const film = checkFilm(campaign, brief.formats, sentBack);
+    checkIssuesLeft(film, handoff, push);
     for (const issue of issues.slice(before))
       issue.path = `campaign.${issue.path}`.replace('campaign.handoff', 'handoff');
+    issues.push(...film);
   }
 
   return {

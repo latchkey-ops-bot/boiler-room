@@ -32,14 +32,14 @@ founder confirms them.
 
 ## Inputs and output
 
-| You get                                                                                                                                                                                                   | From         |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
-| `brand`: name, colours, fonts, logo asset, radius                                                                                                                                                         | Researcher   |
-| `assets`: captured pages, crops, logo, fonts, with provenance                                                                                                                                             | Researcher   |
-| Capture data: per captured page, DOM boxes for the hero, primary CTA and headline. Copy them verbatim into `site-hero` `props.layers`/`focus` and `site-scroll` `props.pages[].ctaBox`. Never invent them | Researcher   |
-| `claims`: each with `id`, `text`, `sourceUrl`, a verbatim `quote` and `status`                                                                                                                            | Researcher   |
-| Music: a licensed track id and file from the music library. If none is given, omit `audio` and say so in the handoff                                                                                      | Orchestrator |
-| The brief: who it is for, outreach sample or customer order, formats, CTA pages, narration paid or not                                                                                                    | Orchestrator |
+| You get                                                                                                                                                                                                                                           | From         |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------ |
+| `brand`: name, colours, fonts, logo asset, radius                                                                                                                                                                                                 | Researcher   |
+| `assets`: captured pages, crops, logo, fonts, with provenance                                                                                                                                                                                     | Researcher   |
+| Capture data: per captured page, DOM boxes for the hero, primary CTA and headline. Copy them verbatim into `site-hero` `props.layers`/`focus` and `site-scroll` `props.pages[].ctaBox`. Never invent them. Without them, see "The tour row" in §4 | Researcher   |
+| `claims`: each with `id`, `text`, `sourceUrl`, a verbatim `quote` and `status`                                                                                                                                                                    | Researcher   |
+| Music: a licensed track id and file from the music library. If none is given, omit `audio` and say so in the handoff                                                                                                                              | Orchestrator |
+| The brief: who it is for, outreach sample or customer order, formats, CTA pages, narration paid or not                                                                                                                                            | Orchestrator |
 
 You hand on a `campaign.json` with `schemaVersion: 1`, `fps: 30`, every scene of one template,
 the claims you cite, `audio`, and `variants`. The Art Director then sets colours and assigns
@@ -157,6 +157,20 @@ Keep the template's scene types. Change one only through the substitutions in
   numbers from that row.
 - Long row 17: `iso-chain` when the claims name 2 or 3 concepts to key to hues, else `cell-type`.
 
+**The tour row.** Write a `site-scroll` (Standard row 5, Long row 8) only when the research
+provides two full-page captures that pass the scene's fit-or-fail check in every format of the
+brief (`docs/motion/scenes/site-scroll.md`: page 1 at least `H + 545` output pixels below its
+start, each page at most three times as tall as wide, never one screen) and, for page 2, the DOM
+box of a CTA or heading (`ctaBox`) or a `targetY` to land on. Copy those pages and their capture
+data unchanged into `assetIds` and `props.pages`. Otherwise write the row as a `site-hero` on the
+best captured screen that row 3's `site-hero` does not show, a product, pricing or docs page
+before the home page. It keeps the row's 72 frames, start and end; it takes no props and at most
+one `label`, that page's URL; its `transitionOut` is `t3` (see `director-beat-templates`); and the
+handoff lists it as a substitution. The task names the screen to use and says whether the research
+supports a `site-scroll`. Never write a `site-scroll` without `props.pages` and leave it for
+someone else: motion refuses the whole film, as it did the first real one, whose research had only
+one-screen captures.
+
 **Seams.** Every scene except the last gets a `transitionOut` id, `t1` to `t17`. Use the
 template's default seams in `director-seams`. They meet every rule below:
 
@@ -168,7 +182,8 @@ template's default seams in `director-seams`. They meet every rule below:
   under `card.min`.
 - **Dead stops.** About a third of the seams are `t3`: `count(t3)` is in
   `[floor(s / 3), ceil(s / 3)]`. The Standard and Long defaults are at the ceiling, so a swap
-  never adds a `t3` there.
+  never adds a `t3` there, except the tour row's: a `site-hero` leaves on scale, so no `t1` can
+  join it to the next row, and its seam becomes `t3`.
 - **Limits.** `t1` and `t3` are free. `t5` is free between consecutive scenes of the same type.
   Every other id is used at most 3 times and never on two adjacent seams.
 - **Showpieces** (`t6`, `t7`, `t12` to `t15`): at most Short 2, Standard 3, Long 4 [N for Short
@@ -284,7 +299,9 @@ reference evidence: add them only on request, and say so in your handoff.
 
 The validator checks the schema, timing, claims behind numbers, character limits per scene type
 and role, contrast and scene types. It passes everything below, so check each one before the
-handoff.
+handoff. The pipeline also runs motion's render gate on every submission, `validateFilm` and the
+image fit check in every format of the brief, and sends back anything it would refuse: a handoff
+never leaves `issuesLeft` empty while a scene would fail it.
 
 | Check                  | Rule                                                                                                                                                     |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -301,6 +318,8 @@ handoff.
 | Product lines          | Every line that states what the product does cites a claim whose quote says it (§5)                                                                      |
 | Props                  | No copy, and no string that states a number. Text ids contain no digits                                                                                  |
 | Accent                 | At most one per scene, and none on `colour-event`                                                                                                        |
+| Tour row               | A `site-scroll` only with the research's long captures and page 2's `ctaBox` or `targetY`, copied; otherwise a `site-hero` on another captured screen    |
+| Render gate            | Nothing motion's `validateFilm` or image fit check refuses. A capture too small for its scene is listed in the handoff's issues left to the Researcher   |
 
 ## Worked example
 

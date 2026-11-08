@@ -247,7 +247,18 @@ sample in 16:9 with no music or narration, where extracted claims may be cited.
      word mid-sentence is a name); a number a quote states only as a goal ("Our mission is to
      connect a billion people by 2031") said as a fact (`CLAIM_GOAL`); no capture props (the
      research holds no DOM boxes), no audio without a track, no narration unpaid;
-   - brand, claims and assets copied from the research unchanged.
+   - brand, claims and assets copied from the research unchanged;
+   - a `site-scroll` only where the research supports one (`src/director/site-scroll.ts`): two
+     long captures that pass motion's fit-or-fail check in every format of the brief, page 2 with
+     a CTA box or `targetY`. `research.json` records no DOM boxes, so today the row is always a
+     `site-hero` on the best captured screen row 3 does not show, with `t3` out of it and the
+     substitution in the handoff. The task says so up front, naming the screen, and a
+     `site-scroll` is sent back with that fix (`SITE_SCROLL`);
+   - motion's render gate: `validateFilm` and `checkImageFit` (on the sizes the research recorded)
+     in every format of the brief. What the Director can fix is its error; a capture too small or
+     the wrong shape is the Researcher's, and must be listed in `handoff.issuesLeft`, so a handoff
+     never says nothing is left while motion would refuse a scene. The `direct` script runs under
+     `tsx` because `@boiler-room/motion`'s templates are TSX, which Node cannot strip.
 4. Every issue the Director owns goes back into the same session with its fix text, up to
    `--max-repairs` rounds (3). Then the run fails loudly: it prints every remaining issue, writes
    `director-failures.json`, writes no `campaign.json`, and exits 1. `CONTRAST_LOW` is the Art

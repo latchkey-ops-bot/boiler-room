@@ -324,7 +324,7 @@ describe('smallerBatches', () => {
     const { proposals, generated } = setup('#5850EC', true);
     const batches = planBatches(proposals, generated);
     const tiles = batches.find((batch) => batch.kind === 'tiles' && batch.assetIds.length > 1);
-    if (!tiles || tiles.kind !== 'tiles') throw new Error('the fixture has no tile group of two');
+    if (tiles?.kind !== 'tiles') throw new Error('the fixture has no tile group of two');
     const halves = smallerBatches(tiles);
     expect(halves.map((half) => half.id)).toEqual([`${tiles.id}-a`, `${tiles.id}-b`]);
     expect(halves.flatMap((half) => (half.kind === 'tiles' ? half.assetIds : []))).toEqual(

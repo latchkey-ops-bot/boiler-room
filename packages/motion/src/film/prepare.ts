@@ -77,9 +77,10 @@ const MAX_ASPECT = 4;
  * Each scene image against how it is shown in this format: an image of a shape a browser frame
  * shows as a strip, one enlarged past what stays sharp, or one the template cannot show here, such
  * as a page too short to scroll, is refused with what to supply instead. Every image is checked,
- * so one refusal names every capture to replace.
+ * so one refusal names every capture to replace. It needs only the images' sizes, so an agent can
+ * run it on a campaign from the sizes its research recorded, before anything is loaded.
  */
-function checkImageFit(
+export function checkImageFit(
   campaign: Campaign,
   format: Format,
   imageSizes: Record<string, ImageSize>,

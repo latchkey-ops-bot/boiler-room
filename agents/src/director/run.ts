@@ -13,7 +13,13 @@ import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { closeSession, inputTokens } from '../naive/session.ts';
 import { type ResearchOutput, researchOutputSchema } from '../researcher/output.ts';
 import { syncAgents } from '../sync.ts';
-import { checkSubmission, type DirectorIssue, researchFacts, type Verdict } from './checks.ts';
+import {
+  checkSubmission,
+  type DirectorIssue,
+  researchFacts,
+  tourPlan,
+  type Verdict,
+} from './checks.ts';
 import { type LoopClient, type LoopResult, runDirectorSession, type StreamEvent } from './loop.ts';
 import type { DirectorBrief } from './output.ts';
 import { directorResumeTask, directorTask } from './prompt.ts';
@@ -138,12 +144,20 @@ export async function direct(options: DirectOptions): Promise<number> {
     say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action}), model ${model}`);
     Object.assign(report, { agent_id: synced.id, agent_version: synced.version });
 
+    const tour = tourPlan(research, options.brief);
+    report.tour = tour;
+    say(
+      tour.support.ok
+        ? `site-scroll supported: ${tour.support.assetIds.join(', ')}`
+        : `site-scroll not supported, so its row becomes a site-hero on ${tour.screens[0] ?? 'a captured screen'}: ${tour.support.reasons[0]}`,
+    );
     const taskInput = {
       research,
       brief: options.brief,
       facts,
       filesOnHand: filesOnHand(researchDir),
       budgetUsd: budgetMicro / 1e6,
+      tour,
     };
     const sessions: Record<string, unknown>[] = [];
     report.sessions = sessions;
@@ -170,7 +184,7 @@ export async function direct(options: DirectOptions): Promise<number> {
           if (line) say(line);
         },
         check: async (output) => {
-          const verdict = await checkSubmission(output, research, options.brief);
+          const verdict = await checkSubmission(output, research, options.brief, tour);
           if (options.drillRepair && verdicts.length === 0) verdict.blocking.push(DRILL_ISSUE);
           verdicts.push(verdict);
           const round = verdicts.length;

@@ -9,7 +9,7 @@
   "scripts": {
     "sync": "node src/cli/sync.ts",
     "research": "node src/cli/research.ts",
-    "direct": "node src/cli/direct.ts",
+    "direct": "tsx src/cli/direct.ts",
     "injection": "node src/cli/injection.ts",
     "art": "node src/cli/art.ts",
     "qc": "node src/cli/qc.ts",
@@ -17,9 +17,11 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
+    "@boiler-room/motion": "workspace:*",
     "@boiler-room/schema": "workspace:*",
     "@usenaive-sdk/managed-agents": "0.12.3",
     "esbuild": "0.28.2",
+    "tsx": "4.23.15",
     "zod": "4.6.7"
   },
   "devDependencies": {

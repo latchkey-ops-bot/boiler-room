@@ -24,7 +24,9 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    as an uncropped full-page capture, or one the scene would enlarge more than 1.5 times by its
    last frame in this format, is refused with the size to supply instead. So is a page too short
    for a `site-scroll`. Every image is checked, so one refusal names every capture to replace. A
-   `site-hero` needs a capture at device scale 2, as its scene file says;
+   `site-hero` needs a capture at device scale 2, as its scene file says. This fit check is
+   exported as `checkImageFit`: it needs only the images' sizes, so the Director runs it on every
+   submission from the sizes the research recorded, before anything is rendered;
 6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
@@ -130,7 +132,9 @@ cropped from its top to at most three times as tall as it is wide, which holds p
 every format, and never cropped to one screen. A page too short for its part of the fling is refused in
 `calculateMetadata`, with the length to capture. The gate checks one image, not two, so a
 `site-scroll` with one page stops at render time. It checks that a `tile-wall` has one captured
-tile, not six: the Director writes the row as a `feature-card` when the site gives fewer.
+tile, not six: the Director writes the row as a `feature-card` when the site gives fewer. In the
+same way the Director writes the `site-scroll` row as a `site-hero` when the research has no two
+long captures that fit, page 2 with a `ctaBox` or `targetY`.
 
 `tile-wall` draws its T9 ramp into the cut only once a pin plays T9, which none does yet, so its
 rows cruise to the last frame. `motionBlur` draws `CameraMotionBlur`'s five samples from the

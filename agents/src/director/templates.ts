@@ -17,7 +17,12 @@ export type RowSlot =
   /** Long row 17: `iso-chain` or `cell-type`. */
   | 'set-piece'
   /** `tile-wall`, which becomes a `feature-card` with fewer than 6 captured tiles. */
-  | 'tiles';
+  | 'tiles'
+  /**
+   * `site-scroll`, which becomes a `site-hero` on the best captured screen when the research has
+   * no long captures with a CTA box for page 2 to land on.
+   */
+  | 'tour';
 
 export interface TemplateRow {
   type: string;
@@ -75,7 +80,7 @@ export const TEMPLATES: Record<TemplateName, Template> = {
       row('logo-reveal', 90, 't1'),
       row('site-hero', 96, 't3'),
       row('type-card', 54, 't3'),
-      row('site-scroll', 72, 't1'),
+      row('site-scroll', 72, 't1', 'tour'),
       proof('t5'),
       proof('t5'),
       proof('t5'),
@@ -104,7 +109,7 @@ export const TEMPLATES: Record<TemplateName, Template> = {
       row('tile-wall', 72, 't5', 'tiles'),
       row('type-card', 54, 't1', 'fixed', 'pivot'),
       row('type-card', 54, 't3'),
-      row('site-scroll', 72, 't1'),
+      row('site-scroll', 72, 't1', 'tour'),
       row('status-relay', 60, 't5'),
       row('status-relay', 60, 't5'),
       row('status-relay', 60, 't3'),

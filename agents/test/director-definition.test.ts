@@ -4,7 +4,7 @@ import addFormats from 'ajv-formats';
 import { describe, expect, it } from 'vitest';
 import { ALWAYS_OFF } from '../src/define.ts';
 import { director } from '../src/definitions/index.ts';
-import { researchFacts } from '../src/director/checks.ts';
+import { researchFacts, tourPlan } from '../src/director/checks.ts';
 import { directorOutputJsonSchema, OUTREACH_BRIEF } from '../src/director/output.ts';
 import { DIRECTOR_SKILLS, directorTask, repairMessage } from '../src/director/prompt.ts';
 import { agentConfig, skillContent } from '../src/sync.ts';
@@ -92,6 +92,17 @@ describe('the director task', () => {
     facts: researchFacts(research),
     filesOnHand: new Set(['logo', 'home']),
     budgetUsd: 2.5,
+    tour: tourPlan(research, OUTREACH_BRIEF),
+  });
+
+  it('says up front that the site-scroll row becomes a site-hero, and why', () => {
+    expect(task).toContain(
+      'The research does not support a site-scroll: the research records no CTA box',
+    );
+    expect(task).toContain(
+      'write the site-scroll row (Standard row 5, Long row 8) as a site-hero: the row\'s start and end, assetIds ["pr-panel"], or ["home"] if row 3\'s site-hero shows "pr-panel"',
+    );
+    expect(task).toContain('transitionOut "t3"');
   });
 
   it('gives the brief, the counted facts, the asset list and the research, with no approval steps', () => {

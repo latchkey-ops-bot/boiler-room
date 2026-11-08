@@ -14,6 +14,9 @@ importers:
 
   agents:
     dependencies:
+      '@boiler-room/motion':
+        specifier: workspace:*
+        version: link:../packages/motion
       '@boiler-room/schema':
         specifier: workspace:*
         version: link:../packages/schema
@@ -23,6 +26,9 @@ importers:
       esbuild:
         specifier: 0.28.2
         version: 0.28.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
       zod:
         specifier: 4.6.7
         version: 4.6.7
