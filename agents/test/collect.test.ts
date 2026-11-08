@@ -168,6 +168,56 @@ const FIXED_PAGE_SITE = `<!doctype html><html><head><title>Night</title><style>
 <a class="cta" href="/start">Start now</a></main></div>
 </body></html>`;
 
+// From the second field test. allbirds.com: a carousel slide that does not move on its own sits
+// off its track at x=-1491, where no visitor sees it. danluu.com: a footnote marker ran into the
+// sentence as "enabled2". cal.com: "$12" and "per user/month" in two spans read "$12per". linear.app
+// and cal.com: the prices load with a yearly billing switch on, beside the words "Billed yearly".
+const FIELD_TEXT_SITE = `<!doctype html><html><head><title>Field</title><style>
+  body { margin: 0; font-family: sans-serif; }
+  .track-box { width: 600px; overflow: hidden; }
+  .track { display: flex; transform: translateX(-1491px); }
+  .slide { flex: 0 0 600px; }
+  .price span { display: inline-block; }
+  .price .per { margin-left: 6px; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .scroll { height: 80px; overflow-y: auto; }
+</style></head><body>
+<h1>Plans</h1>
+<div class="track-box"><div class="track">
+<div class="slide"><p>Our first shoe was the Wool Runner.</p></div>
+<div class="slide"><p>Later came the trail runner.</p></div>
+<div class="slide"><p>Now we make sandals.</p></div>
+</div></div>
+<p>When AOT should be enabled<sup class="footnote-ref"><a href="#fn:1">2</a></sup>, we get a 7% speedup.</p>
+<div class="price"><span>$12</span><span class="per">per user/month</span></div>
+<div class="billing"><label for="basic-toggle"><input id="basic-toggle" type="checkbox" class="sr" checked></label><span>Billed yearly</span></div>
+<div class="scroll"><p>One</p><p>Two</p><p>Three</p><p>Reached by scrolling the box.</p></div>
+<form><input type="email" name="email" placeholder="Work email"></form>
+</body></html>`;
+
+// posthog.com: a raised button paints its orange face over a darker edge, a single hero tab is
+// purple, and a wallpaper image covers the body colour everywhere but a strip.
+const FIELD_STYLE_SITE = `<!doctype html><html><head><title>Hog</title><style>
+  body { margin: 0; background: #EEEFE9; color: #111111; font-family: sans-serif; }
+  header a { color: #23251D; }
+  .wallpaper { position: fixed; inset: 0 0 20px 0; z-index: -1; background-image: linear-gradient(#A1B2C3, #C3B2A1); }
+  .window { width: 1200px; margin: 120px auto; background: #D3DAC6; padding: 40px; }
+  .raised { display: inline-block; background: #CD8407; padding: 0 0 3px; border-radius: 6px; }
+  .raised span { display: block; padding: 12px 20px; background: #EB9D2A; border-radius: 6px; }
+  .tab { display: inline-block; padding: 12px 20px; background: #B62AD9; color: #FFFFFF; }
+  h2.big { font-family: Georgia, serif; font-size: 40px; }
+  h1.small { font-family: Arial, sans-serif; font-size: 18px; }
+</style></head><body><div class="wallpaper"></div>
+<header><a href="/" aria-label="Hog"><svg width="52" height="28" viewBox="0 0 52 28" aria-hidden="true" style="color: currentColor" fill="currentColor"><path d="M0 0h52v28H0z"/></svg></a></header>
+<div class="window">
+<h1 class="small">Your context layer</h1>
+<h2 class="big">Product analytics</h2><h2 class="big">Session replay</h2>
+<p>Every tool you need to build a better product, in one place.</p>
+<a class="raised" href="/signup"><span>Get started</span></a>
+<a class="raised" href="/install"><span>Install</span></a>
+<a class="tab" href="/ask">Ask anything</a>
+</div></body></html>`;
+
 let browser: Browser | undefined;
 
 beforeAll(async () => {
@@ -474,6 +524,55 @@ describe('collectPage in Chromium', () => {
     expect(raw.styles.rootSet).toBe(false);
     const colors = deriveColors(raw.styles);
     expect(colors).toMatchObject({ background: '#0B0B0F', mode: 'dark', primary: '#7C5CFF' });
+    await page.close();
+  });
+
+  it('hides a carousel slide off its track and footnote markers, and spaces apart separate boxes', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(FIELD_TEXT_SITE, false);
+    const rendered = raw.text.rendered.replace(/\s+/g, ' ');
+    const clean = raw.text.clean.replace(/\s+/g, ' ');
+    // translateX(-1491px) on 600 px slides shows the third slide, partly: the first is off the box.
+    expect(raw.text.hidden).toContain('Our first shoe was the Wool Runner.');
+    expect(rendered).not.toContain('Our first shoe was the Wool Runner.');
+    expect(clean).not.toContain('Our first shoe');
+    expect(rendered).toContain('When AOT should be enabled, we get a 7% speedup.');
+    expect(clean).not.toContain('enabled2');
+    expect(raw.text.dom).toContain('enabled2');
+    expect(rendered).toContain('$12 per user/month');
+    expect(clean).toContain('$12 per user/month');
+    // What a box scrolls to is not hidden.
+    expect(rendered).toContain('Reached by scrolling the box.');
+    expect(raw.controls).toEqual([{ role: 'checkbox', label: 'Billed yearly', on: true }]);
+    expect(raw.contactFields).toBe(1);
+    // The spaces put in for reading are taken out again.
+    expect(await page.evaluate(() => document.querySelector('.price')?.textContent)).toBe(
+      '$12per user/month',
+    );
+    await page.close();
+  });
+
+  it('measures a button by its face, skips a wallpaper, and weighs heading fonts by size', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(FIELD_STYLE_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    const fills = raw.ctas.map((cta) => [cta.text, cta.background?.hex]);
+    expect(fills).toContainEqual(['Get started', '#EB9D2A']);
+    expect(fills).toContainEqual(['Install', '#EB9D2A']);
+    // No sample is the wallpaper's body colour: the wallpaper is painted over it.
+    const samples = raw.styles.backgrounds.map((item) => item.hex);
+    expect(samples).toContain('#D3DAC6');
+    const body = raw.styles.backgrounds.find((item) => item.hex === '#EEEFE9')?.weight ?? 0;
+    const window = raw.styles.backgrounds.find((item) => item.hex === '#D3DAC6')?.weight ?? 0;
+    expect(body).toBeLessThan(window);
+    const colors = deriveColors(raw.styles);
+    expect(colors).toMatchObject({ background: '#D3DAC6', primary: '#111111', accent: '#EB9D2A' });
+    expect(raw.fonts?.uses.find((use) => use.role === 'display')?.stack).toContain('Georgia');
+    // The logo keeps currentColor and carries the colour it has on the page, with no markers.
+    const logo = raw.logos.find((item) => item.kind === 'inline-svg')?.svg ?? '';
+    expect(logo).toContain('fill="currentColor"');
+    expect(logo).toContain('color="#23251D"');
+    expect(logo).not.toContain('data-br-');
     await page.close();
   });
 });

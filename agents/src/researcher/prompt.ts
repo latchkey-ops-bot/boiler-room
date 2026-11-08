@@ -90,7 +90,7 @@ export function repairMessage(
     '',
     formatFailures(failures),
     '',
-    `Fix every problem in ~/${runDir}/out/${host}/result.json and keep everything else as it is. Run node TOOL verify on it until it prints VERIFY OK, then call submit_output again with the whole corrected result. If a quote cannot be found word for word, remove that claim and every reference to it. Never edit pages.json or any stored text.`,
+    `Fix every problem in ~/${runDir}/out/${host}/result.json and keep everything else as it is. Run node TOOL verify on it until it prints VERIFY OK, then call submit_output again with the whole corrected result. If a quote cannot be found word for word, remove that claim and every reference to it. If a brief fact or a claim's text says a word its quotes do not, write it in the quotes' words or cite the claim whose quote says it; never change a quote to fit. Never edit pages.json or any stored text.`,
   ].join('\n');
 }
 

@@ -69,7 +69,7 @@ describe('verifyResearch', () => {
       'brief.pricing.free_trial',
       (out: ReturnType<typeof output>) =>
         (must(out.brief.pricing).free_trial = {
-          text: 'A 14 day free trial',
+          text: 'Team: 14 per month billed yearly',
           claim_ids: ['team-price'],
         }),
     ],
@@ -135,7 +135,7 @@ describe('verifyResearch', () => {
     const out = output();
     out.claims.push({
       id: 'hidden-teams',
-      text: 'Used by many teams',
+      text: 'Orbitly is used by teams',
       sourceUrl: SITE,
       quote: hidden,
       status: 'extracted',
@@ -325,7 +325,10 @@ describe('verifyResearch', () => {
     expect(verifyResearch(out, bundle()).map((failure) => [failure.code, failure.path])).toEqual([
       ['CLAIM_UNKNOWN', 'brief.features[0]'],
       ['NUMBER_UNBACKED', 'brief.features[0]'],
+      ['NUMBER_UNBACKED', 'brief.pricing'],
+      ['WORDS_UNBACKED', 'brief.pricing'],
       ['NUMBER_UNBACKED', 'brief.pricing.plans[1]'],
+      ['WORDS_UNBACKED', 'brief.pricing.plans[1]'],
     ]);
   });
 
@@ -335,8 +338,113 @@ describe('verifyResearch', () => {
     const plan = out.brief.pricing.plans[1];
     if (!plan) throw new Error('fixture plan missing');
     plan.claim_ids = [];
-    out.brief.pricing.claim_ids = ['team-price'];
+    out.brief.pricing.claim_ids = ['free-plan', 'team-price'];
     expect(codes(out)).toEqual([]);
+  });
+
+  // linear.app: the one-liner said "shipping", which neither cited quote says; cal.com swapped
+  // "the products built on it" for "organizations".
+  it('refuses a brief fact with a word no cited quote says, and names the word', () => {
+    const out = output();
+    out.brief.one_liner.text = 'Orbitly plans and ships social posts for small teams.';
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.path, failure.briefPath])).toEqual([
+      ['WORDS_UNBACKED', 'brief.one_liner', 'brief.one_liner'],
+    ]);
+    expect(failures[0]?.message).toContain('"ships"');
+  });
+
+  // linear.app: what_it_is said "through Intake" but cited none of the claims that say it.
+  it('refuses a true word quoted only by a claim the fact does not cite', () => {
+    const out = output();
+    out.brief.audiences[0] = { who: 'Small teams with one account', claim_ids: ['small-teams'] };
+    expect(codes(out)).toEqual(['WORDS_UNBACKED']);
+    out.brief.audiences[0] = {
+      who: 'Small teams with one account',
+      claim_ids: ['small-teams', 'free-plan'],
+    };
+    expect(codes(out)).toEqual([]);
+  });
+
+  // linear.app: price-enterprise said "Custom", but its quote was "Annual billing only".
+  it("refuses a claim's text that says more than its quote", () => {
+    const out = output();
+    const claim = must(out.claims[2]);
+    claim.text = 'The Enterprise plan is custom';
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.claimTextId])).toEqual([
+      ['CLAIM_TEXT_UNBACKED', 'team-price'],
+    ]);
+    expect(failures[0]?.message).toContain('"enterprise" and "custom"');
+  });
+
+  // allbirds.com: a product page's price is quoted as "$100"; the page's title names the product.
+  it("backs the words of a fact with the title of a cited claim's page", () => {
+    const pages = bundle();
+    const pricing = must(pages.pages[1]);
+    pricing.title = 'Team plan | Orbitly';
+    pricing.text = { ...pricing.text, rendered: `${pricing.text.rendered}\n$24`, clean: '$24' };
+    const out = output();
+    out.claims.push({
+      id: 'team-only-price',
+      text: 'The Team plan is $24',
+      sourceUrl: 'https://orbitly.example.org/pricing/',
+      quote: '$24',
+      status: 'extracted',
+    });
+    expect(codes(out, pages)).toEqual([]);
+  });
+
+  it('checks only the figures of a conflict or a positioning note, which use words of their own', () => {
+    const out = output();
+    out.brief.conflicts.push({
+      description: 'The home page and the pricing page disagree on Team',
+      claim_ids: ['team-price'],
+    });
+    out.brief.positioning_note = {
+      text: 'The customer called it a calendar; the site sells posts',
+      claim_ids: ['plan-speed'],
+    };
+    expect(codes(out)).toEqual([]);
+  });
+
+  // linear.app: "$10 per user/month" is the price with the "Billed yearly" switch on, as the page
+  // loads; the brief left that out, so it read as the monthly price.
+  it('requires pricing shown with yearly billing switched on to say so', () => {
+    const pages = bundle();
+    const pricing = must(pages.pages[1]);
+    pricing.controls = [{ role: 'checkbox', label: 'Billed yearly', on: true }];
+    const out = output();
+    const brief = must(out.brief.pricing);
+    brief.summary = 'A free Solo plan, and Team at $24 per month';
+    const failures = verifyResearch(out, pages);
+    expect(failures.map((failure) => [failure.code, failure.briefPath])).toEqual([
+      ['PRICING_BILLING', 'brief.pricing.billing'],
+    ]);
+    expect(failures[0]?.message).toContain('"Billed yearly" on');
+    // The fixture's summary says "billed yearly", in the words of its cited quote.
+    expect(codes(output(), pages)).toEqual([]);
+    // A switch that is off, or a monthly one that is on, asks for nothing.
+    pricing.controls = [{ role: 'switch', label: 'Billed yearly', on: false }];
+    expect(codes(out, pages)).toEqual([]);
+    pricing.controls = [{ role: 'tab', label: 'Monthly', on: true }];
+    expect(codes(out, pages)).toEqual([]);
+  });
+
+  it("lets a billing switch's label back the pricing's billing words", () => {
+    const pages = bundle();
+    const pricing = must(pages.pages[1]);
+    pricing.text = {
+      ...pricing.text,
+      rendered: 'Pricing Solo $0 per month Team $24 per month Choose Team',
+      clean: 'Pricing Solo $0 per month Team $24 per month Choose Team',
+    };
+    pricing.controls = [{ role: 'switch', label: 'Yearly', on: true }];
+    const out = output();
+    must(out.claims[2]).quote = 'Team $24 per month';
+    must(out.claims[2]).text = 'Team costs $24 per month';
+    must(out.brief.pricing).summary = 'A free Solo plan, and Team at $24 per month, yearly';
+    expect(codes(out, pages)).toEqual([]);
   });
 
   it('requires calls to action to be verbatim on their page', () => {

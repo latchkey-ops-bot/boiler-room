@@ -135,7 +135,7 @@ export function output(): ResearchOutput {
         id: 'team-price',
         text: 'The Team plan costs $24 a month billed yearly',
         sourceUrl: 'https://orbitly.example.org/pricing',
-        quote: '$24 per month, billed yearly',
+        quote: 'Team $24 per month, billed yearly',
         status: 'extracted',
       },
       {
@@ -147,7 +147,7 @@ export function output(): ResearchOutput {
       },
       {
         id: 'small-teams',
-        text: 'Orbitly is used by 3,200 small teams',
+        text: 'Orbitly is trusted by 3,200 small teams',
         sourceUrl: SITE,
         quote: 'Trusted by 3,200 small teams.',
         status: 'extracted',
@@ -171,11 +171,11 @@ export function output(): ResearchOutput {
     brief: {
       product_name: 'Orbitly',
       one_liner: {
-        text: 'Orbitly plans social media posts for small teams.',
+        text: 'Orbitly plans social posts for small teams.',
         claim_ids: ['plan-speed', 'small-teams'],
       },
       what_it_is: {
-        text: 'A social media scheduler that plans a month of posts in 10 minutes.',
+        text: 'Social scheduling that plans a month of posts in 10 minutes.',
         claim_ids: ['plan-speed'],
       },
       audiences: [{ who: 'Small teams', claim_ids: ['small-teams'] }],
@@ -187,7 +187,7 @@ export function output(): ResearchOutput {
         },
       ],
       pricing: {
-        summary: 'A free Solo plan and a paid Team plan',
+        summary: 'A free Solo plan, and Team at $24 per month billed yearly',
         free_trial: null,
         plans: [
           { name: 'Solo', price: 'Free', claim_ids: ['free-plan'] },

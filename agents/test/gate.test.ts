@@ -8,6 +8,7 @@ import {
   unfinished,
   withoutClaims,
   withoutFailures,
+  withStoredTitles,
 } from '../src/researcher/gate.ts';
 import { bundle, output } from './fixtures.ts';
 
@@ -237,6 +238,69 @@ describe('withoutFailures', () => {
     expect(settled.brief.non_claims).toEqual([]);
     expect(settled.brief.pages).toEqual([{ ...page, title: 'Orbitly | Social scheduling' }]);
     expect((await checkResearch(settled, bundle())).failures).toEqual([]);
+  });
+
+  // Out of repair rounds, a brief or a claim text that says more than its quotes is cut back to
+  // what the quotes say, so a result whose claims are verified is never failed for its wording,
+  // and wording no quote backs never reaches the output.
+  it('settles wording in the quotes’ own words, and then passes', async () => {
+    const out = output();
+    must(out.claims[2]).text = 'The Enterprise plan is custom';
+    out.brief.one_liner.text = 'Orbitly ships social posts.';
+    out.brief.what_it_is.text = 'A calendar for posts.';
+    out.brief.features.push({
+      name: 'Analytics',
+      what_it_does: 'Charts every post',
+      claim_ids: ['plan-speed'],
+    });
+    const pricing = must(out.brief.pricing);
+    pricing.summary = 'Cheap plans for everyone';
+    pricing.plans.push({ name: 'Agency', price: '$24 per month', claim_ids: ['team-price'] });
+    const first = await checkResearch(out, bundle());
+    expect(first.failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ['CLAIM_TEXT_UNBACKED', 'claims[2].text'],
+      ['WORDS_UNBACKED', 'brief.one_liner'],
+      ['WORDS_UNBACKED', 'brief.what_it_is'],
+      ['WORDS_UNBACKED', 'brief.features[1]'],
+      ['WORDS_UNBACKED', 'brief.pricing'],
+      ['WORDS_UNBACKED', 'brief.pricing.plans[2]'],
+    ]);
+    expect(first.failures.every(prunable)).toBe(true);
+    const settled = withoutFailures(out, first.failures, bundle());
+    expect(settled.claims[2]?.text).toBe('Team $24 per month, billed yearly');
+    expect(settled.brief.one_liner).toEqual({
+      text: 'Orbitly plans a month of social posts in 10 minutes.',
+      claim_ids: ['plan-speed'],
+    });
+    expect(settled.brief.what_it_is.text).toBe(
+      'Orbitly plans a month of social posts in 10 minutes.',
+    );
+    expect(settled.brief.features.map((feature) => feature.name)).toEqual(['Planning']);
+    expect(settled.brief.pricing?.plans.map((plan) => plan.name)).toEqual(['Solo', 'Team']);
+    expect(settled.brief.pricing?.summary).toBe('Solo Free; Team $24 per month');
+    expect(settled.brief.pricing?.claim_ids).toEqual(['free-plan', 'team-price']);
+    expect((await checkResearch(settled, bundle())).failures).toEqual([]);
+  });
+
+  it('settles prices shown with yearly billing on in the words of the switch', async () => {
+    const pages = bundle();
+    must(pages.pages[1]).controls = [{ role: 'checkbox', label: 'Billed yearly', on: true }];
+    const out = output();
+    must(out.brief.pricing).summary = 'A free Solo plan, and Team at $24 per month';
+    const first = await checkResearch(out, pages);
+    expect(first.failures.map((failure) => failure.code)).toEqual(['PRICING_BILLING']);
+    const settled = withoutFailures(out, first.failures, pages);
+    expect(settled.brief.pricing?.summary).toBe(
+      'A free Solo plan, and Team at $24 per month. Billed yearly.',
+    );
+    expect((await checkResearch(settled, pages)).failures).toEqual([]);
+  });
+
+  it('keeps every listed page under its stored title, character for character', () => {
+    const pages = bundle();
+    must(pages.pages[0]).title = 'Orbitly |\u00a0Social scheduling';
+    const settled = withStoredTitles(output(), pages);
+    expect(settled.brief.pages[0]?.title).toBe('Orbitly |\u00a0Social scheduling');
   });
 
   it('cannot settle a failure that does not belong to a claim, a non-claim or a page', () => {

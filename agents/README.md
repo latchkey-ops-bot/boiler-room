@@ -72,7 +72,16 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   that answers counts only when the site links to it (its pages or sitemap) or its title or first
   heading names what was probed: sites that serve their users' pages at `/<username>` would
   otherwise hand over a person's profile as the product. A probe that redirects to a contact or
-  sales page is a form, not public product UI.
+  sales page is a form, not public product UI. A site that is one app answers every path with the
+  same shell, so a probe whose server answer matches the missing page's is judged again on the page
+  a browser renders, against the rendered missing page (linear.app's `/demo` is a public demo
+  workspace at `/demo/team/ENG/active`; its `/tour` renders the sign-in page). Each render counts
+  against the 15-page limit, the other demo probes are not rendered once one is found, and a page
+  that asks for an email address or a phone number is a form. A public demo found this way is
+  captured at the probed address, its top shot is product UI, and its text is sample data.
+- `brief.product_ui.notes` starts from a statement code writes: every probe and its verdict, and
+  the sign-in links the home page has. Sign-in pages are never loaded, so it never says a sign-in
+  does not exist.
 - Every page load, frame and fetch goes through an address guard: http(s) only, and the host must
   resolve only to public addresses. Loopback, `0.0.0.0/8`, RFC 1918, link-local `169.254.0.0/16`,
   carrier-grade NAT `100.64.0.0/10`, `::1`, `::`, `fc00::/7`, `fe80::/10` and IPv4 mapped into IPv6
@@ -97,8 +106,11 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
 - Text the page hides as it loads is kept apart as `hidden`, out of the visible text and out of
   the text file the agent reads: anything under `aria-hidden`, not displayed or not visible, in a
   closed `<details>` other than its summary, in a panel a control marks collapsed
-  (`aria-expanded="false"` with `aria-controls`), or in a collapsed accordion panel (one that clips
-  its content to no height or no width). An `aria-hidden` element that holds the page's `main` or
+  (`aria-expanded="false"` with `aria-controls`), in a collapsed accordion panel (one that clips
+  its content to no height or no width), or outside the box that clips it (a carousel slide off
+  its track, as on allbirds.com; what a box scrolls to is not hidden). Footnote markers are left
+  out of the visible text, so "enabled2" reads "enabled", and words in two boxes side by side with
+  a gap read as two words ("$12 per user/month", not "$12per"). An `aria-hidden` element that holds the page's `main` or
   first heading is a dialog library hiding the page behind its dialog, and does not count. One
   exception keeps visible copy visible: visually hidden words beside an `aria-hidden` drawing that
   is on show, readable and carries the same words (an animated price or headline, such as
@@ -106,18 +118,30 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
 - Brand tokens come from computed styles, so they work with or without CSS variables and in any
   colour syntax: the painted background, the most used readable text colour, the brand colour from
   button fills, links and headings, accents, muted text, radius, light or dark, and fonts with how
-  they load. Text in product mockups does not count.
+  they load. Text in product mockups does not count. Every colour is one an element a visitor sees
+  paints: a custom property only adds weight to a painted colour, never names one by itself. A
+  button's fill is its face, the innermost box covering it with a fill of its own (a raised
+  button's top, not its darker edge). A brand colour too light for 3:1 is replaced only by another
+  colour the site uses widely (two elements or more, at least a quarter of the top score), never
+  by one tab's; with no saturated colour, the neutral fill of the buttons is primary (a near-black
+  `#212121` over pure black text), else the text colour. Muted text has at most 70% of the
+  foreground's contrast. The display font is the one most heading text is set in, weighed by size,
+  outside the navigation, header and footer.
 - Before any token is read, cookie banners, dialogs, their scrims and fixed overlays are hidden
   (a fixed layer counts when it covers much of the screen and is on top there, unless it holds the
   page's main content or first heading). The background is what html and body paint: the body's
   opaque colour, else html's. Only a wrapper painted over the body overrides it, seen as one other
   surface on at least half of the samples across the first screens. Each sample is the first fully
   opaque fill under its point, so a semi-transparent layer, such as a dialog's scrim or a glassy
-  header, never counts.
+  header, never counts. A sample on a picture, a video or a background image (a wallpaper, even one
+  behind the content) is not counted: it covers the body colour but has no one colour of its own.
 - The logo is an SVG file if the header has one, then inline SVG, then a raster logo, then a
   favicon. Each download is checked by its bytes, so an HTML page served as `logo.svg` is refused.
-  With no logo at all, the product name is set as a wordmark and marked `generated`, and the
-  customer is asked for the real one.
+  With no logo at all, the product name is set as a wordmark in the site's own font stack and
+  heading weight (the browser default, if the site sets none) and marked `generated`, and the
+  customer is asked for the real one. An inline SVG keeps `currentColor` and carries the colour it
+  has on the page; the capture's own markers are stripped. When the home page has no title or name,
+  the other pages' titles and text say how the site writes its name ("About danluu.com").
 - A Chromium is run on a 1 GiB machine with a 2 GiB swapfile, one page at a time, always closed.
 
 ### The gate
@@ -138,15 +162,29 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   the positioning note. Each may cite only claims that exist, and every figure in it must be stated
   by a cited claim's quote, read with the campaign validator's own number extraction
   (`unbackedNumbers` in `@boiler-room/schema`): values are compared, so `$10` is not backed by
-  `$110`, and a spelled-out "ten" needs a quote that states 10. A plan is backed by its own claims
-  and the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
+  `$110`, and a spelled-out "ten" needs a quote that states 10. Every word must be stated too
+  (`WORDS_UNBACKED`, `src/researcher/words.ts`): each content word of the one-liner, what-it-is,
+  an audience, a feature, the pricing summary, a plan and the free trial must be in the quote of a
+  claim it cites, or the title of that claim's page, after case, plurals and common endings are
+  set aside. Words that only build the sentence, the product's and site's names, and relation
+  verbs ("lets", "offers", "includes") need none; a conflict or a positioning note sets sources
+  side by side in words of its own, so only its figures are checked. A claim's own text must say
+  only what its quote says (`CLAIM_TEXT_UNBACKED`), with words naming where the quote is allowed.
+  Prices a page shows with a yearly billing control on as it loads (the capture records billing
+  switches, tabs and radios and their state) must be called yearly in the pricing
+  (`PRICING_BILLING`); the control's label backs that word. A plan is backed by its own claims and
+  the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
   that still fail, drops uncaptured pages and resets page titles, and accepts the rest only if
   nothing else fails. A brief fact left citing no claim goes with its claims: a list item is
   dropped and pricing, the free trial or the positioning note becomes null. A one-liner or
-  what-it-is left uncited fails the schema, so the result is not accepted.
+  what-it-is left uncited fails the schema, so the result is not accepted. Wording no quote backs
+  is cut back to the quotes: a claim's text becomes its quote, a list item or the free trial goes,
+  the pricing summary becomes its plans' names and prices (citing their claims) with a yearly
+  billing switch's label added, the one-liner becomes its first cited quote and what-it-is its
+  cited quotes. An accepted result keeps every page title exactly as stored.
 - Provenance: the gate downloads `pages.json` itself and requires its SHA-256 to match a digest the
   capture tool printed in this session's tool output, so a bundle edited after the capture is
   refused. Assets must be files this session published, or customer material with provenance

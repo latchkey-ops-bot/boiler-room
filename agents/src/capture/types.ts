@@ -122,6 +122,17 @@ export interface RawLink {
   where: 'nav' | 'header' | 'footer' | 'body';
 }
 
+/**
+ * A control that sets the billing period prices are shown for, as the page loads: a switch, tab,
+ * radio or toggle button whose label names a year or a month, and whether it is on (checked,
+ * selected or pressed).
+ */
+export interface RawControl {
+  role: string;
+  label: string;
+  on: boolean;
+}
+
 export interface RawPage {
   url: string;
   title: string;
@@ -147,6 +158,10 @@ export interface RawPage {
   external: RawLink[];
   ctas: RawCta[];
   loginLinks: RawLink[];
+  /** Billing-period controls and their state as the page loads. */
+  controls: RawControl[];
+  /** Visible fields that ask for an email address or a phone number: a form, not a product. */
+  contactFields: number;
   ui: RawUiCandidate[];
   media: { kind: 'video' | 'iframe'; src: string }[];
   meta: Record<string, string>;

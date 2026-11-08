@@ -1,4 +1,5 @@
 import type {
+  RawControl,
   RawCta,
   RawFontFace,
   RawFonts,
@@ -375,10 +376,50 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       if (panel && !panel.contains(trigger)) closedPanels.add(panel);
     }
   }
+  // A box that clips what overflows it (overflow hidden or clip), nearest first. A slide of a
+  // carousel that does not move on its own sits outside its track's box, where nobody sees it until
+  // they click. A box that scrolls is not a clip: a visitor can scroll to what is in it.
+  const CLIPS_AWAY = /hidden|clip/;
+  const clipCache = new Map<Element, Element | null>();
+  const clipOf = (el: Element): Element | null => {
+    const parent = el.parentElement;
+    if (!parent || parent === body || parent === document.documentElement) return null;
+    let known = clipCache.get(parent);
+    if (known === undefined) {
+      const style = styleOf(parent);
+      // What is inside a box that scrolls can be scrolled to, whatever clips the box itself.
+      known =
+        CLIPS_AWAY.test(style.overflowX) || CLIPS_AWAY.test(style.overflowY)
+          ? parent
+          : /auto|scroll/.test(`${style.overflowX} ${style.overflowY}`)
+            ? null
+            : clipOf(parent);
+      clipCache.set(parent, known);
+    }
+    return known;
+  };
+  const clippedAway = (el: Element): boolean => {
+    const rect = el.getBoundingClientRect();
+    // A box of 2 px or less is the visually hidden pattern, which the concealed text rules read.
+    if (rect.width <= 2 && rect.height <= 2) return false;
+    if (rect.right + window.scrollX <= 0) return true;
+    const clip = clipOf(el);
+    if (!clip) return false;
+    const style = styleOf(clip);
+    const box = clip.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2) return false;
+    const x = CLIPS_AWAY.test(style.overflowX);
+    const y = CLIPS_AWAY.test(style.overflowY);
+    return (
+      (x && (rect.right <= box.left + 1 || rect.left >= box.right - 1)) ||
+      (y && (rect.bottom <= box.top + 1 || rect.top >= box.bottom - 1))
+    );
+  };
   const hidesItself = (el: Element): boolean => {
     if (el.getAttribute('aria-hidden') === 'true' && !el.querySelector('main, [role="main"], h1'))
       return true;
     if (closedPanels.has(el)) return true;
+    if (styleOf(el).position !== 'fixed' && clippedAway(el)) return true;
     const parent = el.parentElement;
     if (
       parent?.tagName === 'DETAILS' &&
@@ -426,6 +467,41 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       hiddenMarks += 1;
     }
 
+  // A footnote's marker, such as the "2" in "enabled2", is a link to a note, not a word of the
+  // sentence: it is left out of the visible text, so it is never quoted as a figure.
+  const noteRefs = Array.from(
+    document.querySelectorAll(
+      'sup a[href^="#"], a[href^="#fn"], [role="doc-noteref"], .footnote-ref, sup.reference',
+    ),
+  )
+    .map((el) => el.closest('sup') ?? el)
+    .filter((el) => (el.textContent ?? '').trim().length <= 4);
+  for (const el of noteRefs) el.setAttribute('data-br-noteref', '1');
+  const isNoteRef = (el: Element) => el.closest('[data-br-noteref]') !== null;
+
+  // Words in two boxes side by side with a gap between them read as two words, though the markup
+  // runs them together, as "$12" and "per user/month" in two spans do. A space is put in for the
+  // reading and taken out after. Every box is measured first, so the page lays out once.
+  const gaps: Element[] = [];
+  for (const el of Array.from(body.querySelectorAll('*')).slice(0, 8000)) {
+    const before = el.previousSibling;
+    const prev = el.previousElementSibling;
+    if (!prev || before !== prev || SKIP.has(el.tagName)) continue;
+    if (!styleOf(el).display.startsWith('inline') || !styleOf(prev).display.startsWith('inline'))
+      continue;
+    if (!(el.textContent ?? '').trim() || !(prev.textContent ?? '').trim()) continue;
+    if (/\s$/.test(prev.textContent ?? '') || /^\s/.test(el.textContent ?? '')) continue;
+    const a = prev.getBoundingClientRect();
+    const b = el.getBoundingClientRect();
+    const sameLine = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0;
+    if (sameLine && b.left - a.right >= 2) gaps.push(el);
+  }
+  const spaces = gaps.map((el) => {
+    const space = document.createTextNode(' ');
+    el.before(space);
+    return space;
+  });
+
   for (const el of concealed) el.setAttribute('data-br-concealed', '1');
   const concealedText = concealed.size
     ? walkText(body, undefined, (parent) => concealed.has(parent) && !isHidden(parent))
@@ -436,8 +512,9 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   let rendered = '';
   {
     const hide = document.createElement('style');
-    hide.textContent = '[data-br-concealed], [data-br-hidden] { display: none !important; }';
-    if (concealed.size || hiddenMarks) document.head.appendChild(hide);
+    hide.textContent =
+      '[data-br-concealed], [data-br-hidden], [data-br-noteref] { display: none !important; }';
+    if (concealed.size || hiddenMarks || noteRefs.length) document.head.appendChild(hide);
     // biome-ignore lint/performance/useDomNodeTextContent: the rendered text is what a reader sees, which is what is captured here
     rendered = (body as HTMLElement).innerText ?? '';
     hide.remove();
@@ -446,9 +523,64 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   const clean = walkText(
     body,
     (el) => illustrative.has(el),
-    (parent) => !concealed.has(parent) && !isHidden(parent),
+    (parent) => !concealed.has(parent) && !isHidden(parent) && !isNoteRef(parent),
   );
   const illustrativeText = [...illustrative].map((el) => walkText(el)).join('\n');
+  for (const space of spaces) space.remove();
+
+  // Controls that set the billing period prices are shown for, and their state as the page
+  // loads: a price shown with "Billed yearly" switched on is not the monthly price.
+  const PERIOD = /\b(years?|yearly|annual|annually|annum|months?|monthly)\b/i;
+  const labelOf = (el: Element): string => {
+    const own = el.getAttribute('aria-label');
+    if (own) return own;
+    const by = (el.getAttribute('aria-labelledby') ?? '')
+      .split(/\s+/)
+      .map((id) => document.getElementById(id)?.textContent ?? '')
+      .join(' ');
+    if (by.trim()) return by;
+    const input = el as HTMLInputElement;
+    const label = input.labels?.[0]?.textContent ?? el.closest('label')?.textContent ?? '';
+    if (label.trim()) return label;
+    // biome-ignore lint/performance/useDomNodeTextContent: the label a visitor reads
+    const text = (el as HTMLElement).innerText ?? el.textContent ?? '';
+    if (text.trim()) return text;
+    // A bare switch is labelled by the words beside it, as in "Monthly [switch] Yearly" or a
+    // switch with "Billed yearly" next to it: the nearest enclosing box with a few words.
+    let box = el.parentElement;
+    for (let depth = 0; box && box !== body && depth < 4; depth++, box = box.parentElement) {
+      // biome-ignore lint/performance/useDomNodeTextContent: the label a visitor reads
+      const around = ((box as HTMLElement).innerText ?? '').trim();
+      if (around) return around.length <= 80 ? around : '';
+    }
+    return '';
+  };
+  const controls: RawControl[] = [];
+  for (const el of Array.from(
+    document.querySelectorAll(
+      '[role="switch"], [role="tab"], [role="radio"], [role="checkbox"], input[type="checkbox"], input[type="radio"], button[aria-pressed], [aria-checked], [aria-selected]',
+    ),
+  )) {
+    // A switch drawn over a hidden native checkbox keeps its state in the checkbox.
+    if (controls.length >= 12 || (isHidden(el) && !(el instanceof HTMLInputElement))) continue;
+    const label = clip(labelOf(el), 80);
+    if (!PERIOD.test(label)) continue;
+    const on =
+      el.getAttribute('aria-checked') === 'true' ||
+      el.getAttribute('aria-selected') === 'true' ||
+      el.getAttribute('aria-pressed') === 'true' ||
+      (el instanceof HTMLInputElement && el.checked);
+    const role =
+      el.getAttribute('role') ??
+      (el instanceof HTMLInputElement ? el.type : el.tagName.toLowerCase());
+    if (!controls.some((item) => item.label === label && item.on === on && item.role === role))
+      controls.push({ role, label, on });
+  }
+  const contactFields = Array.from(
+    document.querySelectorAll(
+      'input[type="email"], input[type="tel"], input[autocomplete="email"], input[autocomplete="tel"], input[name*="email" i], input[name*="phone" i]',
+    ),
+  ).filter((el) => visible(el) && !isHidden(el)).length;
 
   const meta: Record<string, string> = {};
   for (const tag of Array.from(document.querySelectorAll('meta[name], meta[property]'))) {
@@ -625,13 +757,20 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         borderWidth >= 1 && style.borderTopStyle !== 'none' ? toColor(style.borderTopColor) : null;
       return { style, background, filled, border };
     };
-    // A link often wraps the element that is drawn as the button. The drawn box is what shows.
+    // A link often wraps the element that is drawn as the button, and a button can paint its face
+    // over its own fill, as a raised button's lighter top over its darker edge. The face a visitor
+    // sees is the innermost box that covers the button with a fill of its own, or a border.
     let box = boxOf(el);
-    if (!box.filled && !box.border && only) {
-      const innerRect = only.getBoundingClientRect();
-      const covers = innerRect.width * innerRect.height >= rect.width * rect.height * 0.8;
-      const drawn = boxOf(only);
-      if (covers && (drawn.filled || drawn.border)) box = drawn;
+    let node: Element = el;
+    for (let depth = 0; depth < 4; depth++) {
+      const cover = Array.from(node.children).find((child) => {
+        const inner = child.getBoundingClientRect();
+        return visible(child) && inner.width * inner.height >= rect.width * rect.height * 0.6;
+      });
+      if (!cover) break;
+      const drawn = boxOf(cover);
+      if (drawn.filled || (!box.filled && drawn.border)) box = drawn;
+      node = cover;
     }
     const { style, background, filled, border } = box;
     const padded = (Number.parseFloat(style.paddingLeft) || 0) >= 6;
@@ -737,7 +876,13 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   for (const video of Array.from(document.querySelectorAll('video')) as HTMLVideoElement[]) {
     const src =
       video.currentSrc || video.src || video.querySelector('source')?.src || video.poster || null;
-    if (src) media.push({ kind: 'video', src });
+    // Every source, so a direct file next to a stream is seen: a film can use an .mp4.
+    const sources = [
+      video.currentSrc || video.src,
+      ...Array.from(video.querySelectorAll('source')).map((item) => item.src),
+    ].filter((item, index, list): item is string => Boolean(item) && list.indexOf(item) === index);
+    for (const item of sources.length ? sources : src ? [src] : [])
+      media.push({ kind: 'video', src: item });
     if (visible(video) && video.getBoundingClientRect().width >= 360)
       addUi(video, 'video', src, video.getAttribute('aria-label') ?? '', 2, false, 'media');
   }
@@ -776,7 +921,17 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       const fill = toColor(styleOf(el).backgroundColor);
       return fill && fill.alpha >= 0.99 ? fill.hex : null;
     };
+    // A picture, a video or a background image is painted over whatever is behind it, but has no
+    // one colour: a sample that lands on one is not counted, so a wallpaper never reads as the
+    // body colour it covers.
+    const PICTURE = /^(img|video|canvas|picture|iframe|object|embed)$/i;
+    const pictured = (el: Element) => {
+      if (PICTURE.test(el.tagName)) return true;
+      const image = styleOf(el).backgroundImage;
+      return Boolean(image && image !== 'none');
+    };
     const rootFill = opaqueFill(body) ?? opaqueFill(document.documentElement);
+    const bodyOwnBox = opaqueFill(document.documentElement) !== null && opaqueFill(body) !== null;
     const backgrounds = new Map<string, number>();
     const height = document.documentElement.scrollHeight;
     document.head.appendChild(touchable);
@@ -790,12 +945,26 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
           const top = stack[0];
           if (!top || insideIllustrative(top)) continue;
           let hex: string | null = null;
+          let picture = false;
           for (const el of stack) {
-            if (el === body || el === document.documentElement) break;
+            // A layer behind the content (a negative z-index wallpaper) is hit after the body but
+            // painted over the body's colour, unless html paints its own and the body its box.
+            if (el === document.documentElement) continue;
+            if (el === body) {
+              if (bodyOwnBox) break;
+              continue;
+            }
             if (el.closest('[data-br-overlay]')) continue;
             hex = opaqueFill(el);
             if (hex) break;
+            if (pictured(el)) {
+              picture = true;
+              break;
+            }
           }
+          if (!hex && !picture && (pictured(body) || pictured(document.documentElement)))
+            picture = true;
+          if (picture) continue;
           hex ??= rootFill ?? '#FFFFFF';
           backgrounds.set(hex, (backgrounds.get(hex) ?? 0) + 1);
         }
@@ -970,10 +1139,35 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         if (sheet.href) unreadable.push(sheet.href);
       }
     }
+    // The display font is the one the page's headings are set in, weighed by how much heading
+    // text it sets and how large, outside the navigation, header and footer: one small hero line
+    // or a row of tab labels in the body face does not outweigh every large section heading.
+    const headingFonts = new Map<string, { stack: string; weight: number; score: number }>();
+    for (const el of Array.from(body.querySelectorAll('h1, h2'))) {
+      if (!visible(el) || insideIllustrative(el) || isHidden(el) || el.closest(CHROME)) continue;
+      // biome-ignore lint/performance/useDomNodeTextContent: the heading a visitor reads
+      const text = ((el as HTMLElement).innerText ?? '').trim();
+      if (!text) continue;
+      const style = styleOf(el);
+      const size = Number.parseFloat(style.fontSize) || 16;
+      const entry = headingFonts.get(style.fontFamily) ?? {
+        stack: style.fontFamily,
+        weight: Number.parseInt(style.fontWeight, 10) || 400,
+        score: 0,
+      };
+      // A heading draws the eye by its size as much as by its words: weighed by its area.
+      entry.score += Math.min(text.length, 80) * size * size * (el.tagName === 'H1' ? 1.5 : 1);
+      headingFonts.set(style.fontFamily, entry);
+    }
+    const heading = [...headingFonts.values()].sort((a, b) => b.score - a.score)[0];
     fonts = {
       uses: [
-        ...use('h1', 'display'),
-        ...(document.querySelector('h1') ? [] : use('h2', 'display')),
+        ...(heading
+          ? [{ role: 'display' as const, stack: heading.stack, weight: heading.weight }]
+          : [
+              ...use('h1', 'display'),
+              ...(document.querySelector('h1') ? [] : use('h2', 'display')),
+            ]),
         {
           role: 'body',
           stack: bodyStyle.fontFamily,
@@ -1060,8 +1254,22 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       const clone = svg.cloneNode(true) as SVGSVGElement;
       const from = [svg, ...Array.from(svg.querySelectorAll('*'))];
       const to = [clone, ...Array.from(clone.querySelectorAll('*'))];
+      // The colour a shape's author gave it, from the shape up to the svg: `currentColor` stays
+      // `currentColor`, so the file keeps the site's way of recolouring its mark.
+      const authored = (node: Element, prop: 'fill' | 'stroke'): string => {
+        for (let item: Element | null = node; item; item = item.parentElement) {
+          const value =
+            (item as SVGElement).style?.getPropertyValue(prop) || item.getAttribute(prop) || '';
+          if (value.trim()) return value.trim().toLowerCase();
+          if (item === svg) break;
+        }
+        return '';
+      };
       from.forEach((source, index) => {
         const target = to[index];
+        // The capture's own markers are not part of the logo.
+        for (const attr of Array.from(target?.attributes ?? []))
+          if (attr.name.startsWith('data-br-')) target?.removeAttribute(attr.name);
         if (!target || !SHAPES.has(source.tagName.toLowerCase())) return;
         const style = styleOf(source);
         for (const [prop, opacity] of [
@@ -1070,7 +1278,9 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         ] as const) {
           const value = style.getPropertyValue(prop);
           const color = toColor(value);
-          if (color) {
+          if (color && authored(source, prop) === 'currentcolor') {
+            target.setAttribute(prop, 'currentColor');
+          } else if (color) {
             target.setAttribute(prop, color.hex);
             const own = Number.parseFloat(style.getPropertyValue(opacity)) || 1;
             if (color.alpha * own < 1)
@@ -1095,7 +1305,10 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       if (!clone.getAttribute('width')) clone.setAttribute('width', String(Math.round(rect.width)));
       if (!clone.getAttribute('height'))
         clone.setAttribute('height', String(Math.round(rect.height)));
-      clone.setAttribute('color', styleOf(svg).color);
+      // What `currentColor` is on the page, as a colour the file carries itself.
+      const ink = toColor(styleOf(svg).color)?.hex ?? styleOf(svg).color;
+      clone.setAttribute('color', ink);
+      clone.style.setProperty('color', ink);
       const markup = new XMLSerializer().serializeToString(clone);
       if (markup.length > 400000) continue;
       logos.push({
@@ -1204,6 +1417,8 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     external,
     ctas,
     loginLinks,
+    controls,
+    contactFields,
     ui: ui.slice(0, 6),
     media: media.slice(0, 20),
     meta,

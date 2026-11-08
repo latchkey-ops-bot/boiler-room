@@ -146,9 +146,18 @@ describe('deriveColors', () => {
     });
   });
 
-  it('reads colour custom properties named for the brand when the site has them', () => {
+  it('reads colour custom properties named for the brand when the site paints with them', () => {
+    const painted = {
+      texts: [
+        { ...color('#1F2937'), weight: 2000, heading: false },
+        { ...color('#E11D48'), weight: 40, heading: true },
+      ],
+      links: [{ ...color('#2563EB'), weight: 6 }],
+    };
+    expect(deriveColors(styles(painted)).primary).toBe('#2563EB');
     const result = deriveColors(
       styles({
+        ...painted,
         colorVariables: [
           { name: '--brand-primary', hex: '#E11D48', alpha: 1 },
           { name: '--gray-100', hex: '#F3F4F6', alpha: 1 },
@@ -157,6 +166,22 @@ describe('deriveColors', () => {
     );
     expect(result.primary).toBe('#E11D48');
     expect(result.cssVariables).toBe(true);
+  });
+
+  // linear.app declares --color-accent #7170FF and --color-brand-bg #5E6AD2, but no element a
+  // visitor sees on the home page paints either: they were the accent and the primary.
+  it('never takes a colour only a custom property declares', () => {
+    const result = deriveColors(
+      styles({
+        colorVariables: [
+          { name: '--brand-primary', hex: '#E11D48', alpha: 1 },
+          { name: '--color-accent', hex: '#7170FF', alpha: 1 },
+        ],
+      }),
+    );
+    expect(result.primary).toBe('#1F2937');
+    expect(result.accents).toEqual([]);
+    expect(result.candidates).toEqual([]);
   });
 
   it('ignores browser default link colours, and says so', () => {
@@ -261,7 +286,9 @@ describe('deriveColors', () => {
     expect(result).toMatchObject({ primary: '#242424', accent: '#CC4510' });
   });
 
-  it('does not make neutral buttons primary unless the site declares them its brand colour', () => {
+  // linear.app: the buttons a visitor sees are near-white #E5E5E6 with dark text, and its brand
+  // and accent colours live only in custom properties nothing on the page paints.
+  it('makes the neutral fill of the buttons primary when no painted colour is saturated', () => {
     const result = deriveColors(
       styles({
         root: '#08090A',
@@ -280,7 +307,34 @@ describe('deriveColors', () => {
         ],
       }),
     );
-    expect(result.primary).toBe('#5E6AD2');
+    expect(result.primary).toBe('#E5E5E6');
+    expect(result.accents).toEqual([]);
+    expect(result.notes.join(' ')).toContain('its buttons are filled with #E5E5E6');
+  });
+
+  // allbirds.com: no saturated colour anywhere; the body text is pure black, but every button and
+  // bar a visitor sees is #212121. A lone dark chip in the body is not the brand's fill.
+  it("takes a monochrome brand's button fill over its black text, but not one chip", () => {
+    const result = deriveColors(
+      styles({
+        root: '#ECE9E2',
+        backgrounds: [{ ...color('#ECE9E2'), weight: 140 }],
+        texts: [
+          { ...color('#000000'), weight: 1100, heading: false },
+          { ...color('#575757'), weight: 300, heading: false },
+        ],
+        ctas: [
+          cta({ background: color('#212121') }),
+          cta({ background: color('#212121') }),
+          cta({ placement: 'body', background: color('#14120B') }),
+        ],
+      }),
+    );
+    expect(result).toMatchObject({ primary: '#212121', foreground: '#000000', muted: '#575757' });
+    const chip = deriveColors(
+      styles({ ctas: [cta({ placement: 'body', background: color('#14120B') })] }),
+    );
+    expect(chip.primary).toBe('#1F2937');
   });
 
   it('notes a page that declares both light and dark colour schemes', () => {
@@ -296,13 +350,35 @@ describe('deriveColors', () => {
           cta({ background: color('#FDE047'), color: color('#111111') }),
           cta({ placement: 'nav', background: color('#FDE047') }),
         ],
-        links: [{ ...color('#2563EB'), weight: 5 }],
+        links: [{ ...color('#2563EB'), weight: 8 }],
       }),
     );
     expect(result.primary).toBe('#2563EB');
     expect(result.accents).toContain('#FDE047');
     expect(contrast(result.primary, result.background)).toBeGreaterThanOrEqual(3);
     expect(result.notes.join(' ')).toContain('#FDE047');
+  });
+
+  // posthog.com: the orange button face is on every page but too light for 3:1 on the light
+  // surface; the purple fill of one hero tab cleared 3:1 and was taken as primary.
+  it("does not fall back to one element's colour when the brand colour is too light", () => {
+    const result = deriveColors(
+      styles({
+        root: '#D3DAC6',
+        backgrounds: [{ ...color('#D3DAC6'), weight: 140 }],
+        texts: [{ ...color('#111111'), weight: 2000, heading: false }],
+        ctas: [
+          cta({ background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ placement: 'nav', background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ placement: 'body', background: color('#EB9D2A'), color: color('#111111') }),
+          cta({ background: color('#B62AD9') }),
+        ],
+      }),
+    );
+    expect(result.primary).toBe('#111111');
+    expect(result.accent).toBe('#EB9D2A');
+    expect(result.notes.join(' ')).toContain('no other colour the site uses widely');
   });
 
   it('switches to a real page surface when the brand colour only works there', () => {

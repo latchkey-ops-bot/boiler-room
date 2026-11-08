@@ -37,9 +37,11 @@ import {
   type Shot,
 } from './manifest.ts';
 import {
+  answeredAsMissing,
   BASELINE_PATH,
   type CandidateLink,
   classifyLink,
+  DEMO_PROBES,
   duplicateOf,
   judgeProbe,
   type LinkKind,
@@ -246,10 +248,19 @@ export async function captureResilient(
 /** A page load refused because it left the site or reached a private address. Never retried. */
 export class RefusedPage extends Error {}
 
+/** What a probe's page shows once a browser has rendered it. */
+interface RenderedProbe {
+  title: string;
+  heading: string;
+  length: number;
+  contactFields: number;
+}
+
 interface PageFile {
   record: CapturedPage;
   stored: StoredPage;
   raw: RawPage | null;
+  rendered?: RenderedProbe;
 }
 
 let lastSiteRequest = 0;
@@ -319,6 +330,14 @@ async function capturePage(
      * address after redirects is what defines the site.
      */
     site: string | null;
+    /**
+     * Only render the page and read what it shows (title, first heading, how much text, contact
+     * fields), to judge a probe on a site that answers every path with one app shell. Nothing is
+     * stored and nothing is shot.
+     */
+    probe?: boolean;
+    /** The page is a public demo a rendered probe found: its top shot shows the product. */
+    publicDemo?: boolean;
   },
 ): Promise<PageFile> {
   const guard = urlGuard();
@@ -358,6 +377,7 @@ async function capturePage(
     text: emptyText(),
   };
   let raw: RawPage | null = null;
+  let rendered: RenderedProbe | undefined;
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 1,
@@ -463,6 +483,27 @@ async function capturePage(
         }
         await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
         await page.waitForTimeout(800);
+        if (options.probe) {
+          // An app routes on the client, so the address can change after the document loads.
+          await page.waitForTimeout(1500);
+          const moved = await refusalOf(page.url());
+          if (moved) throw new RefusedPage(`Refused ${page.url()}: ${moved}`);
+          record.final_url = page.url();
+          rendered = await page.evaluate(() => ({
+            title: document.title,
+            // biome-ignore lint/performance/useDomNodeTextContent: what a visitor reads
+            heading: (document.querySelector('h1') as HTMLElement | null)?.innerText ?? '',
+            // biome-ignore lint/performance/useDomNodeTextContent: what a visitor reads
+            length: (document.body?.innerText ?? '').trim().length,
+            contactFields: Array.from(
+              document.querySelectorAll(
+                'input[type="email"], input[type="tel"], input[autocomplete="email"], input[autocomplete="tel"], input[name*="email" i], input[name*="phone" i]',
+              ),
+            ).filter((el) => el.getBoundingClientRect().width > 0).length,
+          }));
+          record.title = rendered.title;
+          return;
+        }
         await page.evaluate(async () => {
           const height = Math.min(document.documentElement.scrollHeight, 25_000);
           for (let y = 0; y < height; y += 700) {
@@ -487,6 +528,14 @@ async function capturePage(
         record.hidden_overlays = collected.hidden;
         stored.title = collected.title;
         stored.text = collected.text;
+        // A public demo shows the product with sample data: every figure in it is a sample.
+        if (options.publicDemo && collected.contactFields === 0)
+          stored.text = {
+            ...stored.text,
+            illustrative: [stored.text.illustrative, stored.text.clean].join('\n').trim(),
+            clean: '',
+          };
+        if (collected.controls.length > 0) stored.controls = collected.controls;
         record.text_chars = normaliseWhitespace(collected.text.rendered).length;
 
         await page.evaluate(() => {
@@ -512,6 +561,10 @@ async function capturePage(
           height: 1080,
           sourceUrl: record.final_url,
         };
+        // A public demo a rendered probe found is the product itself, unless it asks for contact
+        // details: then it is a form.
+        if (options.publicDemo && collected.contactFields === 0)
+          top.ui.push({ label: 'the public demo itself', mock: false, grade: 'product' });
         record.shots.push(top);
 
         // One 1920x1080 shot per product UI candidate, unless an earlier shot of this page already
@@ -573,6 +626,7 @@ async function capturePage(
   } finally {
     await Promise.race([context.close().catch(() => {}), sleep(5000)]);
   }
+  if (options.probe) return { record, stored, raw, rendered };
   writeTextFile(record, stored);
   return { record, stored, raw };
 }
@@ -592,6 +646,15 @@ export function writeTextFile(record: CapturedPage, stored: StoredPage) {
       '',
       `--- ${hidden} characters of text on this page are hidden as it loads (collapsed answers, closed tabs or details, aria-hidden elements). They are left out: never a claim, never a brief fact. ---`,
     );
+  if (stored.controls?.length) {
+    parts.push(
+      '',
+      '--- Billing controls, as the page loads. The prices on this page are shown with these settings, and the pricing in the brief must say so. ---',
+      ...stored.controls.map(
+        (control) => `${control.role} "${control.label}": ${control.on ? 'on' : 'off'}`,
+      ),
+    );
+  }
   if (stored.text.illustrative.trim()) {
     parts.push(
       '',
@@ -732,6 +795,89 @@ function probeResponse(fetched: Fetched | null): ProbeResponse {
   };
 }
 
+/**
+ * Judges again, on the page a browser renders, each probe whose server answer was the site's
+ * answer for a missing page. A site that is one app sends every path the same shell and routes in
+ * the browser, so only the rendered page says whether `/demo` is a public demo or the sign-in page
+ * every unknown path shows. The missing page is rendered once to compare with. Each render is a
+ * page load and counts against the site's limit; once a public demo is found the other demo
+ * probes are not rendered. A rendered page that asks for an email address or a phone number is a
+ * form, not product UI.
+ */
+async function renderProbes(
+  browsers: Browsers,
+  ledger: Ledger,
+  paths: Paths,
+  probes: ProbeResult[],
+  origin: string,
+  site: string,
+  isLinked: (address: string | null) => boolean,
+): Promise<void> {
+  const ambiguous = probes.filter((probe) => answeredAsMissing(probe));
+  if (ambiguous.length === 0) return;
+  const render = async (address: string, slug: string) => {
+    const file = await captureResilient(browsers, paths, address, slug, 'other', {
+      withStyles: false,
+      withLogos: false,
+      uiShots: 0,
+      site,
+      probe: true,
+    });
+    if (!file.rendered || file.record.error) return null;
+    const response: ProbeResponse = {
+      status: file.record.status,
+      final_url: file.record.final_url,
+      content_type: 'text/html',
+      title: file.rendered.title,
+      length: file.rendered.length,
+      heading: file.rendered.heading,
+    };
+    return { response, contactFields: file.rendered.contactFields };
+  };
+  const missing = `${origin}${BASELINE_PATH}`;
+  if (!ledger.take(missing)) return;
+  log('  the server answers the probes as it answers a missing page; rendering them');
+  const baseline = await render(missing, 'probe-baseline');
+  if (!baseline) return;
+  let demo = false;
+  for (const probe of ambiguous) {
+    const index = probes.indexOf(probe);
+    if (demo && DEMO_PROBES.has(probe.path)) {
+      probes[index] = {
+        ...probe,
+        reason: `${probe.reason}; not rendered: a public demo was found`,
+      };
+      continue;
+    }
+    if (!ledger.take(probe.url)) {
+      probes[index] = { ...probe, reason: `${probe.reason}; not rendered: the page limit is used` };
+      continue;
+    }
+    const seen = await render(probe.url, `probe${probe.path.replace(/\W+/g, '-')}`);
+    if (!seen) {
+      probes[index] = { ...probe, reason: `${probe.reason}; it did not render` };
+      continue;
+    }
+    let judged = judgeProbe(
+      probe.path,
+      probe.url,
+      seen.response,
+      baseline.response,
+      site,
+      isLinked(probe.url) || isLinked(seen.response.final_url),
+    );
+    if (judged.found && seen.contactFields > 0)
+      judged = { ...judged, found: false, reason: 'a form asking for contact details' };
+    probes[index] = {
+      ...judged,
+      reason: `rendered in a browser: ${judged.reason}`,
+      rendered: true,
+    };
+    if (judged.found && DEMO_PROBES.has(probe.path)) demo = true;
+    log(`  ${probe.path}: ${probes[index]?.found ? 'FOUND' : 'no'} (${probes[index]?.reason})`);
+  }
+}
+
 export interface DiscoverFile {
   site: string;
   requested: string;
@@ -845,6 +991,7 @@ export async function discover(base: string, url: string, script: string): Promi
       );
     }
     await fetchContext.close().catch(() => {});
+    await renderProbes(browsers, ledger, paths, probes, origin, site, isLinked);
 
     const raw = home.raw as RawPage | null;
     const linkText = new Map<string, CandidateLink>();
@@ -1017,7 +1164,7 @@ async function downloadLogo(
   raw: RawPage,
   site: string,
   name: string,
-  display: string,
+  wordmark: { family: string; weight: number },
   color: string,
   generic: 'serif' | 'sans-serif' | 'monospace',
 ): Promise<CaptureManifest['brand']['logo']> {
@@ -1073,7 +1220,7 @@ async function downloadLogo(
     };
   }
   log('  no logo, inline logo or favicon could be downloaded; writing a wordmark of the name');
-  const svg = wordmarkSvg(name, display, color, generic);
+  const svg = wordmarkSvg(name, wordmark.family, color, generic, wordmark.weight);
   writeFileSync(join(paths.out, 'logo.svg'), svg);
   const width = Number(/width="(\d+)"/.exec(svg)?.[1] ?? 0) || null;
   return { source: 'generated', file: 'logo.svg', url: null, kind: 'svg', width, height: 96 };
@@ -1172,6 +1319,7 @@ export async function capture(
   const known = new Map(found.links.map((link) => [normaliseUrl(link.url), link]));
   const skipped: CaptureManifest['skipped'] = [];
   const queue: { url: string; kind: LinkKind; slug?: string }[] = [];
+  const captured = new Set(existing.map((page) => normaliseUrl(page.record.url)));
   // A page whose earlier load failed or read no text may be loaded once more, under its old slug.
   const failed = new Map(
     existing
@@ -1198,6 +1346,12 @@ export async function capture(
       continue;
     }
     if (queue.some((entry) => normaliseUrl(entry.url) === key)) continue;
+    // A probe discover rendered is in the ledger but was never captured: capturing it now loads
+    // the same page again, which the ledger counts once.
+    if (ledger.has(item) && !captured.has(key)) {
+      queue.push({ url: item, kind });
+      continue;
+    }
     if (ledger.has(item)) {
       const earlier = failed.get(key);
       if (earlier && ledger.retry(item))
@@ -1207,6 +1361,13 @@ export async function capture(
     queue.push({ url: item, kind });
   }
 
+  // Public demos a rendered probe found: the page itself is the product.
+  const demos = new Set(
+    found.probes
+      .filter((probe) => probe.found && probe.rendered && DEMO_PROBES.has(probe.path))
+      .flatMap((probe) => [probe.url, probe.final_url ?? probe.url])
+      .map((address) => normaliseUrl(address) ?? address),
+  );
   const browsers = new Browsers();
   try {
     const kept = existing.filter((page) => !failed.has(normaliseUrl(page.record.url)));
@@ -1226,6 +1387,7 @@ export async function capture(
         withLogos: false,
         uiShots: Math.max(0, Math.min(MAX_UI_SHOTS_PER_PAGE, MAX_UI_SHOTS - uiShots)),
         site,
+        publicDemo: demos.has(normaliseUrl(item.url) ?? ''),
       });
       const identity = (file: PageFile) => ({
         finalUrl: file.record.final_url,
@@ -1269,10 +1431,35 @@ export async function capture(
       logoAlt,
       raw.text.rendered,
     );
-    const name = guess.name;
-    if (guess.source === 'domain')
+    // A home page with no title and no name of its own, as a plain blog's can be: the other pages'
+    // titles and text say how the site writes its name.
+    let named = guess;
+    let namedOn: string | null = null;
+    if (guess.source === 'domain') {
+      for (const page of pages) {
+        if (page === home) continue;
+        const other = brandNameGuess(
+          {},
+          page.record.title,
+          new URL(site).hostname,
+          '',
+          page.stored.text.rendered,
+        );
+        if (other.source !== 'domain') {
+          named = other;
+          namedOn = page.record.final_url;
+          break;
+        }
+      }
+    }
+    const name = named.name;
+    if (namedOn)
       colors.notes.push(
-        `The site never writes its name, and has no title or site name: "${name}" is the domain's name, as the domain writes it.`,
+        `The home page has no title or site name and does not write the site's name; "${name}" is how ${namedOn} writes it.`,
+      );
+    else if (named.source === 'domain')
+      colors.notes.push(
+        `No captured page writes the site's name, and none has a title or site name that holds it: "${name}" is the domain's name, as the domain writes it.`,
       );
     const display =
       fonts.find((font) => font.role === 'display')?.family ??
@@ -1286,13 +1473,26 @@ export async function capture(
       '';
     const kind = genericOf(`${displayStack}, ${display}`);
     const generic = kind === 'serif' ? 'serif' : kind === 'mono' ? 'monospace' : 'sans-serif';
+    // A wordmark is set as visitors see the name: in the site's own font, even the browser's
+    // default when the site sets none (a stand-in is only for a film that needs a file), and at the
+    // weight its headings use, or regular when it has none.
+    const shown =
+      fonts.find((font) => font.role === 'display') ?? fonts.find((font) => font.role === 'body');
+    const ownDefault =
+      shown?.method === 'substitute' &&
+      (shown.reason === 'browser-default' || shown.reason === 'system') &&
+      displayStack !== '';
+    const wordmark = {
+      family: ownDefault ? displayStack : display,
+      weight: raw.fonts?.uses.find((use) => use.role === 'display')?.weight ?? 400,
+    };
     const logo = await downloadLogo(
       request,
       paths,
       raw,
       site,
       name,
-      display,
+      wordmark,
       wordmarkColor,
       generic,
     );

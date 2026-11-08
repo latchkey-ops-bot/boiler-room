@@ -1,7 +1,13 @@
 import { validateResearchParts } from '@boiler-room/schema';
 import type { z } from 'zod';
 import { fileIdOf, type ResearchOutput, researchOutputSchema } from './output.ts';
-import { type Failure, PageIndex, type PagesBundle, verifyResearch } from './verify.ts';
+import {
+  type Failure,
+  PageIndex,
+  type PagesBundle,
+  verifyResearch,
+  yearlyBillingLabel,
+} from './verify.ts';
 
 /** A reason the result cannot be accepted, in the form the agent is sent to repair it. */
 export interface GateFailure {
@@ -14,6 +20,10 @@ export interface GateFailure {
   nonClaimIndex?: number;
   /** The `brief.pages` item the failure belongs to, which can be corrected or dropped. */
   pageIndex?: number;
+  /** The claim whose own text says more than its quote, which the gate sets to the quote. */
+  claimTextId?: string;
+  /** The brief fact that says more than its quotes, which the gate settles. */
+  briefPath?: string;
 }
 
 export const PLACEHOLDER_MARK = 'PUBLISH:';
@@ -260,14 +270,97 @@ export function prunable(failure: GateFailure): boolean {
   return (
     failure.claimId !== undefined ||
     failure.nonClaimIndex !== undefined ||
-    failure.pageIndex !== undefined
+    failure.pageIndex !== undefined ||
+    failure.claimTextId !== undefined ||
+    failure.briefPath !== undefined
   );
+}
+
+/** The indexes of the items of one brief list that failed, such as `brief.features[2]`. */
+function failedIndexes(paths: ReadonlySet<string>, list: string): Set<number> {
+  const pattern = new RegExp(`^${list.replace(/[.[\]]/g, '\\$&')}\\[(\\d+)\\]$`);
+  const indexes = new Set<number>();
+  for (const path of paths) {
+    const match = pattern.exec(path);
+    if (match) indexes.add(Number(match[1]));
+  }
+  return indexes;
+}
+
+/**
+ * The brief with every fact that says more than its quotes settled in the quotes' own words. A
+ * list item (an audience, a feature, a plan, a conflict), the free trial and the positioning note
+ * go. The pricing summary becomes
+ * its plans' names and prices, citing every claim they cite. The one-liner becomes the quote of
+ * the first claim it cites, and what-it-is the quotes of the claims it cites, so each says exactly
+ * what its claims say. Prices shown with yearly billing switched on get the switch's label, as in
+ * "Billed yearly". Claims in `dropped` are about to go, so nothing is settled onto them.
+ */
+export function settleBrief(
+  output: ResearchOutput,
+  paths: ReadonlySet<string>,
+  dropped: ReadonlySet<string> = new Set(),
+  billing: string | null = null,
+): ResearchOutput {
+  if (paths.size === 0) return output;
+  const quotes = new Map(
+    output.claims.filter((claim) => !dropped.has(claim.id)).map((claim) => [claim.id, claim]),
+  );
+  const brief = { ...output.brief };
+  if (paths.has('brief.one_liner')) {
+    const id = brief.one_liner.claim_ids.find((item) => quotes.has(item));
+    const claim = id ? quotes.get(id) : undefined;
+    if (id && claim) brief.one_liner = { text: claim.quote, claim_ids: [id] };
+  }
+  if (paths.has('brief.what_it_is')) {
+    const ids = brief.what_it_is.claim_ids.filter((item) => quotes.has(item));
+    if (ids.length > 0)
+      brief.what_it_is = {
+        text: ids.map((item) => quotes.get(item)?.quote ?? '').join(' '),
+        claim_ids: ids,
+      };
+  }
+  const audiences = failedIndexes(paths, 'brief.audiences');
+  brief.audiences = brief.audiences.filter((_, index) => !audiences.has(index));
+  const features = failedIndexes(paths, 'brief.features');
+  brief.features = brief.features.filter((_, index) => !features.has(index));
+  const conflicts = failedIndexes(paths, 'brief.conflicts');
+  brief.conflicts = brief.conflicts.filter((_, index) => !conflicts.has(index));
+  if (paths.has('brief.positioning_note')) brief.positioning_note = null;
+  if (brief.pricing) {
+    const failedPlans = failedIndexes(paths, 'brief.pricing.plans');
+    const plans = brief.pricing.plans.filter((_, index) => !failedPlans.has(index));
+    let pricing: typeof brief.pricing | null = {
+      ...brief.pricing,
+      plans,
+      free_trial: paths.has('brief.pricing.free_trial') ? null : brief.pricing.free_trial,
+    };
+    if (paths.has('brief.pricing')) {
+      pricing =
+        plans.length > 0
+          ? {
+              ...pricing,
+              summary: plans.map((plan) => `${plan.name} ${plan.price}`).join('; '),
+              claim_ids: [
+                ...new Set([...pricing.claim_ids, ...plans.flatMap((plan) => plan.claim_ids)]),
+              ],
+            }
+          : null;
+    }
+    // Prices shown with a yearly billing switch on say so, in the switch's own words.
+    if (pricing && billing && paths.has('brief.pricing.billing'))
+      pricing = { ...pricing, summary: `${pricing.summary.replace(/[.\s]+$/, '')}. ${billing}.` };
+    brief.pricing = pricing;
+  }
+  return { ...output, brief };
 }
 
 /**
  * The result with every failure the gate can settle itself settled: failing claims dropped with
- * every reference to them, failing non-claims dropped, pages that were not captured dropped from
- * the brief, and each listed page's title set to the one the capture stored. Used when repair
+ * every reference to them, a claim's text that says more than its quote set to the quote, brief
+ * facts that say more than their quotes settled in the quotes' words (`settleBrief`), failing
+ * non-claims dropped, pages that were not captured dropped from the brief, and each listed page's
+ * title set to the one the capture stored. Used when repair
  * rounds run out, so a wrong note never fails a result whose claims are verified, and an
  * unverified claim never reaches the output.
  */
@@ -277,6 +370,8 @@ export function withoutFailures(
   bundle: PagesBundle,
 ): ResearchOutput {
   const claims = new Set(failures.flatMap((failure) => (failure.claimId ? [failure.claimId] : [])));
+  const texts = new Set(failures.flatMap((failure) => failure.claimTextId ?? []));
+  const briefPaths = new Set(failures.flatMap((failure) => failure.briefPath ?? []));
   const nonClaims = new Set(failures.flatMap((failure) => failure.nonClaimIndex ?? []));
   const uncaptured = new Set(
     failures.flatMap((failure) =>
@@ -285,16 +380,42 @@ export function withoutFailures(
         : [],
     ),
   );
-  const pages = new PageIndex(bundle);
-  const trimmed = withoutClaims(output, claims);
-  return {
+  // A claim's text that says more than its quote is set to the quote, which says only itself.
+  const reworded = {
+    ...output,
+    claims: output.claims.map((claim) =>
+      texts.has(claim.id) ? { ...claim, text: claim.quote } : claim,
+    ),
+  };
+  const billing = yearlyBillingLabel(reworded, bundle);
+  const trimmed = withoutClaims(settleBrief(reworded, briefPaths, claims, billing), claims);
+  const settled: ResearchOutput = {
     ...trimmed,
     brief: {
       ...trimmed.brief,
       non_claims: trimmed.brief.non_claims.filter((_, index) => !nonClaims.has(index)),
-      pages: trimmed.brief.pages
-        .filter((_, index) => !uncaptured.has(index))
-        .map((page) => ({ ...page, title: pages.find(page.url)?.page.title ?? page.title })),
+      pages: trimmed.brief.pages.filter((_, index) => !uncaptured.has(index)),
+    },
+  };
+  return withStoredTitles(settled, bundle);
+}
+
+/**
+ * The result with each listed page's title exactly as the capture stored it. The gate compares
+ * titles with whitespace collapsed, so a title typed with a plain space where the page has a
+ * no-break space passes; the title is a captured fact, so the stored one is kept character for
+ * character.
+ */
+export function withStoredTitles(output: ResearchOutput, bundle: PagesBundle): ResearchOutput {
+  const pages = new PageIndex(bundle);
+  return {
+    ...output,
+    brief: {
+      ...output.brief,
+      pages: output.brief.pages.map((page) => ({
+        ...page,
+        title: pages.find(page.url)?.page.title ?? page.title,
+      })),
     },
   };
 }

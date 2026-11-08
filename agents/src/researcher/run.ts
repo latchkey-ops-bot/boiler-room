@@ -21,6 +21,7 @@ import {
   type GateFailure,
   prunable,
   withoutFailures,
+  withStoredTitles,
 } from './gate.ts';
 import { fileIdOf, type ResearchOutput, siteUrlProblem } from './output.ts';
 import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
@@ -797,7 +798,10 @@ export async function research(options: ResearchOptions): Promise<number> {
         `${JSON.stringify(state.structured_output, null, 1)}\n`,
       );
       if (verdict.failures.length === 0) {
-        accepted = verdict.output;
+        accepted =
+          verdict.output && verdict.bundle
+            ? withStoredTitles(verdict.output, verdict.bundle)
+            : verdict.output;
         say(`gate passed on submission ${round}`);
         break;
       }

@@ -249,6 +249,26 @@ describe('suggestPages', () => {
     expect(chosen).not.toContain('/privacy');
   });
 
+  // linear.app routes /demo to /demo/team/ENG/active in the browser: the probed address is the
+  // one to capture, so the page discover rendered is loaded at the same address and counted once.
+  it('suggests a rendered probe at the address that was probed', () => {
+    const probe = {
+      path: '/demo',
+      url: 'https://site.example.org/demo',
+      status: 200,
+      final_url: 'https://site.example.org/demo/team/eng/active',
+      content_type: 'text/html',
+      title: 'Engineering',
+      length: 900,
+      found: true,
+      reason: 'rendered in a browser: HTTP 200',
+      rendered: true,
+    };
+    const chosen = suggestPages(HOME, [], [probe]).map((item) => item.url);
+    expect(chosen).toContain('https://site.example.org/demo');
+    expect(chosen).not.toContain('https://site.example.org/demo/team/eng/active');
+  });
+
   it('never suggests more than the page limit', () => {
     const many = Array.from({ length: 60 }, (_, index) =>
       link(`/features/f${index}`, `Feature ${index}`),
