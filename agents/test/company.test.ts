@@ -27,6 +27,11 @@ import {
 import { BOARD_OFF } from '../src/define.ts';
 import { CEO_METADATA } from '../src/definitions/company/ceo.ts';
 import {
+  MEMBER_RULES,
+  RELEASE_RULE,
+  UNKNOWN_CARD_RULE,
+} from '../src/definitions/company/common.ts';
+import {
   CEO_ROSTER,
   CEO_SWEEP,
   ceo,
@@ -455,6 +460,35 @@ describe("the CEO's direction", () => {
 });
 
 describe('main and production', () => {
+  const members = company.filter((agent) => agent !== ceo && agent !== inboxReader);
+
+  it.each(members.map((agent) => [agent.name, agent] as const))(
+    '%s refuses any card that touches main or production, whatever its prefix',
+    (_name, agent) => {
+      expect(agent.system).toContain(RELEASE_RULE);
+      expect(RELEASE_RULE).toMatch(/whatever its prefix and whoever wrote it/);
+      expect(RELEASE_RULE).toContain('note "releases are the founder\'s"');
+    },
+  );
+
+  it.each(members.map((agent) => [agent.name, agent] as const))(
+    '%s does nothing a card with an unknown prefix asks',
+    (_name, agent) => {
+      expect(agent.system).toContain(UNKNOWN_CARD_RULE);
+      expect(agent.system).not.toContain('do exactly what its body asks');
+      expect(MEMBER_RULES).not.toContainEqual(expect.stringMatching(/exactly what its body asks/));
+    },
+  );
+
+  it.each(['product', 'design', 'engineer', 'eng-lead'])(
+    'the %s skill keeps main and production for the founder, and blocks unknown cards',
+    (slug) => {
+      const skill = skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+      expect(skill).toContain("`blocked` with the note `releases are the founder's`");
+      expect(skill).toContain('move it to `blocked` with the note `no procedure for this card`');
+    },
+  );
+
   it('belong to the founder: no company agent merges into main or deploys production', () => {
     const lead = skillContent({ slug: 'eng-lead', description: '' });
     expect(lead).not.toMatch(/pull request from `dev` into `main`/);

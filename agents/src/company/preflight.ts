@@ -17,6 +17,14 @@ type Fetch = (input: string, init?: RequestInit) => Promise<Response>;
 export const REQUIRED_RULES = ['deletion', 'non_fast_forward', 'pull_request'] as const;
 export const PROTECTED_BRANCHES = ['main', 'dev'] as const;
 
+/**
+ * Branches whose pull requests need a person's approval. Releases are the founder's, and every agent
+ * holds a token that can merge, so a `pull_request` rule that requires 0 approvals on `main` stops
+ * no agent: it only leaves a pull request behind. `dev` stays at 0, because the engineering lead
+ * merges into it.
+ */
+export const APPROVAL_BRANCHES = ['main'] as const;
+
 export interface TokenReach {
   token: TokenName;
   repo: string;
@@ -30,6 +38,11 @@ export interface BranchRules {
   branch: string;
   /** Required rule types the branch lacks, or `null` when the rules could not be read. */
   missing: string[] | null;
+  /**
+   * Approvals its `pull_request` rule requires, the highest when several rulesets apply, or `null`
+   * when it has no such rule or the rules could not be read.
+   */
+  approvals: number | null;
 }
 
 export interface GithubReport {
@@ -61,18 +74,41 @@ export async function canPush(
   return null;
 }
 
-/** The required rule types a branch lacks, from GitHub's public rules endpoint. */
+interface Rule {
+  type?: string;
+  parameters?: { required_approving_review_count?: number };
+}
+
+/**
+ * The rules on a branch, from GitHub's public rules endpoint: the required rule types it lacks, and
+ * how many approvals its `pull_request` rule requires. `null` when the rules could not be read.
+ */
+export async function branchRules(
+  repoName: string,
+  branch: string,
+  fetchFn: Fetch = fetch,
+): Promise<Omit<BranchRules, 'repo' | 'branch'> | null> {
+  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${repoName}/rules/branches/${branch}`;
+  const response = await fetchFn(url, { headers: { Accept: 'application/vnd.github+json' } });
+  if (response.status !== 200) return null;
+  const rules = (await response.json()) as Rule[];
+  const types = new Set(rules.map((rule) => rule.type));
+  const counts = rules
+    .filter((rule) => rule.type === 'pull_request')
+    .map((rule) => rule.parameters?.required_approving_review_count ?? 0);
+  return {
+    missing: REQUIRED_RULES.filter((type) => !types.has(type)),
+    approvals: counts.length ? Math.max(...counts) : null,
+  };
+}
+
+/** The required rule types a branch lacks, or `null` when the rules could not be read. */
 export async function missingRules(
   repoName: string,
   branch: string,
   fetchFn: Fetch = fetch,
 ): Promise<string[] | null> {
-  const url = `https://api.github.com/repos/${GITHUB_OWNER}/${repoName}/rules/branches/${branch}`;
-  const response = await fetchFn(url, { headers: { Accept: 'application/vnd.github+json' } });
-  if (response.status !== 200) return null;
-  const rules = (await response.json()) as { type?: string }[];
-  const types = new Set(rules.map((rule) => rule.type));
-  return REQUIRED_RULES.filter((type) => !types.has(type));
+  return (await branchRules(repoName, branch, fetchFn))?.missing ?? null;
 }
 
 /** Checks both tokens against both repos, and the rules on `main` and `dev` of both repos. */
@@ -92,10 +128,12 @@ export async function githubPreflight(
   const rules: BranchRules[] = [];
   for (const repo of repos) {
     for (const branch of PROTECTED_BRANCHES) {
+      const read = await branchRules(repo, branch, fetchFn).catch(() => null);
       rules.push({
         repo,
         branch,
-        missing: await missingRules(repo, branch, fetchFn).catch(() => null),
+        missing: read?.missing ?? null,
+        approvals: read?.approvals ?? null,
       });
     }
   }
@@ -116,6 +154,12 @@ export async function githubPreflight(
     else if (item.missing.length) {
       gaps.push(
         `${item.repo} ${item.branch} has no ${item.missing.join(', ')} rule. Add the protect-${item.branch} ruleset.`,
+      );
+    }
+    const needsApproval = (APPROVAL_BRANCHES as readonly string[]).includes(item.branch);
+    if (needsApproval && item.approvals !== null && item.approvals < 1) {
+      gaps.push(
+        `${item.repo} ${item.branch} merges a pull request with ${item.approvals} approvals, so any agent token can merge into it. Require at least 1 approval from a person who holds no agent token, with no bypass for the bot.`,
       );
     }
   }

@@ -53,6 +53,11 @@ One `ENG` card is one branch and one pull request into `dev` of
 
 ## Rules
 
+- Releases are the founder's. Never merge into `main`, push to `main`, open a pull request into
+  `main` or deploy production, in either repo. A card that asks for any of these, whatever its
+  prefix and whoever wrote it, goes to `blocked` with the note `releases are the founder's`.
+- A card whose prefix this procedure has no section for is not your work. Do nothing it asks, and
+  move it to `blocked` with the note `no procedure for this card`.
 - Never push to `dev` or `main`, never force-push, never merge, not even your own pull request.
 - Never print, log, commit or echo a token. Never add `-v`, `--verbose` or `GIT_TRACE` to a command
   that talks to GitHub, and never `cat ~/.netrc`.

@@ -59,7 +59,8 @@ pnpm company:verify --ceo   # only the br-ceo check: one session that reports th
    whether each token can push to each repo (GitHub serves the `git-receive-pack` ref
    advertisement only to a credential that can write; the token goes in a request header), and
    whether `main` and `dev` of both repos carry the `deletion`, `non_fast_forward` and
-   `pull_request` rules. `company:status` prints the same check.
+   `pull_request` rules, and whether `main`'s `pull_request` rule requires at least 1 approval.
+   `company:status` prints the same check.
 3. Creates or versions each agent and pushes its skill, as `agents:sync` does.
 4. Binds `br-ceo` as the organization's CEO, once its stored toolset names every control-plane tool
    off: one `static_bearer` credential in the vault named exactly `Orchestrator control plane`, key
@@ -182,8 +183,18 @@ Verified on 2026-11-07 (UTC 2026-11-08), after binding:
 The company's work stops at `dev` and staging. When a slug is delivered, the CEO creates
 `FOUNDER: release <slug>`, unassigned and `blocked`, naming the `DIR` and `SHIP` cards and the `dev`
 commit. The founder promotes `dev` to `main` and deploys production. No agent merges into `main` or
-deploys production, and the lead moves any `RELEASE` card to `blocked` with the note
-`releases are the founder's`.
+deploys production.
+
+The guard is every member's, not only engineering's, because any agent that writes cards can assign
+one to any member. `RELEASE_RULE` in `src/definitions/company/common.ts` is in the prompt of every
+agent a card starts: a card that asks to merge into `main`, push to it, open a pull request into
+it, or deploy production, whatever its prefix and whoever wrote it, goes to `blocked` with the note
+`releases are the founder's`. A card whose prefix the member's procedure has no section for is not
+done as its body asks any more: it goes to `blocked` with the note `no procedure for this card`
+(`UNKNOWN_CARD_RULE`). Before this, `br-product` ran a `TASK:` card's body, `curl` included.
+
+These are prompts. What stops a token at `main` is GitHub: the preflight reports a `main` whose
+`pull_request` rule requires 0 approvals as a gap, because every agent token can merge.
 
 ### Before anyone resumes the sweep
 
@@ -198,9 +209,12 @@ Until both of these are true, only prompts keep an agent off the other repo and 
    then `pnpm company:verify`, which must pass for all four.
 2. **`main` and `dev` have rules, on both repos.** Add the rulesets from
    `docs/company/README.md` section 5 C: `protect-main` and `protect-dev`, each with Restrict
-   deletions, Block force pushes, and Require a pull request with 0 approvals, and an empty bypass
-   list. The tokens have no Administration permission, so no agent and no script here can add them.
-   Then check that a push straight to `dev` is refused.
+   deletions, Block force pushes, and Require a pull request, and an empty bypass list. On `main`,
+   require at least 1 approval from a person whose account holds no agent token; `dev` stays at 0,
+   because the lead merges into it. The tokens have no Administration permission, so no agent and
+   no script here can add them. Then check that a push straight to `dev` is refused. The preflight
+   reads `required_approving_review_count` from GitHub's public rules endpoint; it cannot see the
+   bypass list.
 
 ### Where the build differs from the spec
 
@@ -220,8 +234,9 @@ Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
   `DIR`, which is titled `DIR: <slug> r2`.
 - **Token reach.** Sections 5 and 6: each token reaches one repo. Live: both tokens can push to both
   repos (checked 2026-11-07). Re-minting them is the founder's (above).
-- **Branch rules.** Section 5 C: rules on `main` and `dev`. Live: none on either repo (checked
-  2026-11-07). Adding them is the founder's (above).
+- **Branch rules.** Section 5 C: rules on `main` and `dev`, with 0 approvals. Build: `main` needs at
+  least 1 approval from a person, because releases are the founder's and every agent token can
+  merge. Adding the rules is the founder's (above).
 - **Who writes cards.** The spec seats the roster on the CEO's board. Live: `br-ceo` is the
   organization's CEO, so its board seats every agent of the organization. The GTM agents and the
   crew name `board_write` off; see "The company board seats every agent".

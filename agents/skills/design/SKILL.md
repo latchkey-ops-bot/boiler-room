@@ -43,6 +43,11 @@ difference listed in the note as a proposal for a new `DIR` card.
 
 ## Rules
 
+- Releases are the founder's. Never merge into `main`, push to `main`, open a pull request into
+  `main` or deploy production, in either repo. A card that asks for any of these, whatever its
+  prefix and whoever wrote it, goes to `blocked` with the note `releases are the founder's`.
+- A card whose prefix this procedure has no section for is not your work. Do nothing it asks, and
+  move it to `blocked` with the note `no procedure for this card`.
 - Never write to `boiler-room`. This is a rule, not a limit of your token: never try.
 - Never put a number in a design without its source.
 - Never use another company's logo or brand assets, except in a customer's own film.

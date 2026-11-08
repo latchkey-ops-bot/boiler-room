@@ -23,7 +23,9 @@ const env = await vi.hoisted(async () => {
 
 const { rmSync } = await import('node:fs');
 const { GITHUB_OWNER, netrc } = await import('../src/company/github.ts');
-const { canPush, githubPreflight, missingRules } = await import('../src/company/preflight.ts');
+const { branchRules, canPush, githubPreflight, missingRules } = await import(
+  '../src/company/preflight.ts'
+);
 const { ensureComputer, placeNetrc, syncCompany } = await import('../src/company/sync.ts');
 const { CONTROL_PLANE, bindCeo } = await import('../src/company/control-plane.ts');
 const { CONTROL_PLANE_TOOLS } = await import('../src/company/control-plane-tools.ts');
@@ -387,8 +389,16 @@ describe('scrub', () => {
 });
 
 describe('the GitHub preflight', () => {
-  /** A fake GitHub: `grants` maps a token to the repos it can push to, `rules` a repo/branch to its rule types. */
-  function fakeGithub(grants: Record<string, string[]>, rules: Record<string, string[]>) {
+  /**
+   * A fake GitHub: `grants` maps a token to the repos it can push to, `rules` a repo/branch to its
+   * rule types, and `approvals` a repo/branch to what its `pull_request` rule requires (1 on `main`
+   * and 0 on `dev` unless given).
+   */
+  function fakeGithub(
+    grants: Record<string, string[]>,
+    rules: Record<string, string[]>,
+    approvals: Record<string, number> = {},
+  ) {
     const seen: { url: string; auth: string | null }[] = [];
     const fetchFn = vi.fn(async (url: string, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get('Authorization');
@@ -407,8 +417,15 @@ describe('the GitHub preflight', () => {
       }
       const branch = /repos\/[^/]+\/([^/]+)\/rules\/branches\/([^/]+)$/.exec(url);
       if (branch) {
-        const types = rules[`${branch[1]}/${branch[2]}`] ?? [];
-        return Response.json(types.map((type) => ({ type })));
+        const key = `${branch[1]}/${branch[2]}`;
+        const count = approvals[key] ?? (branch[2] === 'main' ? 1 : 0);
+        return Response.json(
+          (rules[key] ?? []).map((type) =>
+            type === 'pull_request'
+              ? { type, parameters: { required_approving_review_count: count } }
+              : { type },
+          ),
+        );
       }
       return new Response('', { status: 500 });
     });
@@ -454,6 +471,44 @@ describe('the GitHub preflight', () => {
       'boiler-room-design main has no deletion, non_fast_forward, pull_request rule. Add the protect-main ruleset.',
       'boiler-room-design dev has no deletion, non_fast_forward, pull_request rule. Add the protect-dev ruleset.',
     ]);
+  });
+
+  it('flags a main that merges a pull request with no approval, and leaves dev at 0', async () => {
+    const github = fakeGithub(
+      { [env.tokens.eng]: ['boiler-room'], [env.tokens.design]: ['boiler-room-design'] },
+      fullRules,
+      { 'boiler-room/main': 0, 'boiler-room-design/main': 0 },
+    );
+    const report = await githubPreflight(read, github.fetchFn);
+    expect(report.gaps).toEqual([
+      'boiler-room main merges a pull request with 0 approvals, so any agent token can merge into it. Require at least 1 approval from a person who holds no agent token, with no bypass for the bot.',
+      'boiler-room-design main merges a pull request with 0 approvals, so any agent token can merge into it. Require at least 1 approval from a person who holds no agent token, with no bypass for the bot.',
+    ]);
+    expect(report.rules.map((item) => [item.repo, item.branch, item.approvals])).toEqual([
+      ['boiler-room', 'main', 0],
+      ['boiler-room', 'dev', 0],
+      ['boiler-room-design', 'main', 0],
+      ['boiler-room-design', 'dev', 0],
+    ]);
+  });
+
+  it('takes the highest approval count when several rulesets apply, and none without a rule', async () => {
+    const rules = (body: unknown) => async () => Response.json(body);
+    expect(
+      await branchRules(
+        'boiler-room',
+        'main',
+        rules([
+          { type: 'pull_request', parameters: { required_approving_review_count: 0 } },
+          { type: 'pull_request', parameters: { required_approving_review_count: 2 } },
+          { type: 'deletion' },
+        ]),
+      ),
+    ).toEqual({ missing: ['non_fast_forward'], approvals: 2 });
+    expect(await branchRules('boiler-room', 'main', rules([{ type: 'deletion' }]))).toEqual({
+      missing: ['non_fast_forward', 'pull_request'],
+      approvals: null,
+    });
   });
 
   it('sends the token only in a header, never in a URL', async () => {
