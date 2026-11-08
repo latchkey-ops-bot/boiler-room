@@ -63,6 +63,13 @@ export const colourEvent = {
   veil: 0.18,
   /** The headline is 1 to 3 words on one line. */
   maxWords: 3,
+  /**
+   * The smallest the headline is set, as a share of the sentence size. Below the sentence cap
+   * height it is made smaller to fit its one line, down to this, so a script the customer approved
+   * is never refused at render for a line a few pixels too wide in the font the film ends up
+   * using. Below this the scene fails: shorten the headline. [N]
+   */
+  minCapShare: 0.6,
 } as const;
 
 const WHITE = '#FFFFFF';
@@ -121,8 +128,8 @@ export const sentenceSize = (
 
 /**
  * Fit or fail: why this headline cannot be set, or undefined when it can. It must be 1 to 3 words
- * on one line, and is never set below the sentence cap height to make it fit. The Director
- * shortens the copy instead.
+ * on one line, and is never set below `minCapShare` of the sentence cap height to make it fit.
+ * Below that the Director shortens the copy instead. A pure function of the copy and the stage.
  */
 export function headlineFitError(
   value: string,
@@ -134,10 +141,11 @@ export function headlineFitError(
   if (words < 1 || words > colourEvent.maxWords) {
     return `"${value}" is ${words} words, and a colour-event headline is 1 to ${colourEvent.maxWords}.`;
   }
-  // Sizes are whole pixels, so the floor is the whole size at or under the sentence size.
-  const floor = Math.floor(sentenceSize(fit, stage));
+  // Sizes are whole pixels, so the floor is the whole size at or under that share of the sentence
+  // size.
+  const floor = Math.floor(sentenceSize(fit, stage) * colourEvent.minCapShare);
   if (fit.lines.length !== 1 || fit.fontSize < floor) {
-    return `"${value}" does not fit on one line ${Math.round(width)} px wide in ${stage.width}×${stage.height} at the sentence cap height or above. Shorten it.`;
+    return `"${value}" does not fit on one line ${Math.round(width)} px wide in ${stage.width}×${stage.height} at ${Math.round(colourEvent.minCapShare * 100)}% of the sentence cap height or above. Shorten it.`;
   }
   return undefined;
 }
@@ -245,7 +253,7 @@ const ColourEvent = ({ scene, props }: SceneProps<ColourEventProps>) => {
   const problem = headlineFitError(headline.value, fit, stage, width);
   if (problem) {
     throw new Error(
-      `Scene "${scene.id}" (colour-event), text "${headline.id}": ${problem} The scene never sets its headline below the sentence cap height.`,
+      `Scene "${scene.id}" (colour-event), text "${headline.id}": ${problem} The scene never sets its headline below ${Math.round(colourEvent.minCapShare * 100)}% of the sentence cap height.`,
     );
   }
   const layout = eventLayout(fit, stage, card);
