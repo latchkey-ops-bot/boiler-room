@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-launch",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 20,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": { "family": "Sora", "source": "font-display" },
+      "body": { "family": "Inter", "source": "font-body" }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "dashboard-shot": {
+      "kind": "image",
+      "src": "assets/nova/dashboard.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://nova.example.com/product"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "music-bed": {
+      "kind": "audio",
+      "src": "assets/audio/bed.mp3",
+      "provenance": "stock",
+      "license": "Example Stock Audio License"
+    },
+    "whoosh": {
+      "kind": "audio",
+      "src": "assets/audio/whoosh.mp3",
+      "provenance": "library"
+    }
+  },
+  "claims": [
+    {
+      "id": "build-times",
+      "text": "Nova cuts build times by 40%",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Teams on Nova cut build times by 40% in their first month.",
+      "status": "approved"
+    },
+    {
+      "id": "team-count",
+      "text": "Over 1,200 teams use Nova",
+      "sourceUrl": "https://nova.example.com",
+      "quote": "More than 1,200 teams ship with Nova every week.",
+      "status": "approved"
+    },
+    {
+      "id": "deploy-rate",
+      "text": "Customers deploy 3x more often",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Customers deploy 3x more often after switching to Nova.",
+      "status": "approved"
+    },
+    {
+      "id": "pricing",
+      "text": "Plans start at $29 per seat",
+      "sourceUrl": "https://nova.example.com/pricing",
+      "quote": "Plans start at $29 per seat, per month.",
+      "status": "extracted"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 4,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Your builds are waiting.",
+          "claimIds": []
+        }
+      ],
+      "voiceover": { "text": "Your builds are waiting. Nova gets them moving.", "claimIds": [] },
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "speed",
+      "type": "feature-card",
+      "start": 4,
+      "end": 9,
+      "props": { "accent": { "textId": "speed-headline", "from": 0, "to": 1 } },
+      "text": [
+        {
+          "id": "speed-headline",
+          "role": "headline",
+          "value": "40% faster builds",
+          "claimIds": ["build-times"]
+        },
+        { "id": "speed-cause", "role": "label", "value": "Every commit", "claimIds": [] },
+        { "id": "speed-effect", "role": "label", "value": "Built sooner", "claimIds": [] }
+      ],
+      "voiceover": {
+        "text": "Teams on Nova cut build times by 40% in their first month.",
+        "claimIds": ["build-times"]
+      },
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "adoption",
+      "type": "site-hero",
+      "start": 9,
+      "end": 14,
+      "props": {},
+      "text": [
+        {
+          "id": "adoption-address",
+          "role": "label",
+          "value": "nova.example.com/product",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "More than 1,200 teams ship with Nova, and customers deploy 3x more often.",
+        "claimIds": ["team-count", "deploy-rate"]
+      },
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 14,
+      "end": 20,
+      "props": {},
+      "text": [
+        { "id": "close-cta", "role": "cta", "value": "Start free", "claimIds": [] },
+        { "id": "close-address", "role": "label", "value": "nova.example.com", "claimIds": [] }
+      ],
+      "voiceover": {
+        "text": "Plans start at $29 per seat. Start free today.",
+        "claimIds": ["pricing"]
+      },
+      "assetIds": ["logo"]
+    }
+  ],
+  "audio": {
+    "voice": { "provider": "elevenlabs", "voiceId": "nova-narrator" },
+    "musicAssetId": "music-bed",
+    "sfx": [{ "assetId": "whoosh", "at": 4 }]
+  },
+  "variants": {
+    "hooks": [
+      {
+        "id": "open-question",
+        "type": "word-slam",
+        "start": 0,
+        "end": 4,
+        "props": {},
+        "text": [
+          {
+            "id": "question-headline",
+            "role": "headline",
+            "value": "Still waiting on CI?",
+            "claimIds": []
+          }
+        ],
+        "voiceover": { "text": "Still waiting on CI?", "claimIds": [] },
+        "assetIds": []
+      }
+    ],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      { "id": "start-free", "label": "Start free", "href": "https://nova.example.com/signup" },
+      { "id": "book-demo", "label": "Book a demo", "href": "https://nova.example.com/demo" }
+    ]
+  }
+}

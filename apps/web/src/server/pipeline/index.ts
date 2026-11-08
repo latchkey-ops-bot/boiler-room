@@ -1,0 +1,97 @@
+import { asc, eq } from 'drizzle-orm';
+import type { Db } from '../../db/client.ts';
+import { approvals, films, revisions } from '../../db/schema.ts';
+import { FORMATS, type Format, PIPELINE_KINDS, type PipelineKind } from '../../lib/film.ts';
+import type { RunnerDeps } from '../runner/runs.ts';
+import { NaivePipeline } from './naive.ts';
+import { SimulatedPipeline, type SimulationLedger } from './simulated.ts';
+import type { PipelineClient } from './types.ts';
+
+export { NaivePipeline } from './naive.ts';
+export { SimulatedPipeline } from './simulated.ts';
+export * from './types.ts';
+
+/** The pipeline new films use in this environment: the `PIPELINE` var in wrangler.jsonc. */
+export function pipelineKindFrom(value: string | undefined): PipelineKind {
+  return PIPELINE_KINDS.includes(value as PipelineKind) ? (value as PipelineKind) : 'naive';
+}
+
+/**
+ * The pipeline client for `kind`. A real film needs the runner's deps: the Naive client, the R2
+ * bucket, the config and `waitUntil`. Without them, the Naive pipeline answers 503.
+ */
+export function createPipeline(
+  kind: PipelineKind,
+  db: Db,
+  clock?: () => Date,
+  runner?: RunnerDeps | null,
+): PipelineClient {
+  if (kind === 'simulated') return new SimulatedPipeline(d1Ledger(db), { clock });
+  return new NaivePipeline(runner ?? null);
+}
+
+/**
+ * Reads a simulated run from D1: the film's start time, the customer's decisions on each script,
+ * and the revisions they asked for after delivery.
+ */
+export function d1Ledger(db: Db): SimulationLedger {
+  return {
+    async run(runId) {
+      const film = await db.query.films.findFirst({ where: eq(films.pipelineRunId, runId) });
+      if (!film) return null;
+      const [rows, asked] = await Promise.all([
+        db
+          .select()
+          .from(approvals)
+          .where(eq(approvals.filmId, film.id))
+          .orderBy(asc(approvals.decidedAt)),
+        db
+          .select()
+          .from(revisions)
+          .where(eq(revisions.filmId, film.id))
+          .orderBy(asc(revisions.requestedAt)),
+      ]);
+      return {
+        url: film.url,
+        startedAt: film.createdAt,
+        decisions: rows.map((row) => ({
+          version: row.scriptVersion,
+          decision: row.decision,
+          note: row.note,
+          hookId: row.chosenHook,
+          ctaId: row.chosenCta,
+          formats: parseFormats(row.formatsJson),
+          confirmedClaimIds: parseIdList(row.confirmedClaimsJson),
+          at: row.decidedAt,
+        })),
+        revisions: asked.map((row) => ({
+          version: row.scriptVersion,
+          note: row.note,
+          at: row.requestedAt,
+        })),
+      };
+    },
+  };
+}
+
+export function parseFormats(json: string | null): Format[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value)
+      ? value.filter((item): item is Format => FORMATS.includes(item as Format))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseIdList(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
+  } catch {
+    return [];
+  }
+}

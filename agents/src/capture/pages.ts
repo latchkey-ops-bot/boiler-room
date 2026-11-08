@@ -1,0 +1,376 @@
+import { normaliseUrl, normaliseWhitespace } from '../researcher/text.ts';
+
+export const MAX_PAGES = 15;
+
+/** Paths every site is probed at for public product UI. */
+export const PROBE_PATHS = [
+  '/demo',
+  '/tour',
+  '/playground',
+  '/sandbox',
+  '/product',
+  '/how-it-works',
+] as const;
+
+/** A path no site has, whose answer shows what the site sends for a missing page. */
+export const BASELINE_PATH = '/br-research-missing-page-7f3a9c';
+
+export type LinkKind =
+  | 'home'
+  | 'pricing'
+  | 'product'
+  | 'docs'
+  | 'about'
+  | 'demo'
+  | 'customers'
+  | 'blog'
+  | 'login'
+  | 'legal'
+  | 'careers'
+  | 'contact'
+  | 'other';
+
+const RULES: [LinkKind, RegExp][] = [
+  [
+    'login',
+    /(^|\/)(log-?in|sign-?in|signin|sign-?up|signup|register|auth|sso|account|dashboard|console|app)(\/|$)/,
+  ],
+  [
+    'legal',
+    /(^|\/)(privacy|terms|legal|cookies?|gdpr|dpa|imprint|impressum|security\.txt|tos|eula|licen[cs]e)/,
+  ],
+  ['careers', /(^|\/)(careers?|jobs|hiring|join-us)(\/|$)/],
+  ['pricing', /(^|\/)(pricing|plans|price|prices|buy|purchase)(\/|$)/],
+  // A demo behind a sales form is a contact page: /contact/demo is a form, not public product UI.
+  ['contact', /^\/(contact|contact-us|talk-to-sales|sales)(\/|$)/],
+  ['demo', /(^|\/)(demo|tour|playground|sandbox|try|interactive|live-demo|how-it-works)(\/|$)/],
+  [
+    'docs',
+    /(^|\/)(docs?|documentation|developers?|api|guides?|reference|help|support|learn|manual)(\/|$)/,
+  ],
+  ['about', /(^|\/)(about|about-us|company|team|story|mission|who-we-are)(\/|$)/],
+  ['customers', /(^|\/)(customers?|case-studies|case-study|stories|testimonials|showcase)(\/|$)/],
+  ['blog', /(^|\/)(blog|news|changelog|updates|press|articles?|posts?)(\/|$)/],
+  ['contact', /(^|\/)(contact|contact-us|talk-to-sales|sales)(\/|$)/],
+  [
+    'product',
+    /(^|\/)(product|products|features?|platform|solutions?|use-cases?|integrations?|why|overview|capabilities)(\/|$)/,
+  ],
+];
+
+const TEXT_RULES: [LinkKind, RegExp][] = [
+  ['login', /^(log ?in|sign ?in|sign ?up|dashboard|console|open app|my account)$/i],
+  ['pricing', /^(pricing|plans|plans (&|and) pricing)$/i],
+  ['docs', /^(docs|documentation|developers|api|guides)$/i],
+  ['about', /^(about|about us|company|our story|team)$/i],
+  // A demo behind a sales form is a contact page; a demo anyone can open is public product UI.
+  ['contact', /\b(book|request|schedule|get|talk to|contact)\b.*\b(demo|call|meeting|sales)\b/i],
+  ['demo', /\b(demo|tour|playground|sandbox|how it works|see it in action)\b/i],
+  ['product', /^(product|products|features|platform|solutions?)$/i],
+  ['customers', /^(customers|case studies|stories)$/i],
+  ['blog', /^(blog|news|changelog)$/i],
+];
+
+/** What a link on a site points at, from its path and its text. */
+export function classifyLink(url: string, text = '', home?: string): LinkKind {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return 'other';
+  }
+  if (home && normaliseUrl(url) === normaliseUrl(home)) return 'home';
+  if (/^(app|dashboard|console|login|auth|accounts?)\./i.test(parsed.hostname)) return 'login';
+  if (parsed.pathname === '/' && !parsed.search) return 'home';
+  const path = parsed.pathname.toLowerCase();
+  const label = normaliseWhitespace(text);
+  for (const [kind, rule] of TEXT_RULES) if (rule.test(label)) return kind;
+  for (const [kind, rule] of RULES) if (rule.test(path)) return kind;
+  return 'other';
+}
+
+export function sameSite(url: string, site: string): boolean {
+  try {
+    const bare = (host: string) => host.toLowerCase().replace(/^www\./, '');
+    return bare(new URL(url).hostname) === bare(new URL(site).hostname);
+  } catch {
+    return false;
+  }
+}
+
+export interface ProbeResult {
+  path: string;
+  url: string;
+  status: number | null;
+  final_url: string | null;
+  content_type: string | null;
+  title: string;
+  length: number;
+  found: boolean;
+  reason: string;
+  /**
+   * Judged on the page a browser rendered, because the server sends every path the same app shell.
+   * The probed address is then the one to capture: it routes to the page in the browser.
+   */
+  rendered?: boolean;
+}
+
+export interface ProbeResponse {
+  status: number | null;
+  final_url: string | null;
+  content_type: string | null;
+  title: string;
+  length: number;
+  /** The first `<h1>` the server sent. */
+  heading?: string;
+}
+
+/** The probes for a public demo. Once one is found, the others need no rendering. */
+export const DEMO_PROBES: ReadonlySet<string> = new Set([
+  '/demo',
+  '/tour',
+  '/playground',
+  '/sandbox',
+]);
+
+/** Whether a probe's server answer was the site's answer for a missing page. */
+export function answeredAsMissing(probe: ProbeResult): boolean {
+  return probe.reason.startsWith(SOFT_404);
+}
+
+const SOFT_404 = 'same as the answer for a missing page';
+
+/**
+ * Whether a probed path is a real page. A status code is not enough (trap: soft 404s answer 200
+ * with an app shell or the home page), so the answer is also compared with what the site sends
+ * for a path that cannot exist, and a redirect to the home page or a sign-in page is not a find.
+ *
+ * A page that answers is still not a find unless the site links to it (`linked`: from its pages or
+ * its sitemap) or the page names what was probed in its title or first heading. Many sites serve
+ * their users' public pages at `/<username>`, so `/product` can be a person's profile or booking
+ * page; such a page is never linked as the product and never titled "product".
+ */
+export function judgeProbe(
+  path: string,
+  url: string,
+  response: ProbeResponse,
+  baseline: ProbeResponse | null,
+  home: string,
+  linked = false,
+): ProbeResult {
+  const result = { path, url, ...response };
+  const verdict = (found: boolean, reason: string): ProbeResult => ({ ...result, found, reason });
+  if (response.status === null) return verdict(false, 'no response');
+  if (response.status >= 400) return verdict(false, `HTTP ${response.status}`);
+  if (!response.content_type?.includes('html'))
+    return verdict(false, `not a page (${response.content_type ?? 'no type'})`);
+  if (response.final_url) {
+    if (normaliseUrl(response.final_url) === normaliseUrl(home))
+      return verdict(false, 'redirects to the home page');
+    if (classifyLink(response.final_url) === 'login')
+      return verdict(false, `redirects to sign-in (${response.final_url})`);
+    if (classifyLink(response.final_url) === 'contact')
+      return verdict(false, `redirects to a contact or sales page (${response.final_url})`);
+    if (!sameSite(response.final_url, home))
+      return verdict(false, `redirects off the site (${response.final_url})`);
+  }
+  if (baseline && baseline.status !== null && baseline.status < 400) {
+    const sameTitle = baseline.title.trim() === response.title.trim();
+    const close =
+      baseline.length > 0 && Math.abs(baseline.length - response.length) / baseline.length < 0.05;
+    if (sameTitle && close) return verdict(false, `${SOFT_404} (soft 404)`);
+  }
+  if (!linked && !namesProbe(path, response))
+    return verdict(
+      false,
+      'not linked from the site, and its title and heading do not name it (it may be a user’s page)',
+    );
+  return verdict(true, `HTTP ${response.status}`);
+}
+
+/** Whether the page names the probed path, as `/how-it-works` is named by "How it works". */
+function namesProbe(path: string, response: ProbeResponse): boolean {
+  const word = path.replace(/^\//, '').replace(/[-_]+/g, ' ').toLowerCase();
+  const plain = (text: string) => text.toLowerCase().replace(/[-_]+/g, ' ');
+  if (plain(response.title).includes(word) || plain(response.heading ?? '').includes(word))
+    return true;
+  // A redirect to another path that names it, such as /product to /product-analytics.
+  if (!response.final_url) return false;
+  const finalPath = new URL(response.final_url).pathname.replace(/\/+$/, '') || '/';
+  return finalPath !== path && plain(finalPath).includes(word);
+}
+
+/** `Disallow` rules for every crawler (`User-agent: *`), from a robots.txt. */
+export function parseRobots(text: string): {
+  disallow: string[];
+  allow: string[];
+  delaySeconds: number | null;
+} {
+  const disallow: string[] = [];
+  const allow: string[] = [];
+  let delaySeconds: number | null = null;
+  let applies = false;
+  let inAgents = false;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.replace(/#.*/, '').trim();
+    const match = /^([a-z-]+)\s*:\s*(.*)$/i.exec(line);
+    if (!match) continue;
+    const key = (match[1] ?? '').toLowerCase();
+    const value = (match[2] ?? '').trim();
+    if (key === 'user-agent') {
+      if (!inAgents) applies = false;
+      inAgents = true;
+      if (value === '*') applies = true;
+      continue;
+    }
+    inAgents = false;
+    if (!applies) continue;
+    if (key === 'disallow' && value) disallow.push(value);
+    if (key === 'allow' && value) allow.push(value);
+    if (key === 'crawl-delay' && Number.isFinite(Number(value))) delaySeconds = Number(value);
+  }
+  return { disallow, allow, delaySeconds };
+}
+
+function ruleMatches(rule: string, path: string): boolean {
+  const pattern = rule
+    .replace(/[.+?^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\\\$$/, '$');
+  return new RegExp(`^${pattern}`).test(path);
+}
+
+/** Whether robots.txt lets any crawler fetch a path. The longest matching rule wins. */
+export function robotsAllow(
+  robots: { disallow: string[]; allow: string[] },
+  path: string,
+): boolean {
+  let best = { length: -1, allowed: true };
+  for (const rule of robots.allow)
+    if (ruleMatches(rule, path) && rule.length > best.length)
+      best = { length: rule.length, allowed: true };
+  for (const rule of robots.disallow)
+    if (ruleMatches(rule, path) && rule.length > best.length)
+      best = { length: rule.length, allowed: false };
+  return best.allowed;
+}
+
+/** What identifies a captured page's content, to tell a second address of one page. */
+export interface PageIdentity {
+  finalUrl: string;
+  text: string;
+}
+
+/**
+ * The earlier page this one repeats, if any: the same address after redirects, or the same
+ * visible text (at least 200 characters of it). Sites often serve one page at two addresses, such
+ * as `/` and `/homepage`, and a second copy spends a page load and doubles its screenshots.
+ */
+export function duplicateOf<T extends PageIdentity>(
+  page: PageIdentity,
+  earlier: T[],
+): T | undefined {
+  const key = normaliseUrl(page.finalUrl);
+  const text = normaliseWhitespace(page.text);
+  return earlier.find(
+    (other) =>
+      (key !== undefined && key === normaliseUrl(other.finalUrl)) ||
+      (text.length >= 200 && text === normaliseWhitespace(other.text)),
+  );
+}
+
+/** A page that loaded as HTML but gave no text, or failed: the capture may load it once more. */
+export function needsRecapture(page: {
+  error: string | null;
+  refused?: boolean;
+  status: number | null;
+  content_type: string | null;
+  text_chars?: number;
+}): boolean {
+  if (page.refused) return false;
+  if (page.error) return true;
+  const html = page.status !== null && page.status < 400 && /html/.test(page.content_type ?? '');
+  return html && (page.text_chars ?? 1) === 0;
+}
+
+export interface CandidateLink {
+  url: string;
+  text: string;
+  where: string;
+  kind: LinkKind;
+}
+
+const KIND_ORDER: LinkKind[] = [
+  'home',
+  'pricing',
+  'product',
+  'demo',
+  'docs',
+  'about',
+  'customers',
+  'other',
+  'blog',
+  'contact',
+];
+const NEVER: Set<LinkKind> = new Set(['login', 'legal', 'careers']);
+
+/**
+ * Up to `max` pages to capture, most useful first: the home page, then one page of each kind a
+ * launch film needs (pricing, product, docs landing, about), every probe that found a page, then
+ * more product and demo pages, preferring links in the navigation and shallow paths. Sign-in,
+ * legal and careers pages are never chosen.
+ */
+export function suggestPages(
+  home: string,
+  links: CandidateLink[],
+  probes: ProbeResult[],
+  max = MAX_PAGES,
+): CandidateLink[] {
+  const chosen: CandidateLink[] = [];
+  const seen = new Set<string>();
+  const take = (link: CandidateLink) => {
+    const key = normaliseUrl(link.url);
+    if (!key || seen.has(key) || chosen.length >= max) return;
+    seen.add(key);
+    chosen.push(link);
+  };
+  const depth = (url: string) => new URL(url).pathname.split('/').filter(Boolean).length;
+  const rank = (link: CandidateLink) =>
+    (link.where === 'nav' || link.where === 'header' ? 0 : link.where === 'body' ? 1 : 2) * 10 +
+    depth(link.url);
+  const usable = links
+    .filter((link) => sameSite(link.url, home) && !NEVER.has(link.kind))
+    .filter(
+      (link) =>
+        !/\.(pdf|zip|png|jpe?g|gif|svg|webp|mp4|xml|txt|json)$/i.test(new URL(link.url).pathname),
+    )
+    .sort((a, b) => rank(a) - rank(b));
+
+  take({ url: home, text: 'Home', where: 'home', kind: 'home' });
+  for (const kind of ['pricing', 'product', 'docs', 'about'] as const) {
+    const first = usable.find((link) => link.kind === kind);
+    if (first) take(first);
+  }
+  for (const probe of probes) {
+    // A probe judged on the rendered page routes there in the browser from the probed address,
+    // which discover already loaded: capturing that address loads the same page, counted once.
+    const url = probe.rendered ? probe.url : (probe.final_url ?? probe.url);
+    if (probe.found)
+      take({
+        url,
+        text: probe.path,
+        where: 'probe',
+        kind: classifyLink(probe.final_url ?? probe.url) === 'product' ? 'product' : 'demo',
+      });
+  }
+  // Links that open a public demo, such as "View live demo", show the product itself.
+  for (const link of usable.filter((item) => item.kind === 'demo').slice(0, 2)) take(link);
+  for (const kind of KIND_ORDER) {
+    const perKind = kind === 'product' || kind === 'demo' ? 4 : kind === 'other' ? 3 : 1;
+    for (const link of usable
+      .filter((item) => item.kind === kind && depth(item.url) <= 2)
+      .slice(0, perKind))
+      take(link);
+  }
+  return chosen;
+}

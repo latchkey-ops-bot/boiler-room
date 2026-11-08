@@ -1,0 +1,375 @@
+/* Script review, built from boiler-room-design design-system/samples/script-review.html with the
+   tokens and components in tokens.css and components.css. Imported by the script review page only.
+   The whole script reads top to bottom beside the preview; the preview itself is the shared brand
+   renderer in brand-scene.css, in the customer's brand, never ours. Every .player rule is scoped to
+   .script-review: the delivery screen's player shares the class name, and Next keeps a page's
+   styles loaded after a client-side navigation. */
+
+.script-review {
+  display: grid;
+  gap: var(--br-space-5);
+}
+
+/* ---------- Head: what this is, and how long ---------- */
+
+.review-head {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.review-head .meta {
+  display: block;
+}
+.review-head .lede {
+  max-width: 40em;
+  color: var(--br-muted);
+}
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+  font-weight: 700;
+  box-shadow: none;
+}
+.back-link .icon {
+  width: 14px;
+  height: 14px;
+  transform: scaleX(-1);
+}
+.icon.flip {
+  transform: scaleX(-1);
+}
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--br-deep);
+  font: 700 var(--br-text-sm) / 1.4 var(--br-font-body);
+  cursor: pointer;
+  box-shadow: 0 2px 0 var(--br-sky);
+}
+.link-button:hover {
+  box-shadow: 0 2px 0 var(--br-deep);
+}
+.link-button:focus-visible {
+  outline: 2px dashed var(--br-deep);
+  outline-offset: 3px;
+}
+
+/* ---------- Layout: the preview beside the script ---------- */
+
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr);
+  gap: var(--br-space-6);
+  align-items: start;
+}
+.review-preview,
+.review-script {
+  min-width: 0;
+}
+.review-preview {
+  position: sticky;
+  top: var(--br-space-5);
+}
+.review-script {
+  display: grid;
+  gap: var(--br-space-5);
+}
+
+/* ---------- The preview, with a scene stepper ---------- */
+
+.script-review .player {
+  --frame: var(--br-ink);
+  padding: 0;
+  background: var(--br-ink);
+}
+.script-review .player .stage-box {
+  aspect-ratio: 16 / 9;
+}
+.script-review .player .controls {
+  display: grid;
+  gap: var(--br-space-3);
+  padding: var(--br-space-3) var(--br-space-4) var(--br-space-4);
+  background: var(--br-white);
+}
+.script-review .player .stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-3);
+}
+.script-review .player .stepper .btn {
+  padding: 6px 10px;
+}
+.script-review .player .where {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px var(--br-space-3);
+  flex: 1;
+  flex-wrap: wrap;
+  text-align: center;
+}
+.script-review .player .where .name {
+  font: 700 16px / 1.2 var(--br-font-display);
+  color: var(--br-ink);
+}
+.script-review .player .time {
+  color: var(--br-muted);
+  font: 400 var(--br-text-mono) / 1.5 var(--br-font-mono);
+  white-space: nowrap;
+}
+.script-review .player .preview-as {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-2) var(--br-space-4);
+  flex-wrap: wrap;
+  padding-top: var(--br-space-3);
+  border-top: 2px dashed var(--br-cream-deep);
+}
+.seg-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--br-space-2);
+}
+
+/* ---------- The script, scene by scene ---------- */
+
+.scenes {
+  display: grid;
+  gap: var(--br-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.scene-card {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.scene-card.is-shown {
+  --frame: var(--br-deep);
+  --drop: var(--br-deep);
+}
+.scene-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.scene-top .label {
+  color: var(--br-muted);
+}
+.scene-card h3 {
+  font-size: var(--br-text-h4);
+  letter-spacing: -0.01em;
+}
+.scene-card .on-screen {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-weight: 700;
+}
+.scene-card .vo {
+  display: grid;
+  gap: 2px;
+  font-size: var(--br-text-sm);
+}
+.scene-card .vo .label {
+  color: var(--br-muted);
+}
+.scene-card .sources {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.script-review .claim-card .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--br-space-2);
+  flex-wrap: wrap;
+}
+.choice-note {
+  display: grid;
+  gap: 4px;
+  padding: var(--br-space-3);
+  background: var(--br-sky-soft);
+  font-size: var(--br-text-sm);
+}
+.scene-card .choice-note .label {
+  color: var(--br-muted);
+}
+.choice-note ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.choice-note .mono {
+  font-family: var(--br-font-mono);
+  font-size: 12px;
+}
+
+/* ---------- A number to confirm: pink, because it needs the founder ---------- */
+
+.confirm {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.confirm-needs {
+  --frame: var(--br-attention-ink);
+  --drop: var(--br-pink);
+  background: var(--br-attention-soft);
+}
+.confirm-done {
+  --frame: var(--br-success-ink);
+  --drop: var(--br-mint);
+  background: var(--br-success-soft);
+}
+.confirm .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.confirm h2 {
+  font-size: 21px;
+}
+.confirm-needs h2 {
+  color: var(--br-attention-ink);
+}
+.confirm-done h2 {
+  color: var(--br-success-ink);
+}
+.confirm-item {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.confirm-item + .confirm-item {
+  padding-top: var(--br-space-3);
+  border-top: 2px dashed var(--br-attention-ink);
+}
+.confirm p {
+  font-size: var(--br-text-sm);
+}
+.confirm .claim-card {
+  background: var(--br-white);
+}
+.confirm-actions {
+  display: flex;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.confirmed-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--br-success-ink);
+  font-weight: 700;
+}
+.confirmed-line .icon {
+  width: 14px;
+  height: 14px;
+}
+.stack-sm {
+  display: grid;
+  gap: var(--br-space-2);
+}
+
+/* ---------- The decision, after the script ---------- */
+
+.decide {
+  display: grid;
+  gap: var(--br-space-3);
+  padding: var(--br-space-4) var(--br-space-5);
+  background: var(--br-white);
+  box-shadow:
+    0 calc(var(--br-px) * -1) 0 0 var(--br-deep),
+    0 var(--br-px) 0 0 var(--br-deep),
+    calc(var(--br-px) * -1) 0 0 0 var(--br-deep),
+    var(--br-px) 0 0 0 var(--br-deep);
+  margin: var(--br-px);
+}
+.decide p {
+  font-weight: 700;
+}
+.decide-actions {
+  display: flex;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+
+/* ---------- Approve: the choices already shown in the script, then one button ---------- */
+
+.approve-dialog fieldset {
+  display: grid;
+  gap: var(--br-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.approve-dialog legend {
+  margin-bottom: var(--br-space-2);
+  color: var(--br-muted);
+}
+.approve-dialog .check,
+.approve-dialog .radio {
+  align-items: flex-start;
+}
+.approve-dialog .choice {
+  display: grid;
+  line-height: 1.35;
+}
+.approve-dialog .choice .mono {
+  font-size: 12px;
+}
+.approve-dialog .shapes {
+  display: flex;
+  gap: var(--br-space-3) var(--br-space-5);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+  .review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .review-preview {
+    position: static;
+  }
+}
+@media (max-width: 860px) {
+  /* Once the founder has scrolled down to the decision, it stays at the bottom of the screen. */
+  .decide.is-sticky {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 0 calc(var(--br-space-4) * -1);
+    padding: var(--br-space-3) var(--br-space-4);
+    box-shadow: 0 calc(var(--br-px) * -1) 0 0 var(--br-deep);
+  }
+  .decide.is-sticky p {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  /* Side by side, so the bar covers as little of the script as it can. */
+  .decide.is-sticky .decide-actions {
+    flex-wrap: nowrap;
+    gap: var(--br-space-2);
+  }
+  .decide.is-sticky .decide-actions .btn {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 8px;
+    font-size: 15px;
+  }
+}
+@media (max-width: 640px) {
+  .decide-actions .btn {
+    flex: 1;
+  }
+}

@@ -1,0 +1,188 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-payoff",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 13,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": {
+        "family": "Sora",
+        "source": "font-display"
+      },
+      "body": {
+        "family": "Inter",
+        "source": "font-body"
+      }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "dashboard-shot": {
+      "kind": "image",
+      "src": "assets/nova/dashboard.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://nova.example.com/product"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [
+    {
+      "id": "build-times",
+      "text": "Nova cuts build times by 40%",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Teams on Nova cut build times by 40% in their first month.",
+      "status": "approved"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Your builds are waiting.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "product",
+      "type": "site-hero",
+      "start": 3,
+      "end": 5.8,
+      "props": {},
+      "text": [
+        {
+          "id": "product-address",
+          "role": "label",
+          "value": "nova.example.com/product",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "speed",
+      "type": "feature-card",
+      "start": 5.8,
+      "end": 8.2,
+      "props": {},
+      "text": [
+        {
+          "id": "speed-headline",
+          "role": "headline",
+          "value": "Every commit, built sooner",
+          "claimIds": []
+        },
+        {
+          "id": "speed-cause",
+          "role": "label",
+          "value": "Every commit",
+          "claimIds": []
+        },
+        {
+          "id": "speed-effect",
+          "role": "label",
+          "value": "Built sooner",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "payoff",
+      "type": "colour-event",
+      "start": 8.2,
+      "end": 9.6,
+      "props": {
+        "card": "frosted"
+      },
+      "text": [
+        {
+          "id": "payoff-line",
+          "role": "headline",
+          "value": "40% faster",
+          "claimIds": ["build-times"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 9.6,
+      "end": 13,
+      "props": {},
+      "text": [
+        {
+          "id": "close-cta",
+          "role": "cta",
+          "value": "Start free",
+          "claimIds": []
+        },
+        {
+          "id": "close-address",
+          "role": "label",
+          "value": "nova.example.com",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["logo"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-free",
+        "label": "Start free",
+        "href": "https://nova.example.com/signup"
+      },
+      {
+        "id": "book-demo",
+        "label": "Book a demo",
+        "href": "https://nova.example.com/demo"
+      }
+    ]
+  }
+}

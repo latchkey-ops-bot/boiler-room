@@ -1,0 +1,121 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The top level is local development only: `pnpm web:dev` and `pnpm web:preview`.
+  // D1 and R2 are simulated on disk in .wrangler/state. Staging and production are under "env".
+  // Bindings, vars and services are not inherited, so each environment states all of them.
+  "name": "boiler-room-web",
+  // worker.ts wraps OpenNext's generated .open-next/worker.js and adds the cron's scheduled
+  // handler. Only staging has a cron trigger.
+  "main": "worker.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  // Each environment is served on workers.dev until it has its own domain. Preview URLs stay off:
+  // a version is tested on staging, not on a public preview link.
+  "workers_dev": true,
+  "preview_urls": false,
+  "upload_source_maps": true,
+  // BR_HOUSE_ACCOUNT_ID is Boiler Room's own account id (acc_…): its newest film on the showcase
+  // goes first, marked "Our own". It is chosen by owner, never by URL. Empty: nothing is pinned.
+  //
+  // Real films (docs/deploy.md, "Real films on staging") need the RUNNER_ vars below plus three
+  // secrets: NAIVE_WEB_KEY, RUNNER_SIGNING_SECRET and REAL_FILM_USERS. Missing any, every new film
+  // is simulated, or answers 503 where PIPELINE is naive. NAIVE_RUNNER_KEY, the film command's own
+  // key, is a fourth: the snapshot runs the real film command, which stops with no_naive_key
+  // before the crew starts when the launch carries none.
+  "vars": {
+    "APP_ENV": "development",
+    "PIPELINE": "simulated",
+    "BR_HOUSE_ACCOUNT_ID": "",
+    "RUNNER_SNAPSHOT_ID": "",
+    "RUNNER_PUBLIC_URL": "",
+    "RUNNER_COMMIT": "",
+    "RUNNER_FILM_COMMIT": ""
+  },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "boiler-room-local",
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-local" }],
+  "env": {
+    "staging": {
+      "name": "boiler-room-web-staging",
+      // PIPELINE stays simulated: only the founders in REAL_FILM_USERS get real films. The
+      // snapshot id and the two commits it holds are committed by pull request after a build.
+      // Caps are in USD: a film's whole cap, and per founder and for staging per rolling 24 hours.
+      // A real 16:9 film costs about $1.30 for its script and $1.00 a format for the render, and
+      // Opus Director rounds can cost more, so a film may take $6.00. A founder's $15.00 a day
+      // holds two films at that cap, and staging's $20.00 a third, such as a test film, beside
+      // them. A film counts at its whole cap while it works, then at what it spent.
+      // TRIPWIRE_DAILY_FALL_USD is the balance tripwire: the Naive balance down more than it in a
+      // day, from any source, halts every real film. It sits above the company's own daily spend
+      // (about $20 to $27 a day with no film), which shares the balance.
+      "vars": {
+        "APP_ENV": "staging",
+        "PIPELINE": "simulated",
+        "BR_HOUSE_ACCOUNT_ID": "acc_boilerroomhouse0001",
+        "RUNNER_SNAPSHOT_ID": "snp_31bbcf3a36fd409fabe91ffd703a2ad9",
+        "RUNNER_PUBLIC_URL": "https://boiler-room-web-staging.boilerroom.workers.dev",
+        "RUNNER_COMMIT": "4595c21d37cdfd31c97a0f3fd9de6b97489e987d",
+        "RUNNER_FILM_COMMIT": "4595c21d37cdfd31c97a0f3fd9de6b97489e987d",
+        "FILM_CAP_USD": "6.00",
+        "FILM_COMPUTE_RESERVE_USD": "0.50",
+        "ACCOUNT_DAILY_CAP_USD": "15.00",
+        "GLOBAL_DAILY_CAP_USD": "20.00",
+        "TRIPWIRE_DAILY_FALL_USD": "80.00",
+        "MAX_REAL_PER_ACCOUNT": "1",
+        "MAX_REAL_GLOBAL": "1",
+        "RUNNER_REVISE_SUPPORTED": "false",
+        // The snapshot runs the real film command (--adapter film), so a runner that says it runs
+        // the stand-in is refused rather than labelled simulated.
+        "RUNNER_ALLOW_STANDIN": "false"
+      },
+      // The real-film watchdog: destroys stuck computers, enforces deadlines and caps.
+      "triggers": { "crons": ["* * * * *"] },
+      "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-staging" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "boiler-room-staging",
+          // Written by `pnpm web:provision:staging`, then committed by pull request.
+          "database_id": "c8adc012-fdec-4c94-898b-f94c20829393",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-staging" }]
+    },
+    "production": {
+      "name": "boiler-room-web-production",
+      // Production makes no simulated films. Until the Naive pipeline is wired, starting a film
+      // there answers 503.
+      //
+      // CLERK_INSTANCE "development": production signs in with Clerk's development instance, by the
+      // founder's decision of 2026-11-08. A Clerk production instance needs a custom domain, and
+      // production is on workers.dev. With it, the build and the secret sync accept the
+      // development keys as PRODUCTION_ keys; without it they refuse them.
+      "vars": {
+        "APP_ENV": "production",
+        "PIPELINE": "naive",
+        "BR_HOUSE_ACCOUNT_ID": "",
+        "CLERK_INSTANCE": "development"
+      },
+      "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-production" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "boiler-room-production",
+          // Written by `pnpm web:provision:production` (run once by the main session, 2026-11-08).
+          "database_id": "33faeba9-e31b-4681-a2f7-d637708776c8",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-production" }]
+    }
+  }
+}

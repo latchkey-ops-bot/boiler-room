@@ -1,0 +1,395 @@
+{
+  "schemaVersion": 1,
+  "id": "posthog-features",
+  "sourceUrl": "https://posthog.com/",
+  "fps": 30,
+  "durationSeconds": 20.2,
+  "brand": {
+    "name": "PostHog",
+    "colors": {
+      "background": "#F7F7F7",
+      "foreground": "#111111",
+      "primary": "#111111",
+      "accent": "#EB9D2A",
+      "muted": "#65675E"
+    },
+    "fonts": {
+      "display": {
+        "family": "Inter",
+        "source": "inter-library"
+      },
+      "body": {
+        "family": "Inter",
+        "source": "inter-library"
+      }
+    },
+    "logoAssetId": "logo",
+    "radius": 6
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/posthog/logo.svg",
+      "provenance": "captured",
+      "width": 24,
+      "height": 24,
+      "sourceUrl": "https://posthog.com/"
+    },
+    "home-screen": {
+      "kind": "image",
+      "src": "assets/posthog/home-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/"
+    },
+    "about-screen": {
+      "kind": "image",
+      "src": "assets/posthog/about-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/about"
+    },
+    "customers-screen": {
+      "kind": "image",
+      "src": "assets/posthog/customers-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/customers"
+    },
+    "demo-screen": {
+      "kind": "image",
+      "src": "assets/posthog/demo-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/demo"
+    },
+    "docs-screen": {
+      "kind": "image",
+      "src": "assets/posthog/docs-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/docs"
+    },
+    "mcp-screen": {
+      "kind": "image",
+      "src": "assets/posthog/mcp-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/mcp"
+    },
+    "pricing-screen": {
+      "kind": "image",
+      "src": "assets/posthog/pricing-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/pricing"
+    },
+    "product-analytics-screen": {
+      "kind": "image",
+      "src": "assets/posthog/product-analytics-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/product-analytics"
+    },
+    "products-screen": {
+      "kind": "image",
+      "src": "assets/posthog/products-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/products"
+    },
+    "self-driving-screen": {
+      "kind": "image",
+      "src": "assets/posthog/self-driving-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/self-driving"
+    },
+    "self-driving-ui-1": {
+      "kind": "image",
+      "src": "assets/posthog/self-driving-ui-1.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/self-driving"
+    },
+    "session-replay-screen": {
+      "kind": "image",
+      "src": "assets/posthog/session-replay-screen.png",
+      "provenance": "captured",
+      "width": 1920,
+      "height": 1080,
+      "sourceUrl": "https://posthog.com/session-replay"
+    },
+    "inter-library": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1",
+      "sourceUrl": "https://fonts.google.com/specimen/Inter"
+    }
+  },
+  "claims": [
+    {
+      "id": "home-subhead",
+      "text": "PostHog ingests and stores your analytics, errors, replays, and business data so you and your agents can query and act on it.",
+      "sourceUrl": "https://posthog.com/",
+      "quote": "PostHog ingests and stores your analytics, errors, replays, and business data so you and your agents can query and act on it.",
+      "status": "extracted"
+    },
+    {
+      "id": "home-self-driving-pr",
+      "text": "If you enable self-driving, when a report is ready, PostHog writes the pull request for you. You review and merge.",
+      "sourceUrl": "https://posthog.com/",
+      "quote": "If you enable self-driving, when a report is ready, PostHog writes the pull request for you. You review and merge.",
+      "status": "extracted"
+    },
+    {
+      "id": "session-replay-def",
+      "text": "Session Replay records what happens in a user's session – clicks, scrolls, form inputs, page views, network requests, console logs – and plays it back like video.",
+      "sourceUrl": "https://posthog.com/session-replay",
+      "quote": "Session Replay records what happens in a user's session – clicks, scrolls, form inputs, page views, network requests, console logs – and plays it back like video.",
+      "status": "extracted"
+    },
+    {
+      "id": "product-analytics-def",
+      "text": "Product Analytics turns what people do in your product into answers you can act on.",
+      "sourceUrl": "https://posthog.com/product-analytics",
+      "quote": "Product Analytics turns what people do in your product into answers you can act on.",
+      "status": "extracted"
+    },
+    {
+      "id": "mcp-def",
+      "text": "The PostHog MCP is a free, hosted server that lets your AI agent use PostHog.",
+      "sourceUrl": "https://posthog.com/mcp",
+      "quote": "The PostHog MCP is a free, hosted server that lets your AI agent use PostHog.",
+      "status": "extracted"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "feature-replay",
+      "type": "feature-card",
+      "start": 0.0,
+      "end": 2.4,
+      "props": {},
+      "text": [
+        {
+          "id": "replay-line",
+          "role": "headline",
+          "value": "Watch sessions back like video",
+          "claimIds": ["session-replay-def"]
+        },
+        {
+          "id": "replay-cause",
+          "role": "label",
+          "value": "Clicks, scrolls",
+          "claimIds": ["session-replay-def"]
+        },
+        {
+          "id": "replay-effect",
+          "role": "label",
+          "value": "Played back",
+          "claimIds": ["session-replay-def"]
+        }
+      ],
+      "assetIds": ["session-replay-screen"],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "feature-analytics",
+      "type": "feature-card",
+      "start": 2.4,
+      "end": 4.8,
+      "props": {},
+      "text": [
+        {
+          "id": "analytics-line",
+          "role": "headline",
+          "value": "Turn what users do into answers",
+          "claimIds": ["product-analytics-def"]
+        }
+      ],
+      "assetIds": ["product-analytics-screen"],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "feature-mcp",
+      "type": "feature-card",
+      "start": 4.8,
+      "end": 7.2,
+      "props": {},
+      "text": [
+        {
+          "id": "mcp-line",
+          "role": "headline",
+          "value": "Let your AI agent use PostHog",
+          "claimIds": ["mcp-def"]
+        }
+      ],
+      "assetIds": ["mcp-screen"],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "feature-self-driving",
+      "type": "feature-card",
+      "start": 7.2,
+      "end": 9.6,
+      "props": {},
+      "text": [
+        {
+          "id": "driving-line",
+          "role": "headline",
+          "value": "PostHog writes the pull request",
+          "claimIds": ["home-self-driving-pr"]
+        },
+        {
+          "id": "driving-cause",
+          "role": "label",
+          "value": "Report ready",
+          "claimIds": ["home-self-driving-pr"]
+        },
+        {
+          "id": "driving-effect",
+          "role": "label",
+          "value": "You merge",
+          "claimIds": ["home-self-driving-pr"]
+        }
+      ],
+      "assetIds": ["self-driving-ui-1"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "wall",
+      "type": "tile-wall",
+      "start": 9.6,
+      "end": 11.8,
+      "props": {},
+      "text": [],
+      "assetIds": [
+        "self-driving-ui-1",
+        "docs-screen",
+        "pricing-screen",
+        "about-screen",
+        "customers-screen",
+        "demo-screen",
+        "home-screen",
+        "mcp-screen",
+        "product-analytics-screen",
+        "products-screen",
+        "self-driving-screen",
+        "session-replay-screen"
+      ],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "payoff",
+      "type": "colour-event",
+      "start": 11.8,
+      "end": 13.2,
+      "props": {
+        "card": "simple"
+      },
+      "text": [
+        {
+          "id": "payoff-line",
+          "role": "headline",
+          "value": "Act on it.",
+          "claimIds": ["home-subhead"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "callback",
+      "type": "type-card",
+      "start": 13.2,
+      "end": 15.0,
+      "props": {},
+      "text": [
+        {
+          "id": "callback-line",
+          "role": "headline",
+          "value": "Stop guessing. Play it back.",
+          "claimIds": ["session-replay-def"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "name",
+      "type": "type-card",
+      "start": 15.0,
+      "end": 16.433333,
+      "props": {
+        "variant": "name"
+      },
+      "text": [
+        {
+          "id": "name-line",
+          "role": "headline",
+          "value": "PostHog",
+          "claimIds": []
+        },
+        {
+          "id": "name-descriptor",
+          "role": "subhead",
+          "value": "Analytics and replays",
+          "claimIds": ["home-subhead"]
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "end",
+      "type": "end-card",
+      "start": 16.433333,
+      "end": 20.2,
+      "props": {},
+      "text": [
+        {
+          "id": "end-cta",
+          "role": "cta",
+          "value": "Get started – free",
+          "claimIds": []
+        },
+        {
+          "id": "end-url",
+          "role": "label",
+          "value": "posthog.com",
+          "claimIds": []
+        }
+      ],
+      "assetIds": []
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16"],
+    "ctas": [
+      {
+        "id": "get-started-free",
+        "label": "Get started – free",
+        "href": "https://app.posthog.com/signup"
+      },
+      {
+        "id": "explore-products",
+        "label": "Explore product suite",
+        "href": "https://posthog.com/products"
+      }
+    ]
+  }
+}

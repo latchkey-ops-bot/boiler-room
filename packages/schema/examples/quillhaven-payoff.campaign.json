@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "id": "quillhaven-payoff",
+  "sourceUrl": "https://quillhaven.example.com",
+  "fps": 30,
+  "durationSeconds": 13,
+  "brand": {
+    "name": "Quillhaven Manuscript Studio",
+    "colors": {
+      "background": "#FBF7EF",
+      "foreground": "#1F1B16",
+      "primary": "#8C2F1B",
+      "accent": "#2F5D50",
+      "muted": "#A39A8F"
+    },
+    "fonts": {
+      "display": {
+        "family": "Fraunces",
+        "source": "font-display"
+      },
+      "body": {
+        "family": "Source Serif 4",
+        "source": "font-body"
+      }
+    },
+    "logoAssetId": "favicon",
+    "radius": 4
+  },
+  "assets": {
+    "favicon": {
+      "kind": "image",
+      "src": "assets/quillhaven/favicon.png",
+      "provenance": "captured",
+      "width": 32,
+      "height": 32,
+      "sourceUrl": "https://quillhaven.example.com"
+    },
+    "editor-shot": {
+      "kind": "image",
+      "src": "assets/quillhaven/editor.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://quillhaven.example.com/editor"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/fraunces.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/source-serif-4.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Every draft, kept in one quiet room.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "revise",
+      "type": "site-hero",
+      "start": 3,
+      "end": 5.8,
+      "props": {
+        "focus": {
+          "x": 720,
+          "y": 360,
+          "w": 1440,
+          "h": 900
+        }
+      },
+      "text": [
+        {
+          "id": "revise-address",
+          "role": "label",
+          "value": "quillhaven.example.com/editor",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["editor-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "features",
+      "type": "feature-card",
+      "start": 5.8,
+      "end": 8.2,
+      "props": {},
+      "text": [
+        {
+          "id": "features-headline",
+          "role": "headline",
+          "value": "Revise and lose nothing",
+          "claimIds": []
+        },
+        {
+          "id": "features-cause",
+          "role": "label",
+          "value": "Every change",
+          "claimIds": []
+        },
+        {
+          "id": "features-effect",
+          "role": "label",
+          "value": "Always kept",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["editor-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "payoff",
+      "type": "colour-event",
+      "start": 8.2,
+      "end": 9.6,
+      "props": {
+        "card": "simple"
+      },
+      "text": [
+        {
+          "id": "payoff-line",
+          "role": "headline",
+          "value": "Just write.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 9.6,
+      "end": 13,
+      "props": {},
+      "text": [
+        {
+          "id": "close-cta",
+          "role": "cta",
+          "value": "Start writing",
+          "claimIds": []
+        },
+        {
+          "id": "close-address",
+          "role": "label",
+          "value": "quillhaven.example.com",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["favicon"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-writing",
+        "label": "Start writing",
+        "href": "https://quillhaven.example.com/signup"
+      },
+      {
+        "id": "see-pricing",
+        "label": "See pricing",
+        "href": "https://quillhaven.example.com/pricing"
+      }
+    ]
+  }
+}

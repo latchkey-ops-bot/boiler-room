@@ -1,0 +1,391 @@
+import { appendFileSync } from 'node:fs';
+import type { AgentDefinition } from '../define.ts';
+import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
+import { ViewEvidence } from '../naive/evidence.ts';
+import {
+  AGENT_CAP,
+  closeSession,
+  inputTokens,
+  pausedOnBudget,
+  SessionTracker,
+} from '../naive/session.ts';
+import { describe } from '../researcher/run.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
+import { type Batch, type BatchResult, batchFiles, smallerBatches } from './apply.ts';
+import { reviewSchema } from './decision.ts';
+import { type ReviewContext, reviewTask } from './prompt.ts';
+
+/**
+ * Runs each review batch as its own short session of `br-art-director`, a few at a time. Cost is
+ * held in code, not by the prompt: a session that starts a second `view_image` call or runs past
+ * its time is interrupted, and once the run has spent its budget no further batch starts. A batch
+ * that ends without a valid review leaves the code's ranking for its scenes. The review is read
+ * from the `session.idle` event that ends the turn, never from `sessions.get`. A session paused on
+ * its budget is cancelled, recorded, and its batch retried once as smaller batches. When it was the
+ * agent's own cap that had no room before the session spent anything, the smaller batches go next,
+ * as a probe: a smaller call can still fit what is left of the day's cap, as one did on 8 November.
+ * If a batch that cannot be made smaller meets the cap the same way, nothing fits, and no further
+ * batch starts in this run: on 8 November the cap was spent and 25 sessions paused one after
+ * another.
+ *
+ * A review's `seen: true` stands only on the session's own events (`ViewEvidence`): a completed
+ * `view_image` for every picture of the batch before the submission, and no word from the agent
+ * afterwards that the pictures never arrived. On 8 November three reviews said `seen: true` with
+ * detailed reasons and then admitted the pictures never reached them. A review that is not proven
+ * seen, or that says it did not see, is not done: the batch runs once more in a fresh session, with
+ * its pictures attached again, and if that review is not proven seen either, the code's choice
+ * stands and the batch is marked chosen by rule, not reviewed.
+ */
+
+export interface ReviewOptions {
+  /** Stop starting batches once the sessions have spent this much, in micro-USD. */
+  budgetMicroUsd: number;
+  /** Sessions running at once. */
+  concurrency: number;
+  /** Wall-clock limit for one batch's session. */
+  maxMinutesPerBatch: number;
+  eventsPath: string;
+  campaignId: string;
+  /** How a dropped event stream is resumed before the session is stopped. */
+  streamRetry?: StreamRetry;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
+}
+
+export interface SessionRecord {
+  batch: string;
+  kind: Batch['kind'];
+  session_id: string | null;
+  consumed_micro_usd: number;
+  views: number;
+  outcome: string;
+  /** Every input token the session read, over all its model requests. */
+  input_tokens?: number;
+  /** Characters of the task message, the part of the input this code writes. */
+  task_chars?: number;
+  /** The session was paused on its budget, and has been cancelled. */
+  budget_paused?: boolean;
+  /** It was paused by the agent's own cap, before it spent anything. */
+  agent_cap_spent?: boolean;
+  /** The file ids the session's events show it was shown before it submitted. */
+  viewed?: string[];
+  /** Why its review could not be taken as seen, when it could not. */
+  not_seen?: string;
+}
+
+export interface ReviewRun {
+  results: BatchResult[];
+  sessions: SessionRecord[];
+  spentMicroUsd: number;
+  agentId: string;
+  agentVersion: number;
+}
+
+const NUDGE =
+  'Call submit_output now with seen, scene, tiles, generated and flags, from what you have seen. Do not view anything again.';
+
+/** The note a batch's second session starts with, after its first review was not proven seen. */
+export function againNote(why: string): string {
+  return [
+    `This review was asked for once already, and that review could not be used: ${why}.`,
+    'The pictures are attached again by the same file ids. Call view_image once with exactly those ids, then look at each picture that arrives.',
+    'If any picture does not arrive, set seen to false and leave the decision empty, so the code ranking stands. Never describe a picture you did not see.',
+  ].join(' ');
+}
+
+/** The prefix of the failure of a batch whose pictures were never proven seen. */
+export const NOT_REVIEWED = 'chosen by rule, not reviewed';
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+const say = (message: string) =>
+  console.log(scrub(`${new Date().toISOString().slice(11, 19)} ${message}`));
+
+async function runBatch(
+  client: Naive,
+  definition: AgentDefinition,
+  agentId: string,
+  batch: Batch,
+  task: string,
+  files: readonly string[],
+  options: ReviewOptions,
+): Promise<{ result: BatchResult; record: SessionRecord; paused: boolean; notSeen?: string }> {
+  const record: SessionRecord = {
+    batch: batch.id,
+    kind: batch.kind,
+    session_id: null,
+    consumed_micro_usd: 0,
+    views: 0,
+    outcome: '',
+    task_chars: task.length,
+  };
+  const tracker = new SessionTracker();
+  const evidence = new ViewEvidence();
+  const fail = (failure: string, paused = false) => {
+    record.outcome = failure;
+    record.input_tokens = inputTokens(tracker.usage);
+    if (paused) record.budget_paused = true;
+    return { result: { batch, review: undefined, failure }, record, paused };
+  };
+  const session = await client.sessions.create({
+    agent_id: agentId,
+    message: task,
+    budget_micro_usd: definition.session.budget_micro_usd,
+    ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
+    structured_output_required: definition.structured_output_required,
+    metadata: { run: 'art', campaign: options.campaignId, batch: batch.id },
+  });
+  record.session_id = session.id;
+  const deadline = Date.now() + options.maxMinutesPerBatch * 60_000;
+  let afterSeq = 0;
+  let stopped: string | undefined;
+  const stop = (why: string) => {
+    if (stopped) return;
+    stopped = why;
+    client.sessions.interrupt(session.id).catch(() => {});
+  };
+
+  const settle = async () => {
+    for (;;) {
+      const timer = setTimeout(
+        () => stop(`ran past ${options.maxMinutesPerBatch} minutes`),
+        Math.max(1000, deadline - Date.now()),
+      );
+      try {
+        for await (const event of sessionEvents(
+          client,
+          session.id,
+          afterSeq,
+          options.streamRetry,
+        )) {
+          afterSeq = event.seq;
+          const record_ = event as unknown as { type: string; data: Record<string, unknown> };
+          const data = record_.data ?? {};
+          tracker.handle(record_);
+          evidence.handle(record_);
+          if (event.type === 'tool.started' && data.name === 'view_image') {
+            record.views += 1;
+            if (record.views > 1) stop('started a second view_image call');
+          }
+          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+            appendFileSync(
+              options.eventsPath,
+              `${scrub(JSON.stringify({ batch: batch.id, ...event }))}\n`,
+            );
+          const line = describe(record_);
+          if (line && !line.includes('view_image: [image]')) say(`[${batch.id}] ${line}`);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      const state = await client.sessions.get(session.id);
+      if ((state.status !== 'running' && state.status !== 'queued') || Date.now() > deadline)
+        return state;
+      await sleep(1000);
+    }
+  };
+
+  try {
+    const state = await settle();
+    const paused = pausedOnBudget(tracker, state);
+    if (!tracker.submissions && !stopped && !paused && state.status === 'idle') {
+      if (Date.now() < deadline) {
+        afterSeq = (await client.sessions.send(session.id, { message: NUDGE, queue: true }))
+          .accepted_seq;
+        await settle();
+      }
+    }
+  } catch (cause) {
+    // The stream or the API failed for good. The session may still be running and spending: stop
+    // it, and count what it spent, so the run's budget sees it and the report lists it. A cost
+    // that cannot be read is counted as the session's whole budget.
+    const after = await closeSession(client, session.id);
+    record.consumed_micro_usd = after.consumedMicroUsd ?? definition.session.budget_micro_usd;
+    const message = cause instanceof Error ? cause.message.slice(0, 200) : String(cause);
+    return fail(
+      `stream failed: ${message}${after.consumedMicroUsd === undefined ? '; cost unread, counted at the session budget' : ''}`,
+      after.budgetPaused,
+    );
+  }
+  // Left neither running nor parked: a session paused on its budget is cancelled here.
+  const final = await closeSession(client, session.id);
+  record.consumed_micro_usd = final.consumedMicroUsd ?? 0;
+
+  if (final.budgetPaused || tracker.budgetPaused) {
+    if (tracker.budgetExceeded === AGENT_CAP && record.consumed_micro_usd === 0)
+      record.agent_cap_spent = true;
+    return fail(
+      `paused on its budget${record.agent_cap_spent ? " (the agent's own cap had no room)" : ''} and ${final.cancelled ? 'cancelled' : 'could not be cancelled'}`,
+      true,
+    );
+  }
+  if (stopped) return fail(`interrupted: ${stopped}`);
+  if (!tracker.submissions || tracker.output == null)
+    return fail(`no review submitted (${final.status}/${final.stopReason})`);
+  const parsed = reviewSchema.safeParse(tracker.output);
+  if (!parsed.success)
+    return fail(`review does not match the schema: ${parsed.error.message.slice(0, 200)}`);
+  record.input_tokens = inputTokens(tracker.usage ?? final.tokenUsage);
+  record.viewed = [...evidence.viewed];
+  // `seen: true` is the agent's word; only the session's events can prove it.
+  const notSeen = parsed.data.seen
+    ? evidence.problem(files)
+    : 'the agent said it did not see every picture';
+  if (notSeen) {
+    record.outcome = `not seen: ${notSeen}`;
+    record.not_seen = notSeen;
+    return {
+      result: { batch, review: undefined, failure: `not seen: ${notSeen}` },
+      record,
+      paused: false,
+      notSeen,
+    };
+  }
+  record.outcome = 'reviewed';
+  return { result: { batch, review: parsed.data, failure: undefined }, record, paused: false };
+}
+
+export async function reviewBatches(
+  client: Naive,
+  definition: AgentDefinition,
+  batches: readonly Batch[],
+  context: ReviewContext,
+  options: ReviewOptions,
+): Promise<ReviewRun> {
+  const [synced] = await ensureAgents(client, [definition], options.agentSync);
+  if (!synced) throw new Error('Agent sync returned nothing.');
+  say(
+    `agent ${synced.name} ${synced.id} v${synced.version} (${synced.action}); ${batches.length} review(s)`,
+  );
+  const results: BatchResult[] = [];
+  const sessions: SessionRecord[] = [];
+  let spent = 0;
+  let next = 0;
+  // A batch paused on its budget is retried once, as smaller batches added to the end.
+  const queue: Batch[] = [...batches];
+  const retries = new Set<Batch>();
+  // A batch whose review was not proven seen runs once more, with why its first one failed.
+  const again = new Map<Batch, string>();
+  // Set once the agent's own cap has no room: every later session would pause the same way.
+  let capSpent = false;
+
+  const worker = async () => {
+    for (;;) {
+      const batch = queue[next];
+      next += 1;
+      if (!batch) return;
+      // A second look that cannot happen leaves the batch to the code's rule, and says so.
+      const unproven = again.get(batch);
+      const ruled = (failure: string): BatchResult =>
+        unproven === undefined
+          ? { batch, review: undefined, failure }
+          : {
+              batch,
+              review: undefined,
+              failure: `${NOT_REVIEWED}: ${unproven}; then ${failure}`,
+              notReviewed: true,
+            };
+      if (spent >= options.budgetMicroUsd || capSpent) {
+        const failure = capSpent
+          ? `not started: the agent's own budget cap has no room for a session`
+          : `not started: the run's review budget of ${usd(options.budgetMicroUsd)} is spent`;
+        results.push(ruled(failure));
+        sessions.push({
+          batch: batch.id,
+          kind: batch.kind,
+          session_id: null,
+          consumed_micro_usd: 0,
+          views: 0,
+          outcome: failure,
+        });
+        continue;
+      }
+      if (batchFiles(batch, context.infos).length === 0) {
+        results.push({ batch, review: undefined, failure: 'no picture can be viewed' });
+        continue;
+      }
+      try {
+        const before = unproven;
+        const task = reviewTask(batch, context);
+        const { result, record, paused, notSeen } = await runBatch(
+          client,
+          definition,
+          synced.id,
+          batch,
+          before ? `${againNote(before)}\n\n${task}` : task,
+          batchFiles(batch, context.infos),
+          options,
+        );
+        spent += record.consumed_micro_usd;
+        sessions.push(record);
+        if (notSeen) {
+          if (before === undefined) {
+            // Not done: once more, in a new session, with its pictures attached again.
+            const retry: Batch = { ...batch, id: `${batch.id}-again` };
+            again.set(retry, notSeen);
+            queue.splice(next, 0, retry);
+            record.outcome += '; asked again in a new session with the pictures attached again';
+          } else {
+            results.push({
+              batch,
+              review: undefined,
+              failure: `${NOT_REVIEWED}: ${notSeen}`,
+              notReviewed: true,
+            });
+            record.outcome += `; ${NOT_REVIEWED}`;
+          }
+          say(`[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}`);
+          continue;
+        }
+        const smaller = paused && !retries.has(batch) ? smallerBatches(batch) : [];
+        if (record.agent_cap_spent && smaller.length === 0) {
+          capSpent = true;
+          record.outcome += '; no smaller batch fits, so no further review starts';
+        }
+        if (smaller.length > 0) {
+          for (const each of smaller) {
+            retries.add(each);
+            // A second look that paused is still the second look: its halves are not asked again.
+            if (unproven !== undefined) again.set(each, unproven);
+          }
+          // After the agent's cap refused a call, the smaller batches go next, to learn if any fits.
+          if (record.agent_cap_spent) queue.splice(next, 0, ...smaller);
+          else queue.push(...smaller);
+          record.outcome += `; retried as ${smaller.map((each) => each.id).join(' and ')}`;
+        } else
+          results.push(
+            unproven !== undefined && !result.review
+              ? ruled(result.failure ?? 'no review')
+              : result,
+          );
+        say(
+          `[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}${record.input_tokens ? `, ${record.input_tokens} input tokens` : ''}`,
+        );
+      } catch (cause) {
+        // Only starting the session throws now, so nothing ran and nothing was spent.
+        const failure = `session failed: ${cause instanceof Error ? cause.message.slice(0, 200) : cause}`;
+        results.push(ruled(failure));
+        sessions.push({
+          batch: batch.id,
+          kind: batch.kind,
+          session_id: null,
+          consumed_micro_usd: 0,
+          views: 0,
+          outcome: failure,
+        });
+        say(`[${batch.id}] ${failure}`);
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker));
+  // Keep the batches in plan order for the report, with any retries last.
+  const order = new Map(queue.map((batch, index) => [batch.id, index]));
+  results.sort((a, b) => (order.get(a.batch.id) ?? 0) - (order.get(b.batch.id) ?? 0));
+  sessions.sort((a, b) => (order.get(a.batch) ?? 0) - (order.get(b.batch) ?? 0));
+  return {
+    results,
+    sessions,
+    spentMicroUsd: spent,
+    agentId: synced.id,
+    agentVersion: synced.version,
+  };
+}
