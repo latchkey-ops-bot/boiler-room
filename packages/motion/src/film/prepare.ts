@@ -6,6 +6,7 @@ import { probeImage } from '../brand/probe.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
 import { ImageUnfit, type ImageView } from '../scenes/definition.ts';
 import { definitionOf } from '../scenes/registry.ts';
+import { copyFitIssues } from './copy-fit.ts';
 import { type CutSelection, resolveCut } from './cut.ts';
 import { type ImageSize, screenImageIds } from './media.ts';
 import { type FilmPlan, planFilm } from './plan.ts';
@@ -38,9 +39,11 @@ export interface FilmRequest extends CutSelection {
 export interface MediaProbe {
   image: (url: string) => ReturnType<typeof probeImage>;
   font: (url: string) => Promise<FontProbe>;
+  /** The copy the templates would refuse to set. It needs the fonts loaded, so a browser. */
+  copy?: (campaign: Campaign, format: Format) => Promise<FilmIssue[]>;
 }
 
-const browserProbe: MediaProbe = { image: probeImage, font: probeFont };
+const browserProbe: MediaProbe = { image: probeImage, font: probeFont, copy: copyFitIssues };
 
 /**
  * Loads both brand fonts. Each render tab loads them again, but a font that fails there fails only
@@ -229,6 +232,11 @@ export async function prepareFilm(
   if (unusable.length > 0) throw new FilmRejected('loading the scene images', unusable);
   const misfits = checkImageFit(campaign, format, imageSizes);
   if (misfits.length > 0) throw new FilmRejected('sizing the scene images', misfits);
+
+  // Measured here rather than while frames are drawn, where one scene's refusal stops its chunk
+  // on a computer that is already billing, and names only that scene.
+  const unfit = (await probe.copy?.(campaign, format)) ?? [];
+  if (unfit.length > 0) throw new FilmRejected('laying out the copy', unfit);
 
   const logoAsset = campaign.assets[campaign.brand.logoAssetId];
   const logoSrc = logoAsset?.src ?? '';
