@@ -6,6 +6,7 @@ import { artDirector } from '../definitions/art-director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { fileIdOf } from '../researcher/output.ts';
 import { siteHost } from '../researcher/text.ts';
+import type { AgentSync } from '../sync.ts';
 import { type ArtPlan, applyArt, gateReviews, planBatches } from './apply.ts';
 import { classifyAssets, distinctAssets, pageKey, proposeAssets } from './assets.ts';
 import { checkBrand } from './brand.ts';
@@ -43,6 +44,8 @@ export interface ArtOptions {
   issues?: readonly ArtIssue[];
   /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
   client?: Naive;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
 }
 
 const MIN_TILES = 6;
@@ -199,6 +202,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
           maxMinutesPerBatch: definition.session.max_minutes,
           eventsPath,
           campaignId: campaign.id,
+          ...(options.agentSync ? { agentSync: options.agentSync } : {}),
         },
       );
       gate = gateReviews(run.results, proposals, infos, generation.generated);

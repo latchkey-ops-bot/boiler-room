@@ -1,6 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
+import { ViewEvidence } from '../naive/evidence.ts';
 import {
   AGENT_CAP,
   closeSession,
@@ -9,7 +10,7 @@ import {
   SessionTracker,
 } from '../naive/session.ts';
 import { describe } from '../researcher/run.ts';
-import { syncAgents } from '../sync.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
 import { type Batch, type BatchResult, batchFiles, smallerBatches } from './apply.ts';
 import { reviewSchema } from './decision.ts';
 import { type ReviewContext, reviewTask } from './prompt.ts';
@@ -26,6 +27,14 @@ import { type ReviewContext, reviewTask } from './prompt.ts';
  * If a batch that cannot be made smaller meets the cap the same way, nothing fits, and no further
  * batch starts in this run: on 8 November the cap was spent and 25 sessions paused one after
  * another.
+ *
+ * A review's `seen: true` stands only on the session's own events (`ViewEvidence`): a completed
+ * `view_image` for every picture of the batch before the submission, and no word from the agent
+ * afterwards that the pictures never arrived. On 8 November three reviews said `seen: true` with
+ * detailed reasons and then admitted the pictures never reached them. A review that is not proven
+ * seen, or that says it did not see, is not done: the batch runs once more in a fresh session, with
+ * its pictures attached again, and if that review is not proven seen either, the code's choice
+ * stands and the batch is marked chosen by rule, not reviewed.
  */
 
 export interface ReviewOptions {
@@ -39,6 +48,8 @@ export interface ReviewOptions {
   campaignId: string;
   /** How a dropped event stream is resumed before the session is stopped. */
   streamRetry?: StreamRetry;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
 }
 
 export interface SessionRecord {
@@ -56,6 +67,10 @@ export interface SessionRecord {
   budget_paused?: boolean;
   /** It was paused by the agent's own cap, before it spent anything. */
   agent_cap_spent?: boolean;
+  /** The file ids the session's events show it was shown before it submitted. */
+  viewed?: string[];
+  /** Why its review could not be taken as seen, when it could not. */
+  not_seen?: string;
 }
 
 export interface ReviewRun {
@@ -69,6 +84,18 @@ export interface ReviewRun {
 const NUDGE =
   'Call submit_output now with seen, scene, tiles, generated and flags, from what you have seen. Do not view anything again.';
 
+/** The note a batch's second session starts with, after its first review was not proven seen. */
+export function againNote(why: string): string {
+  return [
+    `This review was asked for once already, and that review could not be used: ${why}.`,
+    'The pictures are attached again by the same file ids. Call view_image once with exactly those ids, then look at each picture that arrives.',
+    'If any picture does not arrive, set seen to false and leave the decision empty, so the code ranking stands. Never describe a picture you did not see.',
+  ].join(' ');
+}
+
+/** The prefix of the failure of a batch whose pictures were never proven seen. */
+export const NOT_REVIEWED = 'chosen by rule, not reviewed';
+
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const say = (message: string) =>
   console.log(scrub(`${new Date().toISOString().slice(11, 19)} ${message}`));
@@ -79,8 +106,9 @@ async function runBatch(
   agentId: string,
   batch: Batch,
   task: string,
+  files: readonly string[],
   options: ReviewOptions,
-): Promise<{ result: BatchResult; record: SessionRecord; paused: boolean }> {
+): Promise<{ result: BatchResult; record: SessionRecord; paused: boolean; notSeen?: string }> {
   const record: SessionRecord = {
     batch: batch.id,
     kind: batch.kind,
@@ -91,6 +119,7 @@ async function runBatch(
     task_chars: task.length,
   };
   const tracker = new SessionTracker();
+  const evidence = new ViewEvidence();
   const fail = (failure: string, paused = false) => {
     record.outcome = failure;
     record.input_tokens = inputTokens(tracker.usage);
@@ -132,6 +161,7 @@ async function runBatch(
           const record_ = event as unknown as { type: string; data: Record<string, unknown> };
           const data = record_.data ?? {};
           tracker.handle(record_);
+          evidence.handle(record_);
           if (event.type === 'tool.started' && data.name === 'view_image') {
             record.views += 1;
             if (record.views > 1) stop('started a second view_image call');
@@ -194,8 +224,23 @@ async function runBatch(
   const parsed = reviewSchema.safeParse(tracker.output);
   if (!parsed.success)
     return fail(`review does not match the schema: ${parsed.error.message.slice(0, 200)}`);
-  record.outcome = parsed.data.seen ? 'reviewed' : 'reviewed, not seen';
   record.input_tokens = inputTokens(tracker.usage ?? final.tokenUsage);
+  record.viewed = [...evidence.viewed];
+  // `seen: true` is the agent's word; only the session's events can prove it.
+  const notSeen = parsed.data.seen
+    ? evidence.problem(files)
+    : 'the agent said it did not see every picture';
+  if (notSeen) {
+    record.outcome = `not seen: ${notSeen}`;
+    record.not_seen = notSeen;
+    return {
+      result: { batch, review: undefined, failure: `not seen: ${notSeen}` },
+      record,
+      paused: false,
+      notSeen,
+    };
+  }
+  record.outcome = 'reviewed';
   return { result: { batch, review: parsed.data, failure: undefined }, record, paused: false };
 }
 
@@ -206,7 +251,7 @@ export async function reviewBatches(
   context: ReviewContext,
   options: ReviewOptions,
 ): Promise<ReviewRun> {
-  const [synced] = await syncAgents(client, [definition]);
+  const [synced] = await ensureAgents(client, [definition], options.agentSync);
   if (!synced) throw new Error('Agent sync returned nothing.');
   say(
     `agent ${synced.name} ${synced.id} v${synced.version} (${synced.action}); ${batches.length} review(s)`,
@@ -218,6 +263,8 @@ export async function reviewBatches(
   // A batch paused on its budget is retried once, as smaller batches added to the end.
   const queue: Batch[] = [...batches];
   const retries = new Set<Batch>();
+  // A batch whose review was not proven seen runs once more, with why its first one failed.
+  const again = new Map<Batch, string>();
   // Set once the agent's own cap has no room: every later session would pause the same way.
   let capSpent = false;
 
@@ -226,11 +273,22 @@ export async function reviewBatches(
       const batch = queue[next];
       next += 1;
       if (!batch) return;
+      // A second look that cannot happen leaves the batch to the code's rule, and says so.
+      const unproven = again.get(batch);
+      const ruled = (failure: string): BatchResult =>
+        unproven === undefined
+          ? { batch, review: undefined, failure }
+          : {
+              batch,
+              review: undefined,
+              failure: `${NOT_REVIEWED}: ${unproven}; then ${failure}`,
+              notReviewed: true,
+            };
       if (spent >= options.budgetMicroUsd || capSpent) {
         const failure = capSpent
           ? `not started: the agent's own budget cap has no room for a session`
           : `not started: the run's review budget of ${usd(options.budgetMicroUsd)} is spent`;
-        results.push({ batch, review: undefined, failure });
+        results.push(ruled(failure));
         sessions.push({
           batch: batch.id,
           kind: batch.kind,
@@ -246,35 +304,66 @@ export async function reviewBatches(
         continue;
       }
       try {
-        const { result, record, paused } = await runBatch(
+        const before = unproven;
+        const task = reviewTask(batch, context);
+        const { result, record, paused, notSeen } = await runBatch(
           client,
           definition,
           synced.id,
           batch,
-          reviewTask(batch, context),
+          before ? `${againNote(before)}\n\n${task}` : task,
+          batchFiles(batch, context.infos),
           options,
         );
         spent += record.consumed_micro_usd;
         sessions.push(record);
+        if (notSeen) {
+          if (before === undefined) {
+            // Not done: once more, in a new session, with its pictures attached again.
+            const retry: Batch = { ...batch, id: `${batch.id}-again` };
+            again.set(retry, notSeen);
+            queue.splice(next, 0, retry);
+            record.outcome += '; asked again in a new session with the pictures attached again';
+          } else {
+            results.push({
+              batch,
+              review: undefined,
+              failure: `${NOT_REVIEWED}: ${notSeen}`,
+              notReviewed: true,
+            });
+            record.outcome += `; ${NOT_REVIEWED}`;
+          }
+          say(`[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}`);
+          continue;
+        }
         const smaller = paused && !retries.has(batch) ? smallerBatches(batch) : [];
         if (record.agent_cap_spent && smaller.length === 0) {
           capSpent = true;
           record.outcome += '; no smaller batch fits, so no further review starts';
         }
         if (smaller.length > 0) {
-          for (const each of smaller) retries.add(each);
+          for (const each of smaller) {
+            retries.add(each);
+            // A second look that paused is still the second look: its halves are not asked again.
+            if (unproven !== undefined) again.set(each, unproven);
+          }
           // After the agent's cap refused a call, the smaller batches go next, to learn if any fits.
           if (record.agent_cap_spent) queue.splice(next, 0, ...smaller);
           else queue.push(...smaller);
           record.outcome += `; retried as ${smaller.map((each) => each.id).join(' and ')}`;
-        } else results.push(result);
+        } else
+          results.push(
+            unproven !== undefined && !result.review
+              ? ruled(result.failure ?? 'no review')
+              : result,
+          );
         say(
           `[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}${record.input_tokens ? `, ${record.input_tokens} input tokens` : ''}`,
         );
       } catch (cause) {
         // Only starting the session throws now, so nothing ran and nothing was spent.
         const failure = `session failed: ${cause instanceof Error ? cause.message.slice(0, 200) : cause}`;
-        results.push({ batch, review: undefined, failure });
+        results.push(ruled(failure));
         sessions.push({
           batch: batch.id,
           kind: batch.kind,

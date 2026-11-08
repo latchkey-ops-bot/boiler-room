@@ -247,7 +247,19 @@ export function artDecisions(report: Json): DecisionDraft[] {
       data: { sceneId: scene.scene_id, tier: scene.tier ?? null },
     });
   }
-  const defaults = scenes.filter((each) => each.source !== 'agent');
+  // Asked twice, and no review could be shown to have seen the pictures: the code chose.
+  for (const scene of scenes.filter((each) => each.source === 'rule')) {
+    const ids = Array.isArray(scene.asset_ids) ? scene.asset_ids : [];
+    drafts.push({
+      agent: 'art_director',
+      kind: 'decision',
+      stage: 'art_direction',
+      message: `${ids.length ? `${ids.join(', ')} for ${text(scene.scene_id)}` : `No picture for ${text(scene.scene_id)}`}: chosen by rule, not reviewed`,
+      why: `${text(scene.reason, 'The review could not be shown to have seen the pictures.')} The code's ranking stands, by the asset ladder.`,
+      data: { sceneId: scene.scene_id, tier: scene.tier ?? null, reviewed: false },
+    });
+  }
+  const defaults = scenes.filter((each) => each.source !== 'agent' && each.source !== 'rule');
   if (defaults.length) {
     drafts.push({
       agent: 'art_director',
@@ -258,11 +270,12 @@ export function artDecisions(report: Json): DecisionDraft[] {
     });
   }
   for (const image of list(report.generated)) {
+    const ruled = !image.declared && text(image.verdict).includes('chosen by rule, not reviewed');
     drafts.push({
       agent: 'art_director',
       kind: 'decision',
       stage: 'art_direction',
-      message: `${image.declared ? 'Used' : 'Did not use'} the generated ${text(image.purpose, 'image')} ${text(image.asset_id)}`,
+      message: `${image.declared ? 'Used' : 'Did not use'} the generated ${text(image.purpose, 'image')} ${text(image.asset_id)}${ruled ? ': chosen by rule, not reviewed' : ''}`,
       why: text(image.verdict, image.declared ? 'Accepted on sight.' : 'Not accepted on sight.'),
       data: { cost: usd(image.cost_micro_usd) },
     });
@@ -318,6 +331,26 @@ export function qcDecisions(report: Json): DecisionDraft[] {
       },
     },
   ];
+  // What the agent said about frames of images its session was never shown, taken out.
+  const unreviewed = list(review.notReviewed);
+  if (unreviewed.length) {
+    const frames = [
+      ...new Set(
+        unreviewed.flatMap((each) => (typeof each.frame === 'number' ? [each.frame] : [])),
+      ),
+    ];
+    drafts.push({
+      agent: 'quality_check',
+      kind: 'decision',
+      stage: 'review',
+      message: `${plural(unreviewed.length, 'finding')}${frames.length ? ` on frames ${frames.join(', ')}` : ''}: chosen by rule, not reviewed`,
+      why: `The session that reported ${unreviewed.length === 1 ? 'it' : 'them'} was not shown the image${frames.length === 1 ? '' : 's'} by its own events, so ${unreviewed.length === 1 ? 'it was' : 'they were'} taken out and the code's checks stand there.${text(review.askedAgain) ? ` The review was asked for once more because ${text(review.askedAgain)}.` : ''}`,
+      data: {
+        reviewed: false,
+        findings: unreviewed.map((each) => ({ kind: each.kind, id: each.id, frame: each.frame })),
+      },
+    });
+  }
   for (const issue of serious) {
     drafts.push({
       agent: 'quality_check',

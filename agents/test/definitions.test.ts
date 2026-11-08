@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +11,16 @@ import { ALWAYS_OFF } from '../src/define.ts';
 import { agents, artDirector, researcher } from '../src/definitions/index.ts';
 import type { Naive } from '../src/naive/client.ts';
 import { repairMessage, researchTask } from '../src/researcher/prompt.ts';
-import { agentConfig, canonicalJson, HASH_KEY, skillContent, syncAgents } from '../src/sync.ts';
+import {
+  AgentDrift,
+  agentConfig,
+  canonicalJson,
+  checkAgents,
+  ensureAgents,
+  HASH_KEY,
+  skillContent,
+  syncAgents,
+} from '../src/sync.ts';
 import { artCampaign, DIGESTS } from './art-fixtures.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -327,6 +337,78 @@ describe('syncAgents', () => {
     await expect(syncAgents(client as unknown as Naive, [researcher])).rejects.toThrow(
       /2 agents are named/,
     );
+  });
+});
+
+describe('checking the deployed agents without changing them', () => {
+  const skill = researcher.skills[0];
+  if (!skill) throw new Error('the researcher has a skill');
+  const local = createHash('sha256').update(skillContent(skill)).digest('hex');
+  const hash = agentConfig(researcher, new Map([[skill.slug, 4]])).metadata?.[HASH_KEY];
+
+  function deployed(agent: Record<string, unknown>, skillSha = local) {
+    const client = {
+      skills: {
+        push: vi.fn(),
+        listVersions: vi.fn(async () => ({
+          data: [{ version: 4, sha256: skillSha, size_bytes: 1, created_at: '' }],
+          has_more: false,
+          next_cursor: null,
+        })),
+      },
+      agents: {
+        list: vi.fn(async () => ({
+          data: [
+            {
+              id: 'agt_1',
+              name: 'br-researcher',
+              current_version: 12,
+              skills: [`${skill?.slug}@4`],
+              mcp_servers: [],
+              metadata: { [HASH_KEY]: hash },
+              ...agent,
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    return client;
+  }
+
+  it('runs a matching agent as it is, and writes nothing', async () => {
+    const client = deployed({});
+    expect(await ensureAgents(client as unknown as Naive, [researcher], 'verify')).toEqual([
+      { name: 'br-researcher', id: 'agt_1', version: 12, action: 'unchanged' },
+    ]);
+    expect(client.skills.push).not.toHaveBeenCalled();
+    expect(client.agents.create).not.toHaveBeenCalled();
+    expect(client.agents.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a deployed definition hash that is not this checkout', async () => {
+    const client = deployed({ metadata: { [HASH_KEY]: 'b1d457cfd999aaaa' } });
+    const run = ensureAgents(client as unknown as Naive, [researcher], 'verify');
+    await expect(run).rejects.toThrow(AgentDrift);
+    await expect(run).rejects.toThrow(/br-researcher: its definition hash is b1d457cfd999/);
+    expect(client.agents.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pinned skill whose content is not this checkout, and a missing agent', async () => {
+    const { drift } = await checkAgents(deployed({}, 'f'.repeat(64)) as unknown as Naive, [
+      researcher,
+      artDirector,
+    ]);
+    expect(drift).toEqual([
+      {
+        name: 'br-researcher',
+        problem: `its skill ${skill.slug}@4 is not the one in this checkout`,
+      },
+      { name: 'br-art-director', problem: 'no agent of this name is deployed' },
+    ]);
   });
 });
 

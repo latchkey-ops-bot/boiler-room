@@ -109,7 +109,12 @@ export function smallerBatches(batch: Batch): Batch[] {
 
 export interface Pick {
   assetIds: string[];
-  source: 'agent' | 'default';
+  /**
+   * `agent` when a review proven seen chose it; `rule` when a review was asked for twice and
+   * neither could be shown to have seen the pictures, so the code's choice stands unreviewed;
+   * `default` for the code's choice where no review was needed or none could run.
+   */
+  source: 'agent' | 'default' | 'rule';
   reason: string;
 }
 
@@ -130,11 +135,17 @@ export interface BatchResult {
   review: Review | undefined;
   /** Why there is no usable review, when there is none. */
   failure: string | undefined;
+  /** Asked for twice, and neither review was proven seen: the code's choice, not reviewed. */
+  notReviewed?: boolean;
 }
 
-const defaultPick = (proposal: Proposal, reason?: string): Pick => ({
+const defaultPick = (
+  proposal: Proposal,
+  reason?: string,
+  source: Pick['source'] = 'default',
+): Pick => ({
   assetIds: proposal.assetIds,
-  source: 'default',
+  source,
   reason: reason ?? proposal.note ?? 'The code ranking.',
 });
 
@@ -157,8 +168,10 @@ export function gateReviews(
   const rejected = new Map<string, string>();
   const flags: string[] = [];
   const wallsSeen = new Set<Proposal>();
+  /** Walls with a group of tiles no review was proven to have seen, with why. */
+  const wallsRuled = new Map<Proposal, string>();
 
-  for (const { batch, review, failure } of results) {
+  for (const { batch, review, failure, notReviewed } of results) {
     const usable = review?.seen ? review : undefined;
     const why = failure ?? (review && !review.seen ? 'the agent did not see every picture' : '');
     if (review) flags.push(...review.flags.map((flag) => `Agent (${batch.id}): ${flag}`));
@@ -168,7 +181,10 @@ export function gateReviews(
       const entry = usable?.scene;
       if (!entry) {
         const reason = why ? `No review: ${why}.` : 'The review held no pick.';
-        picks.set(proposal.sceneId, defaultPick(proposal, reason));
+        picks.set(
+          proposal.sceneId,
+          notReviewed ? defaultPick(proposal, `${why}.`, 'rule') : defaultPick(proposal, reason),
+        );
         continue;
       }
       const shown = new Set(batch.assetIds);
@@ -194,6 +210,7 @@ export function gateReviews(
           : defaultPick(proposal, `The pick was refused: ${found[0]?.message}`),
       );
     } else if (batch.kind === 'tiles') {
+      if (notReviewed) wallsRuled.set(batch.proposal, why);
       if (!usable) continue;
       wallsSeen.add(batch.proposal);
       for (const tile of usable.tiles) {
@@ -220,15 +237,23 @@ export function gateReviews(
     if (proposal.type === 'tile-wall') {
       const ids = proposal.candidates.map((candidate) => candidate.id);
       const removed = ids.filter((id) => dropped.has(id));
+      const ruled = wallsRuled.get(proposal);
       picks.set(
         proposal.sceneId,
-        wallsSeen.has(proposal)
+        wallsSeen.has(proposal) && !ruled
           ? {
               assetIds: ids.filter((id) => !dropped.has(id)).slice(0, proposal.slot.fill),
               source: 'agent',
               reason: `The ranked tiles, without the ${removed.length} the agent dropped.`,
             }
-          : defaultPick(proposal),
+          : ruled
+            ? {
+                // Only what a review proven seen dropped is dropped; the rest stand by rank.
+                assetIds: ids.filter((id) => !dropped.has(id)).slice(0, proposal.slot.fill),
+                source: 'rule',
+                reason: `${ruled}.${removed.length ? ` ${removed.length} tile(s) dropped by reviews that were seen.` : ''}`,
+              }
+            : defaultPick(proposal),
       );
     } else if (!picks.has(proposal.sceneId)) {
       picks.set(proposal.sceneId, defaultPick(proposal));

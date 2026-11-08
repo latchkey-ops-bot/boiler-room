@@ -134,6 +134,28 @@ describe('gateReviews', () => {
     expect(gate.accepted.get('hero-texture')).toBe('Abstract, no glyphs.');
   });
 
+  it('marks a scene, a wall and an image no review was proven to see as chosen by rule', () => {
+    const { batches, proposals, infos, generated } = setup(undefined, true);
+    const ruled = 'chosen by rule, not reviewed: the agent said it did not see every picture';
+    const wall = batches.find((batch) => batch.kind === 'tiles');
+    if (!wall) throw new Error('fixture changed');
+    const results: BatchResult[] = [
+      { batch: byId(batches, 'hero'), review: undefined, failure: ruled, notReviewed: true },
+      { batch: wall, review: undefined, failure: ruled, notReviewed: true },
+      { batch: byId(batches, 'generated-1'), review: undefined, failure: ruled, notReviewed: true },
+    ];
+    const gate = gateReviews(results, proposals, infos, generated);
+    const hero = proposals.find((proposal) => proposal.sceneId === 'hero');
+    expect(gate.picks.get('hero')).toEqual({
+      assetIds: hero?.assetIds,
+      source: 'rule',
+      reason: `${ruled}.`,
+    });
+    expect(gate.picks.get('team')).toMatchObject({ source: 'rule', reason: `${ruled}.` });
+    expect(gate.accepted.size).toBe(0);
+    expect(gate.rejected.get('hero-texture')).toBe(`Not inspected, so not declared: ${ruled}.`);
+  });
+
   it('keeps the ranking for a refused pick, a failed batch or an unseen review', () => {
     const { batches, proposals, infos, generated } = setup();
     const results: BatchResult[] = [

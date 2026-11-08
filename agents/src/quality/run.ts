@@ -20,6 +20,7 @@ import { qualityCheck } from '../definitions/quality-check.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { researchOutputSchema } from '../researcher/output.ts';
 import { PageIndex, pagesBundleSchema } from '../researcher/verify.ts';
+import type { AgentSync } from '../sync.ts';
 import {
   checkFrames,
   checkGate,
@@ -61,6 +62,8 @@ export interface QcOptions {
   say?: (line: string) => void;
   /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
   client?: Naive;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
 }
 
 const SEVERITY_ORDER = { blocker: 0, major: 1, minor: 2 } as const;
@@ -400,6 +403,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       budgetMicroUsd: budgetMicro,
       eventsFile: join(work, 'events.jsonl'),
       say,
+      ...(options.agentSync ? { agentSync: options.agentSync } : {}),
     });
     say(
       `review cost ${usd(run.costMicroUsd)}, ${run.sessions.map((each) => `${each.input_tokens} input tokens`).join(' + ')}`,
@@ -446,12 +450,17 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
       (a.frame ?? Number.MAX_SAFE_INTEGER) - (b.frame ?? Number.MAX_SAFE_INTEGER),
   );
+  // A pass rests only on frames of images the review's session was shown, by its own events.
   const { verdict, blocked } = finalVerdict(
     issues,
     checks,
     run,
     options.model,
-    new Set(images.flatMap((image) => image.frames ?? [])),
+    new Set(
+      images
+        .filter((image) => run?.images.some((each) => each.name === image.name && each.viewed))
+        .flatMap((image) => image.frames ?? []),
+    ),
   );
 
   const report: QcReport = {
@@ -488,6 +497,8 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
           modelVerdict: run.review?.verdict ?? null,
           summary: run.review?.summary ?? run.problem,
           sessions: run.sessions,
+          askedAgain: run.askedAgain,
+          notReviewed: run.unreviewed,
         }
       : null,
     createdAt: new Date().toISOString(),

@@ -13,7 +13,7 @@ import { sniff } from '../capture/logo.ts';
 import type { AgentDefinition } from '../define.ts';
 import { researcher } from '../definitions/researcher.ts';
 import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
-import { syncAgents } from '../sync.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
 import { bundleTool, type ToolBundle } from './bundle.ts';
 import {
   checkProvenance,
@@ -66,6 +66,15 @@ export interface ResearchOptions {
     /** This run's folder on the agent's computer, relative to its home. */
     runDir: string;
   }) => Promise<void>;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
+  /**
+   * False leaves SIGINT and SIGTERM to the caller, which must then call the `stop` it is handed
+   * through `onStop`: `pnpm film` owns its signals and exits with its own code. Default true.
+   */
+  ownSignals?: boolean;
+  /** Receives the run's clean-up (stop the session, pause the computer, write the report). */
+  onStop?: (stop: () => Promise<void>) => void;
 }
 
 /** Stop reasons after which the agent can simply be asked to carry on. */
@@ -681,7 +690,12 @@ export async function research(options: ResearchOptions): Promise<number> {
   const agentSpend = (id: string) =>
     client.agents.spend(id, { by: 'component' }).catch((cause) => ({ error: String(cause) }));
 
-  const cleanup = async () => {
+  let cleaning: Promise<void> | undefined;
+  const cleanup = () => {
+    cleaning ??= clean();
+    return cleaning;
+  };
+  const clean = async () => {
     if (cleaned) return;
     cleaned = true;
     if (sessionId) {
@@ -736,8 +750,12 @@ export async function research(options: ResearchOptions): Promise<number> {
     say('interrupted; cleaning up');
     cleanup().finally(() => process.exit(130));
   };
-  process.once('SIGINT', onSignal);
-  process.once('SIGTERM', onSignal);
+  const ownSignals = options.ownSignals ?? true;
+  if (ownSignals) {
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+  }
+  options.onStop?.(cleanup);
 
   try {
     const tool = await bundleTool({ allowPrivateHosts: options.allowPrivateHosts });
@@ -746,7 +764,7 @@ export async function research(options: ResearchOptions): Promise<number> {
     const { refs, manifestId } = await uploadMaterial(client, options.material, host);
     const materialIds = new Set(refs.map((ref) => ref.file_id));
 
-    const [synced] = await syncAgents(client, [definition]);
+    const [synced] = await ensureAgents(client, [definition], options.agentSync);
     if (!synced) throw new Error('Agent sync returned nothing.');
     agentId = synced.id;
     say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action})`);
@@ -963,8 +981,10 @@ export async function research(options: ResearchOptions): Promise<number> {
     say(`error: ${report.error}`);
   } finally {
     await cleanup();
-    process.removeListener('SIGINT', onSignal);
-    process.removeListener('SIGTERM', onSignal);
+    if (ownSignals) {
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+    }
   }
   return exitCode;
 }

@@ -12,7 +12,7 @@ import { director } from '../definitions/director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { closeSession, inputTokens } from '../naive/session.ts';
 import { type ResearchOutput, researchOutputSchema } from '../researcher/output.ts';
-import { syncAgents } from '../sync.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
 import {
   checkSubmission,
   type DirectorIssue,
@@ -49,6 +49,8 @@ export interface DirectOptions {
   revise?: { submission: unknown; issues: readonly DirectorIssue[] };
   /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
   client?: Naive;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
 }
 
 /** The issue a repair drill adds to the first submission. */
@@ -149,7 +151,7 @@ export async function direct(options: DirectOptions): Promise<number> {
   const sessionIds: string[] = [];
 
   try {
-    const [synced] = await syncAgents(client, [definition]);
+    const [synced] = await ensureAgents(client, [definition], options.agentSync);
     if (!synced) throw new Error('Agent sync returned nothing.');
     say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action}), model ${model}`);
     Object.assign(report, { agent_id: synced.id, agent_version: synced.version });

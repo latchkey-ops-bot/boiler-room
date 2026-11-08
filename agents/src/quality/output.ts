@@ -119,6 +119,21 @@ export interface QcReport {
       consumed_micro_usd: number;
       budget_paused: boolean;
       outcome: string;
+      viewed?: string[];
+      retraction?: string;
+    }[];
+    /** Why the review was asked for once more, when its first left images unseen. */
+    askedAgain?: string | null;
+    /**
+     * What the agent reported on frames of images its session was not shown, by that session's
+     * own events: taken out of the review, so the code's checks stand there, not reviewed.
+     */
+    notReviewed?: {
+      session_id: string;
+      kind: 'issue' | 'check' | 'inspected';
+      id: string;
+      frame: number | null;
+      what: string;
     }[];
   } | null;
   createdAt: string;

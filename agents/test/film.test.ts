@@ -909,6 +909,53 @@ describe('decisions', () => {
     expect(qc).toHaveLength(2);
   });
 
+  it('say when a choice was made by rule because no review was proven to see the pictures', () => {
+    const art = artDecisions({
+      family: { name: 'Neutral Cut', background: '#ffffff', background_l: 1, ground: '#ffffff' },
+      colour_changes: [],
+      assets_per_scene: [
+        {
+          scene_id: 'surface',
+          asset_ids: ['home-screen'],
+          source: 'rule',
+          reason:
+            'chosen by rule, not reviewed: the agent said afterwards that the pictures did not reach it.',
+        },
+      ],
+      generated: [
+        {
+          asset_id: 'event-field',
+          purpose: 'event-field',
+          declared: false,
+          verdict: 'Not inspected, so not declared: chosen by rule, not reviewed: no view_image.',
+        },
+      ],
+      sent_back: [],
+    });
+    expect(art.map((each) => each.message)).toEqual([
+      'Neutral Cut family, on a #ffffff ground',
+      'home-screen for surface: chosen by rule, not reviewed',
+      'Did not use the generated event-field event-field: chosen by rule, not reviewed',
+    ]);
+    expect(art[1]?.data).toMatchObject({ reviewed: false });
+
+    const report = {
+      ...qcReport('fail'),
+      review: {
+        askedAgain: 'its session showed no view_image result for rest-00690.png',
+        notReviewed: [
+          { session_id: 'ses_1', kind: 'issue', id: 'ground', frame: 690, what: 'a patch' },
+        ],
+      },
+    };
+    const qc = qcDecisions(report as never);
+    expect(qc[1]).toMatchObject({
+      agent: 'quality_check',
+      message: '1 finding on frames 690: chosen by rule, not reviewed',
+      data: { reviewed: false },
+    });
+  });
+
   it('word a Quality Check issue for the Director with the path of its scene', () => {
     const mapped = directorIssueOf(issue('copy-fit', 'director'), {
       scenes: [{ id: 'intro' }, { id: 'hook' }],

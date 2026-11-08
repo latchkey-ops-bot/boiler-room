@@ -6,13 +6,22 @@
  * The review is read from the `session.idle` event that ends the turn, never from `sessions.get`,
  * which can still answer the previous turn's output. A session paused on its budget is cancelled,
  * recorded, and the review retried once as two smaller sessions, each with half the images.
+ *
+ * What the agent reports on a frame stands only when that session's own events show it was shown
+ * the image the frame is in (`ViewEvidence`): an issue on a frame of an image it was not shown, a
+ * check that rests only on such frames, and an image it says it inspected but never opened are
+ * taken out of its review. When the review leaves any image unseen, it is asked for once more in a
+ * fresh session with every image attached again; if that one does not see them all either, the
+ * review that saw more stands, the rest is chosen by rule and not reviewed, and the report is
+ * blocked on the images nobody opened.
  */
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
+import { ViewEvidence } from '../naive/evidence.ts';
 import { closeSession, type InputSize, pausedOnBudget, SessionTracker } from '../naive/session.ts';
-import { syncAgents } from '../sync.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
 import { type QcReview, qcReviewSchema } from './output.ts';
 import { CONTINUE_MESSAGE, type ReviewImage } from './prompt.ts';
 
@@ -28,33 +37,17 @@ export interface LocalImage {
   frames?: number[];
 }
 
-/** Records the file ids every successful `view_image` call opened. */
-export class ViewTracker {
-  readonly viewed = new Set<string>();
-  submissions = 0;
-  private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
+/** Records the file ids every successful `view_image` call opened, before the submission. */
+export { ViewEvidence as ViewTracker };
 
-  handle(event: { type: string; data: Record<string, unknown> }): void {
-    const data = event.data ?? {};
-    if (event.type === 'tool.started') {
-      this.started.set(String(data.tool_call_id), {
-        name: String(data.name),
-        args: (data.args as Record<string, unknown>) ?? {},
-      });
-      return;
-    }
-    if (event.type !== 'tool.completed' || data.is_error) return;
-    const call = this.started.get(String(data.tool_call_id));
-    const name = String(data.name ?? call?.name);
-    if (name === 'submit_output') this.submissions += 1;
-    if (name !== 'view_image') return;
-    const ids = call?.args.file_ids;
-    const output = typeof data.output === 'string' ? data.output : '';
-    for (const id of Array.isArray(ids) ? ids : []) {
-      // An id the tool could not open is not listed in its output.
-      if (typeof id === 'string' && output.includes(id)) this.viewed.add(id);
-    }
-  }
+/** A claim the agent made that no image it was shown can back: taken out of its review. */
+export interface Unreviewed {
+  session_id: string;
+  /** `issue`, `check` or `inspected`. */
+  kind: 'issue' | 'check' | 'inspected';
+  id: string;
+  frame: number | null;
+  what: string;
 }
 
 export interface ReviewRun {
@@ -69,6 +62,10 @@ export interface ReviewRun {
   costMicroUsd: number;
   /** Each session the review ran, with what it read and how it ended. */
   sessions: ReviewSession[];
+  /** What the agent reported on frames of images its session was not shown, taken out. */
+  unreviewed: Unreviewed[];
+  /** Why a review was asked for once more, when it was. */
+  askedAgain: string | null;
 }
 
 export interface ReviewSession extends InputSize {
@@ -79,6 +76,10 @@ export interface ReviewSession extends InputSize {
   /** The session was paused on its budget, and has been cancelled. */
   budget_paused: boolean;
   outcome: string;
+  /** File ids the session's events show it was shown before it submitted. */
+  viewed?: string[];
+  /** The agent's words, when it said afterwards that the images did not reach it. */
+  retraction?: string;
 }
 
 const worst = (results: readonly QcReview['checks'][number]['result'][]) =>
@@ -157,16 +158,91 @@ interface SessionOutcome {
   paused: boolean;
 }
 
+/**
+ * The part of `review` that the images its session was shown can back. `framesOf` gives the frames
+ * each uploaded image shows; a frame no image shows cannot be checked against any, and is kept.
+ */
+export function supportedReview(
+  review: QcReview,
+  shown: readonly ReviewImage[],
+  viewed: ReadonlySet<string>,
+  framesOf: (image: ReviewImage) => readonly number[],
+  sessionId: string,
+): { review: QcReview; unreviewed: Unreviewed[] } {
+  const seenFrames = new Set(
+    shown.filter((image) => viewed.has(image.fileId)).flatMap((image) => framesOf(image)),
+  );
+  const unseenFrames = new Set(
+    shown
+      .filter((image) => !viewed.has(image.fileId))
+      .flatMap((image) => framesOf(image))
+      .filter((frame) => !seenFrames.has(frame)),
+  );
+  const sawAny = shown.some((image) => viewed.has(image.fileId));
+  const unreviewed: Unreviewed[] = [];
+  const issues = review.issues.filter((issue) => {
+    const backed = issue.frame === null ? sawAny : !unseenFrames.has(issue.frame);
+    if (!backed)
+      unreviewed.push({
+        session_id: sessionId,
+        kind: 'issue',
+        id: issue.check,
+        frame: issue.frame,
+        what: issue.what,
+      });
+    return backed;
+  });
+  const checks = review.checks.map((check) => {
+    const frames = check.frames.filter((frame) => !unseenFrames.has(frame));
+    if (check.frames.length === 0 || frames.length > 0 || check.result === 'n/a')
+      return { ...check, frames };
+    unreviewed.push({
+      session_id: sessionId,
+      kind: 'check',
+      id: check.id,
+      frame: check.frames[0] ?? null,
+      what: `${check.result}: ${check.measured}`,
+    });
+    return {
+      ...check,
+      result: 'n/a' as const,
+      measured: `not reviewed: it rests only on frames ${check.frames.join(', ')}, of images the session was not shown`,
+      frames: [],
+    };
+  });
+  const inspected = review.inspected.filter((entry) => {
+    if (viewed.has(entry.file_id)) return true;
+    unreviewed.push({
+      session_id: sessionId,
+      kind: 'inspected',
+      id: entry.file_id,
+      frame: null,
+      what: entry.saw,
+    });
+    return false;
+  });
+  return { review: { ...review, issues, checks, inspected }, unreviewed };
+}
+
+/** The note a review's second session starts with, after its first left images unseen. */
+export function againNote(why: string): string {
+  return [
+    `This review was asked for once already, and it could not be used in full: ${why}.`,
+    'Every image is attached again by the same file ids. Open each one with view_image before you judge, and report only on frames of images that arrived.',
+  ].join(' ');
+}
+
 /** One review session over `images`, which are already uploaded. */
 async function reviewSession(
   options: ReviewOptions,
   agentId: string,
   images: readonly ReviewImage[],
+  note?: string,
 ): Promise<SessionOutcome> {
   const { client, definition, say } = options;
-  const views = new ViewTracker();
+  const views = new ViewEvidence();
   const tracker = new SessionTracker();
-  const task = options.task(images);
+  const task = note ? `${note}\n\n${options.task(images)}` : options.task(images);
   const record: ReviewSession = {
     session_id: '',
     images: images.length,
@@ -182,12 +258,15 @@ async function reviewSession(
     consumed: number | undefined,
     paused = false,
   ): SessionOutcome => {
+    const viewed = views.viewed;
     Object.assign(record, tracker.inputSize(), {
       consumed_micro_usd: consumed ?? options.budgetMicroUsd,
       budget_paused: paused,
       outcome: problem ?? `reviewed: ${review?.verdict}`,
+      viewed: [...viewed],
+      ...(views.retracted ? { retraction: views.retractionText } : {}),
     });
-    return { record, review, problem, viewed: views.viewed, paused };
+    return { record, review, problem, viewed, paused };
   };
 
   const session = await client.sessions.create({
@@ -310,43 +389,68 @@ interface ReviewOptions {
   say: (line: string) => void;
   /** How a dropped event stream is resumed before the session is stopped. */
   streamRetry?: StreamRetry;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
 }
 
 /**
  * Runs the review. `say` prints progress; `eventsFile` keeps every event with the key scrubbed.
  * Images are uploaded before and deleted after, whatever happens. A session paused on its budget
  * is cancelled and the review retried once in two smaller sessions, each with half the images,
- * whose reviews are merged; the halves are not split again.
+ * whose reviews are merged; the halves are not split again. Each session's review keeps only what
+ * the images it was shown can back (`supportedReview`). A review that leaves any image unseen is
+ * asked for once more, in one fresh session with every image attached again; the review that saw
+ * more images is the one that stands.
  */
 export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
   const { client, definition, say } = options;
-  const [synced] = await syncAgents(client, [definition]);
+  const [synced] = await ensureAgents(client, [definition], options.agentSync);
   if (!synced) throw new Error('Agent sync returned nothing.');
   say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action})`);
   writeFileSync(options.eventsFile, '');
   const images = await uploadImages(client, options.images, options.folder);
   say(`uploaded ${images.length} images: ${images.map((image) => image.fileId).join(', ')}`);
+  // `uploadImages` keeps the order it was given, so each upload is the local image at its index.
+  const frames = new Map(
+    images.map((image, index) => [image.fileId, options.images[index]?.frames ?? []]),
+  );
+  const framesOf = (image: ReviewImage) => frames.get(image.fileId) ?? [];
   const sessions: ReviewSession[] = [];
-  const viewed = new Set<string>();
-  const result = (review: QcReview | null, problem: string | null): ReviewRun => ({
+  interface Attempt {
+    review: QcReview | null;
+    problem: string | null;
+    viewed: Set<string>;
+    unreviewed: Unreviewed[];
+  }
+  const result = (attempt: Attempt, askedAgain: string | null): ReviewRun => ({
     agentId: synced.id,
     agentVersion: synced.version,
     sessionId: sessions.map((each) => each.session_id).join(', '),
-    images: images.map((image) => ({ ...image, viewed: viewed.has(image.fileId) })),
-    review,
-    problem,
+    images: images.map((image) => ({ ...image, viewed: attempt.viewed.has(image.fileId) })),
+    review: attempt.review,
+    problem: attempt.problem,
     costMicroUsd: sessions.reduce((sum, each) => sum + each.consumed_micro_usd, 0),
     sessions,
+    unreviewed: attempt.unreviewed,
+    askedAgain,
   });
-  const run = async (shown: readonly ReviewImage[]) => {
-    const outcome = await reviewSession(options, synced.id, shown);
+  /** One session, its review cut to what the images it was shown can back. */
+  const run = async (shown: readonly ReviewImage[], note?: string) => {
+    const outcome = await reviewSession(options, synced.id, shown, note);
     sessions.push(outcome.record);
-    for (const id of outcome.viewed) viewed.add(id);
-    return outcome;
+    const supported = outcome.review
+      ? supportedReview(outcome.review, shown, outcome.viewed, framesOf, outcome.record.session_id)
+      : null;
+    return {
+      ...outcome,
+      review: supported?.review ?? null,
+      unreviewed: supported?.unreviewed ?? [],
+    };
   };
-  try {
+  /** The first review, in one session, or in two halves after a budget pause. */
+  const firstReview = async (): Promise<Attempt> => {
     const first = await run(images);
-    if (!first.paused || images.length < 2) return result(first.review, first.problem);
+    if (!first.paused || images.length < 2) return { ...first, viewed: new Set(first.viewed) };
     const cut = Math.ceil(images.length / 2);
     say(`retrying the review in two sessions of ${cut} and ${images.length - cut} images`);
     const halves = [await run(images.slice(0, cut)), await run(images.slice(cut))];
@@ -354,9 +458,36 @@ export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
       half.problem ? [`half ${index + 1}: ${half.problem}`] : [],
     );
     const reviews = halves.flatMap((half) => (half.review ? [half.review] : []));
+    const viewed = new Set(halves.flatMap((half) => [...half.viewed]));
+    const unreviewed = halves.flatMap((half) => half.unreviewed);
     return reviews.length === halves.length
-      ? result(mergeReviews(reviews), null)
-      : result(null, `${first.problem}; the retry in halves failed (${problems.join('; ')})`);
+      ? { review: mergeReviews(reviews), problem: null, viewed, unreviewed }
+      : {
+          review: null,
+          problem: `${first.problem}; the retry in halves failed (${problems.join('; ')})`,
+          viewed,
+          unreviewed,
+        };
+  };
+  const unseenOf = (attempt: Attempt) =>
+    images.filter((image) => !attempt.viewed.has(image.fileId));
+  try {
+    const first = await firstReview();
+    const unseen = unseenOf(first);
+    const retracted = sessions.find((each) => each.retraction)?.retraction;
+    if (!first.review || unseen.length === 0) return result(first, null);
+    // Not done: once more, with every image attached again.
+    const why = retracted
+      ? `the agent said afterwards that the images did not reach it ("${retracted}")`
+      : `its session's events show no view_image result for ${unseen.map((image) => `${image.name} (${image.fileId})`).join(', ')}`;
+    say(
+      `the review left ${unseen.length} image(s) unseen; asking once more with every image attached again`,
+    );
+    const again = await run(images, againNote(why));
+    const second: Attempt = { ...again, viewed: new Set(again.viewed) };
+    // The review that was shown more stands; on a tie, the second, which was told what went wrong.
+    const better = second.review && unseenOf(second).length <= unseen.length ? second : first;
+    return result(better, why);
   } finally {
     const deleted = await deleteImages(client, images);
     say(`deleted ${deleted} of ${images.length} uploaded images`);

@@ -713,6 +713,8 @@ describe('the verdict', () => {
     problem: null,
     costMicroUsd: 1,
     sessions: [],
+    unreviewed: [],
+    askedAgain: null,
   });
 
   it('passes only when nothing failed and every image was opened', () => {
@@ -880,6 +882,7 @@ describe('the review session', () => {
       state: Record<string, unknown>;
     },
     images = 1,
+    frames: number[][] = [],
   ) {
     let sessions = 0;
     let uploads = 0;
@@ -919,7 +922,12 @@ describe('the review session', () => {
     const files = Array.from({ length: images }, (_, index) => {
       const file = join(dir, `frame-${index}.png`);
       writeFileSync(file, 'not really a png');
-      return { file, name: `frame-${index}.png`, what: `frame ${index}` };
+      return {
+        file,
+        name: `frame-${index}.png`,
+        what: `frame ${index}`,
+        ...(frames[index] ? { frames: frames[index] } : {}),
+      };
     });
     const start = () =>
       runReview({
@@ -1007,6 +1015,103 @@ describe('the review session', () => {
     ]);
     expect(run.costMicroUsd).toBe(1_100_000);
     expect(client.files.delete).toHaveBeenCalledTimes(3);
+  });
+
+  /** A fail review with one issue on `frame`, saying it inspected `inspected`. */
+  const failing = (frame: number, inspected: string[]) => ({
+    verdict: 'fail' as const,
+    inspected: inspected.map((file_id) => ({ file_id, saw: 'a frame' })),
+    checks: [{ id: 'ground', result: 'fail' as const, measured: 'a patch', frames: [frame] }],
+    issues: [
+      {
+        severity: 'major' as const,
+        check: 'ground',
+        sceneId: 'wall',
+        frame,
+        timecode: null,
+        what: `a patch at frame ${frame}`,
+        fix: 'fill the ground',
+        owner: 'motion' as const,
+      },
+    ],
+    summary: 'fail.',
+  });
+  const done = { status: 'idle', stop_reason: 'end_turn', consumed_micro_usd: 100_000 };
+
+  it('asks once more when a review reports on a frame of an image its session was not shown', async () => {
+    // fil_a shows frames 0 and 30, fil_b shows 690. The first session opens only fil_a, yet
+    // reports on 690 and says it inspected fil_b; the second opens both.
+    const { client, start } = reviewClient(
+      (session) => ({
+        events:
+          session === 1
+            ? submitted(['fil_a'], failing(690, ['fil_a', 'fil_b']))
+            : submitted(['fil_a', 'fil_b'], failing(690, ['fil_a', 'fil_b'])),
+        state: done,
+      }),
+      2,
+      [[0, 30], [690]],
+    );
+    const run = await start();
+    expect(client.sessions.create).toHaveBeenCalledTimes(2);
+    const second = client.sessions.create.mock.calls[1] as unknown as [{ message: string }];
+    expect(second[0].message).toMatch(
+      /^This review was asked for once already, and it could not be used in full: its session's events show no view_image result for frame-1\.png \(fil_b\)/,
+    );
+    expect(run.askedAgain).toMatch(/frame-1\.png \(fil_b\)/);
+    expect(run.images.map((image) => image.viewed)).toEqual([true, true]);
+    expect(run.review?.issues.map((issue) => issue.frame)).toEqual([690]);
+    expect(run.unreviewed).toEqual([]);
+  });
+
+  it('keeps the rule on frames no session was shown, and blocks on the unopened image', async () => {
+    const { client, start } = reviewClient(
+      () => ({ events: submitted(['fil_a'], failing(690, ['fil_a', 'fil_b'])), state: done }),
+      2,
+      [[0, 30], [690]],
+    );
+    const run = await start();
+    expect(client.sessions.create).toHaveBeenCalledTimes(2);
+    expect(run.images.map((image) => image.viewed)).toEqual([true, false]);
+    // The issue and the check on frame 690, and the claim to have inspected fil_b, are taken out.
+    expect(run.review?.issues).toEqual([]);
+    expect(run.review?.checks).toEqual([
+      {
+        id: 'ground',
+        result: 'n/a',
+        measured: 'not reviewed: it rests only on frames 690, of images the session was not shown',
+        frames: [],
+      },
+    ]);
+    expect(run.review?.inspected.map((entry) => entry.file_id)).toEqual(['fil_a']);
+    expect(run.unreviewed.map((each) => [each.kind, each.id, each.frame])).toEqual([
+      ['issue', 'ground', 690],
+      ['check', 'ground', 690],
+      ['inspected', 'fil_b', null],
+    ]);
+    expect(finalVerdict([], [], run, true).blocked).toBe(
+      'the agent did not open frame-1.png (fil_b)',
+    );
+  });
+
+  it('asks once more when the agent says afterwards the images never arrived', async () => {
+    const said = {
+      type: 'message.completed',
+      data: { role: 'assistant', content: 'I submitted a pass, but the images never arrived.' },
+    };
+    const { client, start } = reviewClient((session) => ({
+      events:
+        session === 1
+          ? [...submitted(['fil_a'], review('pass', 'pass', [0])), said]
+          : submitted(['fil_a'], review('pass', 'pass', [0])),
+      state: done,
+    }));
+    const run = await start();
+    expect(client.sessions.create).toHaveBeenCalledTimes(2);
+    expect(run.sessions[0]?.retraction).toBe('I submitted a pass, but the images never arrived.');
+    expect(run.askedAgain).toMatch(/^the agent said afterwards that the images did not reach it/);
+    expect(run.images[0]?.viewed).toBe(true);
+    expect(run.review?.verdict).toBe('pass');
   });
 });
 
