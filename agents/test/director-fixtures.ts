@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import type { Campaign } from '@boiler-room/schema';
 import type { DirectorBrief, Handoff } from '../src/director/output.ts';
-import type { ResearchOutput } from '../src/researcher/output.ts';
+import type { MeasuredColor, ResearchOutput } from '../src/researcher/output.ts';
 
 const skill = new URL('../../skills/director/SKILL.md', import.meta.url);
 
@@ -11,6 +11,50 @@ export function workedExample(): Campaign {
   const block = /^```json\n([\s\S]*?)^```$/m.exec(body)?.[1];
   if (!block) throw new Error('skills/director/SKILL.md has no fenced JSON block');
   return JSON.parse(block) as Campaign;
+}
+
+/** The worked example's brand colours, each measured where the capture read it on the home page. */
+function measured(): MeasuredColor[] {
+  const at = (x: number, y: number, element: string) => ({
+    page_url: 'https://fernhook.example.com',
+    x,
+    y,
+    element,
+  });
+  return [
+    {
+      hex: '#F6F5F1',
+      property: 'background-color',
+      seen_as: 'surface',
+      ...at(60, 30, 'body'),
+      share: 0.9,
+      tokens: ['background'],
+    },
+    {
+      hex: '#161616',
+      property: 'color',
+      seen_as: 'text',
+      ...at(400, 320, 'h1'),
+      share: null,
+      tokens: ['foreground'],
+    },
+    {
+      hex: '#1E6B57',
+      property: 'background-color',
+      seen_as: 'button',
+      ...at(520, 410, 'a.btn'),
+      share: null,
+      tokens: ['primary'],
+    },
+    {
+      hex: '#5C5C57',
+      property: 'color',
+      seen_as: 'text',
+      ...at(400, 380, 'p.lede'),
+      share: null,
+      tokens: ['muted'],
+    },
+  ];
 }
 
 /** Research the worked example could have been written from: its brand, assets and claims. */
@@ -27,6 +71,7 @@ export function exampleResearch(): ResearchOutput {
       fonts: [],
       radius_px: 14,
       css_variables: false,
+      measured: measured(),
       notes: [],
     },
     brief: {
@@ -71,7 +116,13 @@ export function exampleResearch(): ResearchOutput {
     evidence: {
       pages_file_id: 'fil_pages',
       capture_file_id: 'fil_capture',
-      logo: { asset_id: 'logo', source: 'svg', url: 'https://fernhook.example.com' },
+      logo: {
+        asset_id: 'logo',
+        source: 'svg',
+        found_in: 'header-home-link',
+        aspect: 4,
+        url: 'https://fernhook.example.com',
+      },
       material: [],
     },
   };
