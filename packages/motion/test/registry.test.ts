@@ -10,8 +10,14 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw four of the scene types in the schema registry, under its names', () => {
-    expect(IMPLEMENTED_SCENE_TYPES).toEqual(['word-slam', 'site-hero', 'feature-card', 'end-card']);
+  it('draw five of the scene types in the schema registry, under its names', () => {
+    expect(IMPLEMENTED_SCENE_TYPES).toEqual([
+      'word-slam',
+      'site-hero',
+      'feature-card',
+      'end-card',
+      'colour-event',
+    ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
       expect(Object.hasOwn(sceneRegistry, type)).toBe(true);
   });
@@ -77,6 +83,11 @@ describe('scene templates', () => {
         ground: 'base plate',
         anchors: [{ id: 'logo', entry: { axis: 'y', sign: -1, v: 36 }, exit: undefined }],
       },
+      'colour-event': {
+        kind: 'type',
+        ground: 'event event',
+        anchors: [{ id: 'card', entry: undefined, exit: undefined }],
+      },
     });
   });
 
@@ -106,7 +117,7 @@ describe('validateForRender', () => {
         path: 'scenes[1].type',
         message:
           'Scene type "proof-bars" is in the scene library, but motion has no template for it yet, so it cannot be rendered.',
-        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
+        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card, colour-event. Or keep it and render once the proof-bars template is built.',
       },
     ]);
   });
@@ -125,7 +136,7 @@ describe('validateForRender', () => {
     at(campaign.scenes, 1).type = 'carousel';
     const { issues } = await validateForRender(campaign);
     expect(issues.map(({ code }) => code)).toEqual(['SCENE_TYPE_UNKNOWN']);
-    expect(issues[0]?.fix).toContain('word-slam, site-hero, feature-card, end-card');
+    expect(issues[0]?.fix).toContain('word-slam, site-hero, feature-card, end-card, colour-event');
   });
 
   it('applies the limits the schema gives each type', async () => {

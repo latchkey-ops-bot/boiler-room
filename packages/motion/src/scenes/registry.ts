@@ -1,4 +1,5 @@
 import { type SceneRegistry, sceneRegistry } from '@boiler-room/schema';
+import { colourEventScene } from './colour-event.tsx';
 import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
@@ -16,6 +17,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'site-hero': siteHero,
   'feature-card': featureCard,
   'end-card': endCard,
+  'colour-event': colourEventScene,
 };
 
 /** The scene types a film can use today, in the order of the scene library. */
