@@ -322,8 +322,11 @@ describe('buildTemplate', () => {
       asset.src = `naive://files/${ids.get(id)}`;
     filled.evidence.pages_file_id = 'fil_pages1';
     filled.evidence.capture_file_id = 'fil_capture1';
-    filled.brief.one_liner = 'Orbitly plans social media posts for small teams.';
-    filled.brief.what_it_is = 'A social media scheduler.';
+    filled.brief.one_liner = {
+      text: 'Orbitly plans social media posts for small teams.',
+      claim_ids: ['plan-speed'],
+    };
+    filled.brief.what_it_is = { text: 'A social media scheduler.', claim_ids: ['plan-speed'] };
     filled.brief.product_ui.notes = 'Only an HTML mockup with sample data.';
     filled.claims = [
       {

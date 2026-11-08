@@ -263,7 +263,15 @@ function describeUi(ui: RawUiCandidate): string {
 }
 
 function emptyText(): StoredPage['text'] {
-  return { rendered: '', dom: '', meta: '', clean: '', illustrative: '', concealed: '' };
+  return {
+    rendered: '',
+    dom: '',
+    meta: '',
+    clean: '',
+    illustrative: '',
+    concealed: '',
+    hidden: '',
+  };
 }
 
 /**
@@ -423,6 +431,7 @@ async function capturePage(
             clean: text,
             illustrative: '',
             concealed: '',
+            hidden: '',
           };
           record.title = url.split('/').pop() ?? url;
           stored.title = record.title;
@@ -546,20 +555,19 @@ async function capturePage(
 
 /**
  * The page text the agent reads to pick quotes, with each kind of text marked off: what a visitor
- * sees first, then collapsed text a visitor can open, then mockup text (sample data), then text
- * styled so nobody can see it and the title and meta tags, neither of which may be quoted.
+ * sees, then mockup text (sample data), then text styled so nobody can see it and the title and
+ * meta tags, neither of which may be quoted. Text the page hides as it loads (collapsed answers,
+ * closed tabs, aria-hidden elements) is left out: it is never a claim or a brief fact, so the file
+ * only says how much there is.
  */
 export function writeTextFile(record: CapturedPage, stored: StoredPage) {
   const parts = [`# ${record.title}`, `URL: ${record.final_url}`, '', stored.text.rendered.trim()];
-  const visible = normaliseWhitespace(stored.text.rendered);
-  const openable = normaliseWhitespace(stored.text.clean);
-  if (openable.length > visible.length * 1.3 + 200) {
+  const hidden = normaliseWhitespace(stored.text.hidden ?? '').length;
+  if (hidden > 0)
     parts.push(
       '',
-      '--- Text in the page that is not visible until opened (collapsed answers, other tabs). Quotable. ---',
-      stored.text.clean.replace(/[ \t]+/g, ' ').trim(),
+      `--- ${hidden} characters of text on this page are hidden as it loads (collapsed answers, closed tabs or details, aria-hidden elements). They are left out: never a claim, never a brief fact. ---`,
     );
-  }
   if (stored.text.illustrative.trim()) {
     parts.push(
       '',
@@ -1105,6 +1113,7 @@ function readMaterial(base: string): { entries: MaterialEntry[]; pages: StoredPa
           clean: text,
           illustrative: '',
           concealed: '',
+          hidden: '',
         },
       });
       writeFileSync(join(base, `${item.name}.txt`), text);

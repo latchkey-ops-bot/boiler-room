@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { checkQuote, PageIndex, verifyResearch } from '../src/researcher/verify.ts';
-import { bundle, output, SITE } from './fixtures.ts';
+import { bundle, HIDDEN_ANSWER, output, SITE } from './fixtures.ts';
+
+/** A fixture part the test needs, which the fixture always has. */
+const must = <T>(value: T | null | undefined): T => {
+  if (value === null || value === undefined) throw new Error('fixture part missing');
+  return value;
+};
 
 const codes = (out = output(), pages = bundle()) =>
   verifyResearch(out, pages).map((failure) => failure.code);
@@ -18,9 +24,88 @@ describe('verifyResearch', () => {
     expect(checkQuote(page, 'Schedule posts without the​ spreadsheet')).toBe('found');
   });
 
-  it('finds quotes in collapsed text a visitor can open', () => {
-    // free-plan quotes the collapsed answer, which is only in the document text.
-    expect(codes(output())).toEqual([]);
+  // The cal.com brief took a price from a collapsed FAQ answer, which no visitor sees until it is
+  // opened. Hidden text is in the document, so it used to pass as quotable.
+  it('refuses a quote that is only in text the page hides until it is opened', () => {
+    const out = output();
+    out.claims.push({
+      id: 'team-monthly',
+      text: 'Team costs $30 a month billed monthly',
+      sourceUrl: SITE,
+      quote: HIDDEN_ANSWER,
+      status: 'extracted',
+    });
+    expect(verifyResearch(out, bundle())).toEqual([
+      expect.objectContaining({ code: 'QUOTE_HIDDEN', claimId: 'team-monthly' }),
+    ]);
+  });
+
+  it('keeps a figure only in hidden text out of the brief', () => {
+    const out = output();
+    const team = out.brief.pricing?.plans[1];
+    if (!team) throw new Error('fixture plan missing');
+    team.price = '$24 per month billed yearly, $30 per month billed monthly';
+    expect(verifyResearch(out, bundle()).map((failure) => [failure.code, failure.path])).toEqual([
+      ['NUMBER_UNBACKED', 'brief.pricing.plans[1]'],
+    ]);
+  });
+
+  it.each([
+    [
+      'brief.one_liner',
+      (out: ReturnType<typeof output>) =>
+        (out.brief.one_liner.text = 'Plans posts for 5,000 teams.'),
+    ],
+    [
+      'brief.what_it_is',
+      (out: ReturnType<typeof output>) =>
+        (out.brief.what_it_is.text = 'Plans a month of posts in 7 minutes.'),
+    ],
+    [
+      'brief.pricing',
+      (out: ReturnType<typeof output>) => (must(out.brief.pricing).summary = 'Team is $19 a month'),
+    ],
+    [
+      'brief.pricing.free_trial',
+      (out: ReturnType<typeof output>) =>
+        (must(out.brief.pricing).free_trial = {
+          text: 'A 14 day free trial',
+          claim_ids: ['team-price'],
+        }),
+    ],
+    [
+      'brief.positioning_note',
+      (out: ReturnType<typeof output>) =>
+        (out.brief.positioning_note = {
+          text: 'Twice as fast as described',
+          claim_ids: ['plan-speed'],
+        }),
+    ],
+    [
+      'brief.conflicts[0]',
+      (out: ReturnType<typeof output>) =>
+        out.brief.conflicts.push({
+          description: 'Team is $24 here and $29 there',
+          claim_ids: ['team-price'],
+        }),
+    ],
+  ])('checks every figure in %s against the quotes it cites', (path, change) => {
+    const out = output();
+    change(out);
+    expect(verifyResearch(out, bundle()).map((failure) => [failure.code, failure.path])).toEqual([
+      ['NUMBER_UNBACKED', path],
+    ]);
+  });
+
+  it('reads brief figures as values, as the campaign validator reads copy', () => {
+    const out = output();
+    out.brief.what_it_is.text = 'Plans a month of posts in ten minutes, for 3,200 small teams.';
+    out.brief.what_it_is.claim_ids = ['plan-speed', 'small-teams'];
+    expect(verifyResearch(out, bundle())).toEqual([]);
+    out.brief.what_it_is.text = 'Plans a month of posts in 100 minutes.';
+    expect(verifyResearch(out, bundle()).map((failure) => failure.message)).toEqual([
+      expect.stringContaining('states "100"'),
+    ]);
   });
 
   // A meta description is not on the page a visitor sees, and is where a page can carry text
@@ -111,6 +196,7 @@ describe('verifyResearch', () => {
       const failures = tampered((quote) => quote.replace('10 minutes', '5 minutes'), 1);
       expect(failures.map((failure) => [failure.code, failure.path, failure.claimId])).toEqual([
         ['QUOTE_NOT_FOUND', 'claims[1].quote', 'plan-speed'],
+        ['NUMBER_UNBACKED', 'brief.what_it_is', undefined],
         ['NUMBER_UNBACKED', 'brief.features[0]', undefined],
       ]);
     });
@@ -160,6 +246,7 @@ describe('verifyResearch', () => {
         illustrative: '',
       };
       expect(codes(output(), pages)).toEqual([
+        'QUOTE_NOT_FOUND',
         'QUOTE_NOT_FOUND',
         'QUOTE_NOT_FOUND',
         'QUOTE_NOT_FOUND',
@@ -232,8 +319,9 @@ describe('verifyResearch', () => {
     feature.what_it_does = 'Plans a month of posts in 7 minutes';
     feature.claim_ids.push('no-such-claim');
     const plan = out.brief.pricing?.plans[1];
-    if (!plan) throw new Error('fixture plan missing');
+    if (!plan || !out.brief.pricing) throw new Error('fixture plan missing');
     plan.claim_ids = [];
+    out.brief.pricing.claim_ids = ['free-plan'];
     expect(verifyResearch(out, bundle()).map((failure) => [failure.code, failure.path])).toEqual([
       ['CLAIM_UNKNOWN', 'brief.features[0]'],
       ['NUMBER_UNBACKED', 'brief.features[0]'],

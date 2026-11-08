@@ -11,6 +11,12 @@ import {
 } from '../src/researcher/gate.ts';
 import { bundle, output } from './fixtures.ts';
 
+/** A fixture part the test needs, which the fixture always has. */
+const must = <T>(value: T | null | undefined): T => {
+  if (value === null || value === undefined) throw new Error('fixture part missing');
+  return value;
+};
+
 const sha = (text: string) => createHash('sha256').update(text).digest('hex');
 
 function evidence(overrides: Partial<Evidence> = {}): Evidence {
@@ -33,7 +39,7 @@ describe('checkResearch', () => {
   it('passes a complete result', async () => {
     const result = await checkResearch(output(), bundle(), { fileExists: () => true });
     expect(result.failures).toEqual([]);
-    expect(result.output?.claims).toHaveLength(4);
+    expect(result.output?.claims).toHaveLength(5);
   });
 
   it('runs the campaign validator on brand, assets and claims', async () => {
@@ -93,10 +99,10 @@ describe('checkResearch', () => {
     const asset = out.assets.logo;
     if (!asset) throw new Error('fixture asset missing');
     asset.src = 'naive://files/PUBLISH:logo.svg';
-    out.brief.one_liner = 'TODO';
+    out.brief.one_liner.text = 'TODO';
     expect(unfinished(raw).map((failure) => [failure.code, failure.path])).toEqual([
       ['PLACEHOLDER', 'assets.logo.src'],
-      ['TODO', 'brief.one_liner'],
+      ['TODO', 'brief.one_liner.text'],
     ]);
   });
 });
@@ -149,14 +155,62 @@ describe('checkProvenance', () => {
 });
 
 describe('withoutClaims', () => {
-  it('drops claims and every reference to them', async () => {
-    const trimmed = withoutClaims(output(), new Set(['plan-speed', 'home-headline']));
-    expect(trimmed.claims.map((claim) => claim.id)).toEqual(['team-price', 'free-plan']);
-    expect(trimmed.brief.features[0]?.claim_ids).toEqual([]);
+  it('drops claims and every reference to them, and every brief fact left with no backing', () => {
+    const trimmed = withoutClaims(output(), new Set(['team-price', 'home-headline']));
+    expect(trimmed.claims.map((claim) => claim.id)).toEqual([
+      'plan-speed',
+      'free-plan',
+      'small-teams',
+    ]);
     expect(trimmed.brief.headline_claim_id).toBeNull();
+    expect(trimmed.brief.pricing?.claim_ids).toEqual(['free-plan']);
+    expect(trimmed.brief.pricing?.plans.map((plan) => plan.name)).toEqual(['Solo']);
+    const priceless = withoutClaims(output(), new Set(['team-price', 'free-plan']));
+    expect(priceless.brief.pricing).toBeNull();
+  });
+
+  it('keeps an uncited one-liner, which then fails the schema', async () => {
+    const trimmed = withoutClaims(output(), new Set(['plan-speed']));
+    expect(trimmed.brief.features).toEqual([]);
+    expect(trimmed.brief.one_liner.claim_ids).toEqual(['small-teams']);
+    expect(trimmed.brief.what_it_is.claim_ids).toEqual([]);
     const { failures } = await checkResearch(trimmed, bundle());
     expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
-      ['NUMBER_UNBACKED', 'brief.features[0]'],
+      ['SCHEMA_INVALID', 'brief.what_it_is.claim_ids'],
+    ]);
+    expect(failures[0]?.message).toMatch(/must cite the claims that back it/);
+  });
+});
+
+describe('brief citations', () => {
+  it.each([
+    [
+      'one-liner',
+      (out: ReturnType<typeof output>) => (out.brief.one_liner.claim_ids = []),
+      'brief.one_liner.claim_ids',
+    ],
+    [
+      'audience',
+      (out: ReturnType<typeof output>) => (must(out.brief.audiences[0]).claim_ids = []),
+      'brief.audiences[0].claim_ids',
+    ],
+    [
+      'plan',
+      (out: ReturnType<typeof output>) => (must(must(out.brief.pricing).plans[0]).claim_ids = []),
+      'brief.pricing.plans[0].claim_ids',
+    ],
+    [
+      'free trial',
+      (out: ReturnType<typeof output>) =>
+        (must(out.brief.pricing).free_trial = { text: 'Free for 14 days', claim_ids: [] }),
+      'brief.pricing.free_trial.claim_ids',
+    ],
+  ])('refuses a %s that cites no claim', async (_name, change, path) => {
+    const out = output();
+    change(out);
+    const { failures } = await checkResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ['SCHEMA_INVALID', path],
     ]);
   });
 });

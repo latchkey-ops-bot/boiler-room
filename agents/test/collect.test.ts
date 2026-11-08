@@ -96,6 +96,40 @@ const CONCEALED_SITE = `<!doctype html><html><head><title>Paper</title><style>
 <span class="sr-only">Open the menu</span>
 </body></html>`;
 
+// Text the page does not show as it loads, next to the screen-reader twin of an animated price
+// (linear.app draws its prices in an aria-hidden NumberFlow and puts the words in a visually
+// hidden span), and visually hidden text that is no twin. cal.com put its prices in a collapsed
+// FAQ panel of no height, which innerText still read.
+const HIDDEN_SITE = `<!doctype html><html><head><title>Plans</title><style>
+  body { margin: 0; background: #08090A; color: #F7F8F8; font-family: sans-serif; }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+  .contents { display: contents; }
+  .flow { display: inline-block; padding: 4px 0; }
+  .panel { height: 0; overflow: hidden; }
+  .shut { max-height: 0; overflow: hidden; }
+</style></head><body>
+<h1><span class="sr-only">The planning system for teams</span><span aria-hidden="true"><span>The planning</span> <span>system for teams</span>The planning</span></h1>
+<p>Basic is billed yearly.</p>
+<div class="price"><span class="sr-only">$10 per user/month</span><span class="contents"><span aria-hidden="true"><span class="flow">$10 per user/month</span></span></span></div>
+<div><span class="sr-only">500% faster than anyone</span><span aria-hidden="true">Check</span></div>
+<div><span class="sr-only">Winner of 42 awards</span></div>
+<div><span class="sr-only">$99 per seat</span><span aria-hidden="true" style="color:#08090A">$99 per seat</span></div>
+<div><button aria-expanded="false" aria-controls="faq-1">How much is Team?</button>
+<div id="faq-1" class="panel"><p>Team is $12/user/month billed yearly.</p></div></div>
+<div class="shut"><p>Organizations are $28/user/month.</p></div>
+<button aria-expanded="false" aria-controls="more">Read more</button><div id="more"><p>Enterprise has a dedicated database.</p></div>
+<details><summary>Is there a free plan?</summary><p>Yes, the Solo plan is free.</p></details>
+<div style="display: none">Monthly price $15</div>
+<div style="visibility: hidden">Yearly price $14</div>
+<div aria-hidden="true">Marquee of Acme Globex Initech</div>
+</body></html>`;
+
+// A dialog library marks the whole page aria-hidden while its dialog is open.
+const DIALOG_SITE = `<!doctype html><html><head><title>Shop</title></head><body>
+<div id="app" aria-hidden="true"><main><h1>Wool runners</h1><p>Made from merino wool since 2016.</p></main></div>
+<div role="dialog" aria-modal="true"><p>Where are we shipping to?</p></div>
+</body></html>`;
+
 let browser: Browser | undefined;
 
 beforeAll(async () => {
@@ -130,6 +164,9 @@ describe('collectPage in Chromium', () => {
     expect(raw.text.dom).toContain('Schedule posts without spreadsheets');
     expect(raw.text.dom).toContain('Yes, the Solo plan is free.');
     expect(raw.text.rendered).not.toContain('Yes, the Solo plan is free.');
+    expect(raw.text.hidden).toContain('Yes, the Solo plan is free.');
+    expect(raw.text.clean).not.toContain('Yes, the Solo plan is free.');
+    expect(raw.text.clean).toContain('Is there a free plan?');
     expect(raw.text.illustrative).toContain('Followers this week: 12,480');
     expect(raw.text.clean).not.toContain('12,480');
     expect(raw.text.clean).toContain('Orbitly plans a month of posts in 10 minutes.');
@@ -309,6 +346,62 @@ describe('collectPage in Chromium', () => {
       expect(raw.text.rendered).toContain(seen);
       expect(raw.text.concealed).not.toContain(seen);
     }
+    await page.close();
+  });
+
+  it('keeps text the page hides as it loads apart from what a visitor sees', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(HIDDEN_SITE, false);
+    const visible = (text: string) => `${raw.text.rendered}\n${raw.text.clean}`.includes(text);
+    for (const hidden of [
+      'Team is $12/user/month billed yearly.',
+      'Organizations are $28/user/month.',
+      'Enterprise has a dedicated database.',
+      'Yes, the Solo plan is free.',
+      'Monthly price $15',
+      'Yearly price $14',
+      'Marquee of Acme Globex Initech',
+    ]) {
+      expect(raw.text.hidden, hidden).toContain(hidden);
+      expect(visible(hidden), hidden).toBe(false);
+    }
+    for (const shown of [
+      'How much is Team?',
+      'Read more',
+      'Is there a free plan?',
+      'Basic is billed yearly.',
+    ]) {
+      expect(raw.text.rendered, shown).toContain(shown);
+      expect(raw.text.clean, shown).toContain(shown);
+    }
+    await page.close();
+  });
+
+  it('reads the words of an aria-hidden drawing from its screen-reader twin, and nothing else', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(HIDDEN_SITE, false);
+    for (const twin of ['$10 per user/month', 'The planning system for teams']) {
+      expect(raw.text.rendered, twin).toContain(twin);
+      expect(raw.text.clean, twin).toContain(twin);
+      expect(raw.text.concealed, twin).not.toContain(twin);
+    }
+    // No drawing, a drawing of something else, and a drawing nobody can read are no twins.
+    for (const alone of ['500% faster than anyone', 'Winner of 42 awards', '$99 per seat']) {
+      expect(raw.text.concealed, alone).toContain(alone);
+      expect(raw.text.clean, alone).not.toContain(alone);
+      expect(raw.text.rendered, alone).not.toContain(alone);
+    }
+    // The drawing's own text is aria-hidden, so it is hidden text.
+    expect(raw.text.hidden).toContain('The planning system for teams');
+    await page.close();
+  });
+
+  it('does not hide the page when a dialog marks the rest of it aria-hidden', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(DIALOG_SITE, false);
+    expect(raw.text.rendered).toContain('Made from merino wool since 2016.');
+    expect(raw.text.clean).toContain('Made from merino wool since 2016.');
+    expect(raw.text.hidden).toBe('');
     await page.close();
   });
 });

@@ -230,16 +230,45 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   };
   const INVISIBLE = 1.3;
   const concealed = new Set<Element>();
+  /** Concealed text in a box of 2 px or less, with that box: the "visually hidden" pattern. */
+  const tiny = new Map<Element, Element>();
   const suspects: Element[] = [];
+  const CLIPS = /hidden|clip|auto|scroll/;
+  const clipsContent = (style: CSSStyleDeclaration) =>
+    CLIPS.test(style.overflowX) ||
+    CLIPS.test(style.overflowY) ||
+    (style.clip !== 'auto' && style.clip !== '') ||
+    style.clipPath !== 'none';
+  /** The box of 2 px or less, the element or one just above it, that clips the element away. */
+  const tinyBox = (el: Element): Element | null => {
+    let node: Element | null = el;
+    for (let depth = 0; node && node !== body && depth < 4; depth++, node = node.parentElement) {
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 2 && rect.height <= 2 && (node === el || clipsContent(styleOf(node))))
+        return node;
+    }
+    return null;
+  };
   for (const el of Array.from(body.querySelectorAll('*')).slice(0, 8000)) {
     if (SKIP.has(el.tagName)) continue;
     let chars = 0;
     for (const node of Array.from(el.childNodes))
       if (node.nodeType === Node.TEXT_NODE) chars += (node.textContent ?? '').trim().length;
-    if (chars === 0 || !visible(el)) continue;
+    if (chars === 0) continue;
+    const box = tinyBox(el);
+    if (box && box !== el) {
+      concealed.add(el);
+      tiny.set(el, box);
+      continue;
+    }
+    if (!visible(el)) continue;
     const style = styleOf(el);
-    const rect = el.getBoundingClientRect();
-    if ((Number.parseFloat(style.fontSize) || 16) < 3 || (rect.width <= 2 && rect.height <= 2)) {
+    if (box) {
+      concealed.add(el);
+      tiny.set(el, el);
+      continue;
+    }
+    if ((Number.parseFloat(style.fontSize) || 16) < 3) {
       concealed.add(el);
       continue;
     }
@@ -293,17 +322,120 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     probe.remove();
     window.scrollTo(0, 0);
   }
+  // A screen-reader twin: visually hidden text that says in words what an aria-hidden element
+  // beside it draws, as an animated price or headline does. A visitor sees the drawing and a
+  // screen reader reads the words, so the words are what the page shows. It counts only when the
+  // drawing is on show, readable, and carries the same words: visually hidden text alone, or
+  // beside a drawing of something else, stays concealed.
+  const squash = (text: string) => text.replace(/\s+/g, '');
+  const hasTwin = (box: Element): boolean => {
+    const words = squash(box.textContent ?? '');
+    if (words.length < 2) return false;
+    let parent = box.parentElement;
+    while (parent && styleOf(parent).display === 'contents') parent = parent.parentElement;
+    if (!parent) return false;
+    return Array.from(parent.querySelectorAll('[aria-hidden="true"]')).some((drawn) => {
+      if (drawn.contains(box) || box.contains(drawn) || insideIllustrative(drawn)) return false;
+      const rect = drawn.getBoundingClientRect();
+      if (rect.width < 4 || rect.height < 4 || !visible(drawn)) return false;
+      const color = toColor(styleOf(drawn).color);
+      const behind = painted(drawn).hex;
+      if (!color || color.alpha < 0.1 || ratio(over(color, behind), behind) < INVISIBLE)
+        return false;
+      const labels = [drawn, ...Array.from(drawn.querySelectorAll('[aria-label]'))].map(
+        (node) => node.getAttribute('aria-label') ?? '',
+      );
+      return [drawn.textContent ?? '', ...labels].some((text) => squash(text).includes(words));
+    });
+  };
+  const twinned = new Map<Element, boolean>();
+  for (const [el, box] of tiny) {
+    let known = twinned.get(box);
+    if (known === undefined) {
+      known = hasTwin(box);
+      twinned.set(box, known);
+    }
+    if (known) concealed.delete(el);
+  }
+
+  // Text a visitor cannot see on the page as it loads, and which is never a claim: under
+  // aria-hidden, not displayed or not visible, in a closed <details> other than its summary, in a
+  // panel a collapsed control names (aria-expanded="false"), or in a collapsed panel, one that
+  // clips its content to no height or no width, as an accordion does. A dialog's library can mark
+  // the whole page aria-hidden while it is open; an aria-hidden element holding the page's main
+  // content or its first heading is that, and does not hide the page.
+  const closedPanels = new Set<Element>();
+  for (const trigger of Array.from(
+    document.querySelectorAll('[aria-expanded="false"][aria-controls]'),
+  )) {
+    for (const id of (trigger.getAttribute('aria-controls') ?? '').split(/\s+/).filter(Boolean)) {
+      const panel = document.getElementById(id);
+      if (panel && !panel.contains(trigger)) closedPanels.add(panel);
+    }
+  }
+  const hidesItself = (el: Element): boolean => {
+    if (el.getAttribute('aria-hidden') === 'true' && !el.querySelector('main, [role="main"], h1'))
+      return true;
+    if (closedPanels.has(el)) return true;
+    const parent = el.parentElement;
+    if (
+      parent?.tagName === 'DETAILS' &&
+      !(parent as HTMLDetailsElement).open &&
+      el !== parent.querySelector(':scope > summary')
+    )
+      return true;
+    const style = styleOf(el);
+    if (!CLIPS.test(style.overflowX) && !CLIPS.test(style.overflowY)) return false;
+    const rect = el.getBoundingClientRect();
+    return (rect.height < 2 && rect.width >= 2) || (rect.width < 2 && rect.height >= 2);
+  };
+  const chainCache = new Map<Element, boolean>();
+  const hiddenChain = (el: Element | null): boolean => {
+    if (!el || el === body || el === document.documentElement) return false;
+    let known = chainCache.get(el);
+    if (known === undefined) {
+      known = hidesItself(el) || hiddenChain(el.parentElement);
+      chainCache.set(el, known);
+    }
+    return known;
+  };
+  const shownCache = new Map<Element, boolean>();
+  /** Whether the browser draws the element at all: displayed, and its visibility visible. */
+  const drawn = (el: Element): boolean => {
+    let box: Element | null = el;
+    while (box && box !== body && styleOf(box).display === 'contents') box = box.parentElement;
+    if (!box || box === body) return true;
+    let known = shownCache.get(box);
+    if (known === undefined) {
+      const check = (box as Element & { checkVisibility?: (options: object) => boolean })
+        .checkVisibility;
+      known = check
+        ? check.call(box, { visibilityProperty: true, checkVisibilityCSS: true })
+        : styleOf(box).display !== 'none' && styleOf(box).visibility === 'visible';
+      shownCache.set(box, known);
+    }
+    return known;
+  };
+  const isHidden = (parent: Element) => hiddenChain(parent) || !drawn(parent);
+  let hiddenMarks = 0;
+  for (const el of Array.from(body.querySelectorAll('*')))
+    if (!SKIP.has(el.tagName) && hidesItself(el) && !hiddenChain(el.parentElement)) {
+      el.setAttribute('data-br-hidden', '1');
+      hiddenMarks += 1;
+    }
+
   for (const el of concealed) el.setAttribute('data-br-concealed', '1');
   const concealedText = concealed.size
-    ? walkText(body, undefined, (parent) => concealed.has(parent))
+    ? walkText(body, undefined, (parent) => concealed.has(parent) && !isHidden(parent))
     : '';
+  const hiddenText = walkText(body, undefined, (parent) => isHidden(parent));
 
-  // What a visitor sees: innerText with the concealed text taken out, which keeps the layout.
+  // What a visitor sees: innerText with the concealed and the hidden text taken out.
   let rendered = '';
   {
     const hide = document.createElement('style');
-    hide.textContent = '[data-br-concealed] { visibility: hidden !important; }';
-    if (concealed.size) document.head.appendChild(hide);
+    hide.textContent = '[data-br-concealed], [data-br-hidden] { display: none !important; }';
+    if (concealed.size || hiddenMarks) document.head.appendChild(hide);
     // biome-ignore lint/performance/useDomNodeTextContent: the rendered text is what a reader sees, which is what is captured here
     rendered = (body as HTMLElement).innerText ?? '';
     hide.remove();
@@ -312,7 +444,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   const clean = walkText(
     body,
     (el) => illustrative.has(el),
-    (parent) => !concealed.has(parent),
+    (parent) => !concealed.has(parent) && !isHidden(parent),
   );
   const illustrativeText = [...illustrative].map((el) => walkText(el)).join('\n');
 
@@ -1008,6 +1140,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       clean,
       illustrative: illustrativeText,
       concealed: concealedText,
+      hidden: hiddenText,
     },
     headings,
     links,

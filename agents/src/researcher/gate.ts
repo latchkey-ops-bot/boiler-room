@@ -70,11 +70,16 @@ export function unfinished(raw: unknown): GateFailure[] {
 function schemaFailures(issues: readonly z.core.$ZodIssue[]): GateFailure[] {
   return issues.map((issue) => {
     const path = formatPath(issue.path);
+    const uncited = issue.code === 'too_small' && issue.path.at(-1) === 'claim_ids';
     return {
       code: 'SCHEMA_INVALID',
       path,
-      message: `${path}: ${issue.message}`,
-      fix: `Change ${path} so that it passes: ${issue.message}.`,
+      message: uncited
+        ? `${path} is empty: every brief fact must cite the claims that back it.`
+        : `${path}: ${issue.message}`,
+      fix: uncited
+        ? `Put in ${path} the id of each claim whose quote says what this item says. If no claim backs it, quote one from a page's visible text, or remove the item (set it to null where it may be null).`
+        : `Change ${path} so that it passes: ${issue.message}.`,
     };
   });
 }
@@ -210,28 +215,37 @@ export function checkProvenance(output: ResearchOutput, evidence: Evidence): Gat
 
 /**
  * The result without these claims, and with every reference to them removed from the brief. Used
- * when repair rounds run out: a claim that cannot be verified never reaches the output.
+ * when repair rounds run out: a claim that cannot be verified never reaches the output. A brief
+ * fact left citing no claim has nothing behind it, so it goes too: a list item is dropped, an
+ * optional fact (pricing, the free trial, the positioning note) becomes null. The one-liner and
+ * what-it-is cannot go; left uncited, they fail the schema and the result is not accepted.
  */
 export function withoutClaims(output: ResearchOutput, ids: ReadonlySet<string>): ResearchOutput {
-  const keep = (list: string[]) => list.filter((id) => !ids.has(id));
+  const keep = <T extends { claim_ids: string[] }>(item: T): T => ({
+    ...item,
+    claim_ids: item.claim_ids.filter((id) => !ids.has(id)),
+  });
+  const backed = <T extends { claim_ids: string[] }>(items: T[]): T[] =>
+    items.map(keep).filter((item) => item.claim_ids.length > 0);
+  const optional = <T extends { claim_ids: string[] }>(item: T | null): T | null => {
+    const kept = item ? keep(item) : null;
+    return kept && kept.claim_ids.length > 0 ? kept : null;
+  };
   const { brief } = output;
+  const pricing = optional(brief.pricing);
   return {
     ...output,
     claims: output.claims.filter((claim) => !ids.has(claim.id)),
     brief: {
       ...brief,
-      audiences: brief.audiences.map((item) => ({ ...item, claim_ids: keep(item.claim_ids) })),
-      features: brief.features.map((item) => ({ ...item, claim_ids: keep(item.claim_ids) })),
-      conflicts: brief.conflicts.map((item) => ({ ...item, claim_ids: keep(item.claim_ids) })),
-      pricing: brief.pricing
-        ? {
-            ...brief.pricing,
-            claim_ids: keep(brief.pricing.claim_ids),
-            plans: brief.pricing.plans.map((plan) => ({
-              ...plan,
-              claim_ids: keep(plan.claim_ids),
-            })),
-          }
+      one_liner: keep(brief.one_liner),
+      what_it_is: keep(brief.what_it_is),
+      audiences: backed(brief.audiences),
+      features: backed(brief.features),
+      conflicts: backed(brief.conflicts),
+      positioning_note: optional(brief.positioning_note),
+      pricing: pricing
+        ? { ...pricing, free_trial: optional(pricing.free_trial), plans: backed(pricing.plans) }
         : null,
       headline_claim_id:
         brief.headline_claim_id && ids.has(brief.headline_claim_id)

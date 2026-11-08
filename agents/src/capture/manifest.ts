@@ -291,8 +291,8 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
     },
     brief: {
       product_name: brand.name,
-      one_liner: TODO,
-      what_it_is: TODO,
+      one_liner: { text: TODO, claim_ids: [] },
+      what_it_is: { text: TODO, claim_ids: [] },
       audiences: [],
       features: [],
       pricing: null,

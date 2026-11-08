@@ -20,6 +20,7 @@ describe('@boiler-room/schema', () => {
         'researchPartsSchema',
         'sceneFrames',
         'toFrame',
+        'unbackedNumbers',
         'validateCampaign',
         'validateResearchParts',
       ].sort(),

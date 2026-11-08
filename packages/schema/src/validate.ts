@@ -463,6 +463,35 @@ function backingFor(value: string, quotes: readonly Quote[]): NumericToken[] {
   );
 }
 
+/**
+ * The numeric statements in `copy` that none of `quotes` states, read exactly as
+ * `validateCampaign` reads scene copy against the quotes it cites: the copy strictly, each quote
+ * literally (or strictly when the copy repeats it word for word), compared as values. `brandName`
+ * is left out of the copy and the quotes, as `brand.name` is in a campaign, unless the name itself
+ * reads as a statistic. The Researcher's brief uses this, so a brief cannot state a number its
+ * cited claims do not.
+ */
+export function unbackedNumbers(
+  copy: string,
+  quotes: readonly string[],
+  options: { brandName?: string } = {},
+): NumericToken[] {
+  const name = options.brandName?.trim();
+  const brand = name && !brandReadsAsClaim(name) ? wholePhrase(name) : undefined;
+  const withoutBrand = (text: string) => (brand ? text.replace(brand, ' ') : text);
+  const read = quotes.map((quote): Quote => {
+    const text = withoutBrand(quote);
+    return {
+      text,
+      literal: extractNumericTokens(text, 'literal'),
+      strict: extractNumericTokens(text),
+    };
+  });
+  const value = withoutBrand(copy);
+  const backing = backingFor(value, read);
+  return extractNumericTokens(value).filter((token) => !isBacked(token, backing));
+}
+
 const citationSource = (cited: readonly string[]) =>
   cited.length ? `the quotes of ${cited.join(', ')} do not state it` : 'it cites no claim';
 

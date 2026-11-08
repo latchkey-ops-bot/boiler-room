@@ -120,9 +120,11 @@ export interface RawPage {
   title: string;
   lang: string;
   /**
-   * `rendered` is what a visitor sees, `dom` all text, `clean` the text outside mockups and outside
-   * concealed text, `illustrative` the mockup text, and `concealed` text styled so nobody can see
-   * it: the colour of what is behind it, too small, or in a box too small to show it.
+   * `rendered` is what a visitor sees, `dom` all text, `clean` the visible text outside mockups,
+   * `illustrative` the mockup text, `concealed` text styled so nobody can see it (the colour of
+   * what is behind it, too small, or in a box too small to show it), and `hidden` text the page
+   * does not show as it loads: aria-hidden, not displayed or not visible, in a closed `<details>`
+   * or a collapsed accordion panel.
    */
   text: {
     rendered: string;
@@ -131,6 +133,7 @@ export interface RawPage {
     clean: string;
     illustrative: string;
     concealed: string;
+    hidden: string;
   };
   headings: { level: number; text: string }[];
   links: RawLink[];

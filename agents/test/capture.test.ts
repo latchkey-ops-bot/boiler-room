@@ -96,7 +96,8 @@ afterAll(async () => {
 
 const options = { withStyles: false, withLogos: false, uiShots: 3, site: null };
 
-describe('captureResilient', () => {
+// A real page load takes a few seconds, more with the other test files running beside it.
+describe('captureResilient', { timeout: 60_000 }, () => {
   // Another job killed the browser between pages, and every later page was stored with no text.
   it('starts a new browser when the one it had has closed, and still reads the page', async (context) => {
     if (!available) return context.skip();
@@ -139,7 +140,7 @@ describe('captureResilient', () => {
     }
   });
 
-  describe('the address guard', { timeout: 60_000 }, () => {
+  describe('the address guard', () => {
     const load = async (path: string, site: string | null = origin) => {
       const browsers = new Browsers();
       try {
@@ -234,7 +235,7 @@ describe('captureResilient', () => {
   });
 });
 
-describe('fetchResource', () => {
+describe('fetchResource', { timeout: 60_000 }, () => {
   it('follows redirects by hand and refuses a hop to a private address', async (context) => {
     if (!available) return context.skip();
     const { request } = await import('playwright');

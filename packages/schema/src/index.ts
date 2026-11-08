@@ -23,4 +23,10 @@ export type {
   ValidateOptions,
   ValidationResult,
 } from './validate.ts';
-export { DEFAULT_TEXT_LIMITS, ISSUE_CODES, MIN_CONTRAST, validateCampaign } from './validate.ts';
+export {
+  DEFAULT_TEXT_LIMITS,
+  ISSUE_CODES,
+  MIN_CONTRAST,
+  unbackedNumbers,
+  validateCampaign,
+} from './validate.ts';

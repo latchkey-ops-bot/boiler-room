@@ -87,6 +87,15 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   as screens are product UI; other large pictures count only on pages about the product, never on
   about, customers, careers or blog pages; video, video embeds, canvases and anything faded out
   are never shot. Contact, legal and careers pages are read but not shot.
+- Text the page hides as it loads is kept apart as `hidden`, out of the visible text and out of
+  the text file the agent reads: anything under `aria-hidden`, not displayed or not visible, in a
+  closed `<details>` other than its summary, in a panel a control marks collapsed
+  (`aria-expanded="false"` with `aria-controls`), or in a collapsed accordion panel (one that clips
+  its content to no height or no width). An `aria-hidden` element that holds the page's `main` or
+  first heading is a dialog library hiding the page behind its dialog, and does not count. One
+  exception keeps visible copy visible: visually hidden words beside an `aria-hidden` drawing that
+  is on show, readable and carries the same words (an animated price or headline, such as
+  linear.app's) are the drawing's words, so they count as visible text.
 - Brand tokens come from computed styles, so they work with or without CSS variables and in any
   colour syntax: the painted background, the most used readable text colour, the brand colour from
   button fills, links and headings, accents, muted text, radius, light or dark, and fonts with how
@@ -103,18 +112,27 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   schema unchanged, plus `brand_details`, `brief`, `needs_upload` and `evidence`.
 - The campaign validator on those parts (`validateResearchParts` in `@boiler-room/schema`), with
   every asset checked against Naive files.
-- The verbatim rule: every claim's quote must be in the stored text of its source page, after
-  whitespace is normalised. A figure that only appears inside a product mockup is refused as
-  sample data. A quote only in the title, meta tags or alt text is refused: a visitor never sees
-  it. A quote only in concealed text (the colour of its background, too small to read, or in a
-  box too small to show it) is refused: the collector keeps that text out of the visible text, and
-  the page file marks it untrusted. Brief items may only cite claims that exist, and every number
-  in them must be in a cited quote. Calls to action must be verbatim on their page. Each
+- The verbatim rule: every claim's quote must be in the visible text of its source page, as laid
+  out or as written, after whitespace is normalised. A figure that only appears inside a product
+  mockup is refused as sample data. A quote only in the title, meta tags or alt text is refused: a
+  visitor never sees it. A quote only in concealed text (the colour of its background, too small
+  to read, or in a box too small to show it) is refused: the collector keeps that text out of the
+  visible text, and the page file marks it untrusted. A quote only in hidden text (a collapsed
+  answer, a closed tab, an `aria-hidden` element) is refused as `QUOTE_HIDDEN`.
+- Every factual brief field cites the claims that back it, at least one: `one_liner`,
+  `what_it_is`, each audience, feature and conflict, `pricing` and each plan, the free trial and
+  the positioning note. Each may cite only claims that exist, and every figure in it must be stated
+  by a cited claim's quote, read with the campaign validator's own number extraction
+  (`unbackedNumbers` in `@boiler-room/schema`): values are compared, so `$10` is not backed by
+  `$110`, and a spelled-out "ten" needs a quote that states 10. A plan is backed by its own claims
+  and the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
   that still fail, drops uncaptured pages and resets page titles, and accepts the rest only if
-  nothing else fails.
+  nothing else fails. A brief fact left citing no claim goes with its claims: a list item is
+  dropped and pricing, the free trial or the positioning note becomes null. A one-liner or
+  what-it-is left uncited fails the schema, so the result is not accepted.
 - Provenance: the gate downloads `pages.json` itself and requires its SHA-256 to match a digest the
   capture tool printed in this session's tool output, so a bundle edited after the capture is
   refused. Assets must be files this session published, or customer material with provenance

@@ -1,13 +1,16 @@
+import { unbackedNumbers } from '@boiler-room/schema';
 import { z } from 'zod';
 import type { ResearchOutput } from './output.ts';
 import { normaliseUrl, normaliseWhitespace, numbersIn } from './text.ts';
 
 /**
  * The text the capture tool stored for one page or one piece of customer material. `rendered` is
- * what a reader sees (`innerText`, without concealed text), `dom` is everything in the document
- * (`textContent`, without scripts and styles), and `meta` is the title, meta tags and alt text.
- * `illustrative` is the text of product mockups, device frames and terminals, where sample figures
- * live; `concealed` is text styled so nobody can see it; and `clean` is `dom` without either.
+ * what a reader sees (`innerText`, without concealed or hidden text), `dom` is everything in the
+ * document (`textContent`, without scripts and styles), and `meta` is the title, meta tags and alt
+ * text. `illustrative` is the text of product mockups, device frames and terminals, where sample
+ * figures live; `concealed` is text styled so nobody can see it; `hidden` is text the page does not
+ * show as it loads (aria-hidden, not displayed, a closed `<details>`, a collapsed accordion panel);
+ * and `clean` is the visible text outside mockups: `dom` without the other three.
  */
 export const storedPageSchema = z.object({
   url: z.string(),
@@ -25,6 +28,8 @@ export const storedPageSchema = z.object({
     illustrative: z.string(),
     /** Text styled so nobody can see it. Never a claim. Absent in bundles from older captures. */
     concealed: z.string().optional(),
+    /** Text the page does not show until opened, or hides. Never a claim. Absent in older bundles. */
+    hidden: z.string().optional(),
   }),
 });
 
@@ -43,6 +48,7 @@ export const FAILURE_CODES = [
   'QUOTE_NOT_FOUND',
   'QUOTE_NOT_VISIBLE',
   'QUOTE_CONCEALED',
+  'QUOTE_HIDDEN',
   'QUOTE_ILLUSTRATIVE',
   'NON_CLAIM_SOURCE',
   'PAGE_NOT_CAPTURED',
@@ -96,11 +102,14 @@ class PageText {
 }
 
 /**
- * Where a quote may come from: the page's text. Its title, meta tags and alt text are context, not
- * copy: a visitor never sees them on the page, and a meta tag is where a page can carry text meant
- * for machines rather than people.
+ * Where a quote may come from: the text a visitor sees on the page as it loads, as laid out
+ * (`rendered`) or as written in the source (`clean`, which keeps the case a stylesheet changes).
+ * Its title, meta tags and alt text are context, not copy: a visitor never sees them on the page,
+ * and a meta tag is where a page can carry text meant for machines rather than people. Text the
+ * page hides until it is opened, such as a collapsed answer or a closed tab, is not what a visitor
+ * sees either.
  */
-const READABLE: readonly Field[] = ['rendered', 'dom'];
+const READABLE: readonly Field[] = ['rendered', 'clean'];
 /** Every field, for finding where a figure a brief item mentions really is. */
 const ANYWHERE: readonly Field[] = ['rendered', 'dom', 'meta', 'illustrative'];
 
@@ -127,18 +136,25 @@ export class PageIndex {
   }
 }
 
-export type QuoteVerdict = 'found' | 'illustrative' | 'concealed' | 'meta' | 'missing';
+export type QuoteVerdict = 'found' | 'illustrative' | 'concealed' | 'hidden' | 'meta' | 'missing';
 
 /**
- * Whether a quote is in the stored text of a page, after normalising whitespace on both sides. A
- * quote only in the title, meta tags or alt text is `meta`: not text the page shows. A quote only in
- * concealed text is `concealed`: styled so nobody sees it. A quote with a number that only appears
- * inside a product mockup is `illustrative`: it is sample data, not a claim.
+ * Whether a quote is in the visible text of a page, after normalising whitespace on both sides. A
+ * quote only in text the page hides (collapsed, closed, aria-hidden) is `hidden`. A quote only in
+ * the title, meta tags or alt text is `meta`: not text the page shows. A quote only in concealed
+ * text is `concealed`: styled so nobody sees it. A quote with a number that only appears inside a
+ * product mockup is `illustrative`: it is sample data, not a claim.
  */
 export function checkQuote(page: PageText, quote: string): QuoteVerdict {
   const needle = normaliseWhitespace(quote);
   if (!needle) return 'missing';
-  if (!page.has(READABLE, needle)) return page.has(['meta'], needle) ? 'meta' : 'missing';
+  if (!page.has(READABLE, needle)) {
+    if (/\d/.test(needle) && page.has(['illustrative'], needle)) return 'illustrative';
+    if (page.has(['concealed'], needle)) return 'concealed';
+    if (page.has(['hidden'], needle)) return 'hidden';
+    if (page.has(['meta'], needle)) return 'meta';
+    return 'missing';
+  }
   if (page.has(['concealed'], needle) && !page.has(['clean'], needle)) return 'concealed';
   if (/\d/.test(needle) && page.has(['illustrative'], needle) && !page.has(['clean'], needle)) {
     return 'illustrative';
@@ -187,6 +203,14 @@ function verifyClaims(output: ResearchOutput, pages: PageIndex): Failure[] {
         fix: `Quote the same statement from the page's visible text instead, or remove claim "${claim.id}". Meta tags are context, never a quote.`,
         claimId: claim.id,
       });
+    } else if (verdict === 'hidden') {
+      failures.push({
+        code: 'QUOTE_HIDDEN',
+        path: `${path}.quote`,
+        message: `The quote of claim "${claim.id}" is only in text ${claim.sourceUrl} does not show as it loads: a collapsed answer, a closed tab or details, or an aria-hidden element. A visitor does not see it.`,
+        fix: `Quote the same statement from the page's visible text, or remove claim "${claim.id}" and every reference to it.`,
+        claimId: claim.id,
+      });
     } else if (verdict === 'concealed') {
       failures.push({
         code: 'QUOTE_CONCEALED',
@@ -214,9 +238,14 @@ interface Cited {
   ids: string[];
 }
 
-/** Every brief item that cites claims, with the text whose numbers those claims must state. */
+/**
+ * Every factual brief field, with the claims it cites and the text whose numbers those claims
+ * must state. A plan is backed by its own claims and the pricing block's.
+ */
 function citedItems(brief: ResearchOutput['brief']): Cited[] {
   const items: Cited[] = [
+    { path: 'brief.one_liner', text: brief.one_liner.text, ids: brief.one_liner.claim_ids },
+    { path: 'brief.what_it_is', text: brief.what_it_is.text, ids: brief.what_it_is.claim_ids },
     ...brief.audiences.map((item, index) => ({
       path: `brief.audiences[${index}]`,
       text: item.who,
@@ -229,13 +258,21 @@ function citedItems(brief: ResearchOutput['brief']): Cited[] {
     })),
     ...brief.conflicts.map((item, index) => ({
       path: `brief.conflicts[${index}]`,
-      text: '',
+      text: item.description,
       ids: item.claim_ids,
     })),
   ];
+  if (brief.positioning_note) {
+    const note = brief.positioning_note;
+    items.push({ path: 'brief.positioning_note', text: note.text, ids: note.claim_ids });
+  }
   if (brief.pricing) {
     const { pricing } = brief;
     items.push({ path: 'brief.pricing', text: pricing.summary, ids: pricing.claim_ids });
+    if (pricing.free_trial) {
+      const trial = pricing.free_trial;
+      items.push({ path: 'brief.pricing.free_trial', text: trial.text, ids: trial.claim_ids });
+    }
     pricing.plans.forEach((plan, index) => {
       items.push({
         path: `brief.pricing.plans[${index}]`,
@@ -253,6 +290,7 @@ function citedItems(brief: ResearchOutput['brief']): Cited[] {
 function verifyBrief(output: ResearchOutput, pages: PageIndex): Failure[] {
   const failures: Failure[] = [];
   const quotes = new Map(output.claims.map((claim) => [claim.id, claim.quote]));
+  const brandName = output.brand.name;
 
   for (const item of citedItems(output.brief)) {
     for (const id of item.ids) {
@@ -265,16 +303,14 @@ function verifyBrief(output: ResearchOutput, pages: PageIndex): Failure[] {
         });
       }
     }
-    const stated = new Set(item.ids.flatMap((id) => numbersIn(quotes.get(id) ?? '')));
-    for (const number of numbersIn(item.text)) {
-      if (!stated.has(number)) {
-        failures.push({
-          code: 'NUMBER_UNBACKED',
-          path: item.path,
-          message: `${item.path} states "${number}", but no claim it cites quotes that number.`,
-          fix: `Cite a claim whose quote states "${number}" in ${item.path}, or remove the number.`,
-        });
-      }
+    const cited = item.ids.flatMap((id) => quotes.get(id) ?? []);
+    for (const token of unbackedNumbers(item.text, cited, { brandName })) {
+      failures.push({
+        code: 'NUMBER_UNBACKED',
+        path: item.path,
+        message: `${item.path} states "${token.raw}", but no claim it cites quotes that figure.`,
+        fix: `Cite a claim whose quote states "${token.raw}" in ${item.path}, or remove the figure. A figure only in hidden text, a mockup or another page cannot back it.`,
+      });
     }
   }
 
@@ -282,11 +318,11 @@ function verifyBrief(output: ResearchOutput, pages: PageIndex): Failure[] {
     const path = `brief.ctas[${index}]`;
     const page = pages.find(cta.source_url);
     const label = normaliseWhitespace(cta.label);
-    if (!page?.has(['rendered', 'dom'], label)) {
+    if (!page?.has(READABLE, label)) {
       failures.push({
         code: 'CTA_NOT_FOUND',
         path: `${path}.label`,
-        message: `The call to action "${cta.label}" is not in the stored text of ${cta.source_url}.`,
+        message: `The call to action "${cta.label}" is not in the visible text of ${cta.source_url}.`,
         fix: `Copy the exact label from a captured page into ${path}.label and set ${path}.source_url to that page, or remove the call to action.`,
       });
     }
