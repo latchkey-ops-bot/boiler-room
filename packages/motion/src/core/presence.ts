@@ -71,6 +71,11 @@ export const springAt = (
 export type SceneExit = 'hold' | 'text' | 'all';
 
 export interface SceneTiming {
+  /**
+   * The scene frame its own entry starts on: 0, or the frame an incoming transition gives the stage
+   * up. A scene of the library counts its spec frames from here.
+   */
+  entryAt: number;
   /** Frames, cards and anything else that holds content. */
   container: PresenceWindow;
   /** The words. They arrive after their container and leave before it. */
@@ -120,6 +125,7 @@ export function sceneTiming({
   // Far enough back that a spring started there has come to rest before the scene is first drawn.
   const settled = framesFor(duration.slower * 2, fps);
   return {
+    entryAt: enterAfter,
     container: {
       enterAt: arrivesWhole ? -durationInFrames - settled : enterAfter,
       enterFrames: containerEnter,

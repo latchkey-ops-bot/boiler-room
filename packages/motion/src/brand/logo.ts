@@ -26,7 +26,14 @@ export interface LogoProbe {
 
 export type ResolvedLogo =
   /** `plate` is set when the logo sits on an opaque box of one colour, which is drawn as a plate. */
-  | { kind: 'image'; src: string; aspect: number; plate?: string }
+  | {
+      kind: 'image';
+      src: string;
+      aspect: number;
+      plate?: string;
+      /** A raster logo's width in pixels, which it is never drawn above. An SVG has none. */
+      naturalWidth?: number;
+    }
   | { kind: 'wordmark'; reason: LogoRejection };
 
 export type LogoRejection =

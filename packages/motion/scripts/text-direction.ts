@@ -1,5 +1,5 @@
 /**
- * Proves that right-to-left copy reads in its own order. A kinetic headline in Hebrew and one in
+ * Proves that right-to-left copy reads in its own order. A word-slam headline in Hebrew and one in
  * Arabic, each a short word followed by two longer ones, is rendered once its words have landed,
  * and the headline's ink is split into words by the gaps between them. The first word written must
  * be the rightmost one on screen, and the longest the leftmost.
@@ -73,8 +73,8 @@ try {
     });
     if (!buffer) throw new Error('The still returned no image.');
     const png = PNG.sync.read(buffer);
-    // Below the corner mark: 9% safe inset, a mark of 5 units and a gap of 3, at 10.8 px a unit.
-    const top = Math.round(1080 * 0.09 + 10.8 * 8);
+    // Below the corner mark: a 5% safe inset, a mark of 5 units and a gap of 3, at 10.8 px a unit.
+    const top = Math.round(1080 * 0.05 + 10.8 * 8);
     const words = inkSegments(png, [0x0b, 0x10, 0x20], top, 24);
     const widths = words.map(({ from, to }) => to - from);
     const shown = words.map(({ from, to }) => `${from}-${to}`).join(', ');

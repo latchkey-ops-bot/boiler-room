@@ -7,9 +7,10 @@ const DRIFT_SPEED = 0.006;
 const DRIFT_RANGE = 16;
 
 /** The brand's background with a slow glow of its primary colour, seeded so it never repeats a look. */
-export const Backdrop = ({ seed }: { seed: string }) => {
+export const Backdrop = ({ seed, clock }: { seed: string; clock?: number }) => {
   const { colors } = useBrand();
-  const { frame } = useScene();
+  const scene = useScene();
+  const frame = clock ?? scene.frame;
   const x = 50 + noise2D(`${seed}-x`, frame * DRIFT_SPEED, 0) * DRIFT_RANGE;
   const y = 40 + noise2D(`${seed}-y`, 0, frame * DRIFT_SPEED) * DRIFT_RANGE;
   return (

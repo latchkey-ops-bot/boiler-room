@@ -1,14 +1,15 @@
-import { type Campaign, type Issue, validateCampaign } from '@boiler-room/schema';
+import { type Campaign, type Issue, sceneFrames } from '@boiler-room/schema';
 import { assetUrl } from '../brand/assets.ts';
 import { type FontProbe, type FontRole, fontUrl, probeFont } from '../brand/fonts.ts';
 import { resolveLogo } from '../brand/logo.ts';
 import { probeImage } from '../brand/probe.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
-import { definitionOf, sceneRegistry } from '../scenes/registry.ts';
+import { definitionOf } from '../scenes/registry.ts';
 import { type CutSelection, resolveCut } from './cut.ts';
-import { type ImageSize, screenImageId } from './media.ts';
-import { type FilmPlan, featureCount, planFilm } from './plan.ts';
+import { type ImageSize, screenImageIds } from './media.ts';
+import { type FilmPlan, planFilm } from './plan.ts';
 import { type FilmIssue, validateFilm } from './validate-film.ts';
+import { validateForRender } from './validate-render.ts';
 
 /** Thrown when a campaign may not be rendered. It lists every issue, with what to change. */
 export class FilmRejected extends Error {
@@ -82,42 +83,48 @@ function checkImageFit(
 ): FilmIssue[] {
   const { width: stageWidth, height: stageHeight } = FORMAT_SIZES[format];
   const stage = stageFor(stageWidth, stageHeight);
+  const { fps, scenes: frames } = sceneFrames(campaign);
   const issues = new Map<string, FilmIssue & { upscale: number }>();
-  for (const scene of campaign.scenes) {
-    const id = screenImageId(scene, campaign);
-    const size = id ? imageSizes[id] : undefined;
+  for (const [sceneIndex, scene] of campaign.scenes.entries()) {
     const definition = definitionOf(scene.type);
-    if (!id || !size || !definition?.imageView) continue;
-    const path = `assets.${id}.src`;
-    const aspect = size.width / size.height;
-    const dimensions = `${size.width}×${size.height}`;
-    if (aspect < MIN_ASPECT || aspect > MAX_ASPECT) {
+    if (!definition?.imageView) continue;
+    const durationInFrames = frames[sceneIndex]?.durationInFrames ?? 0;
+    for (const [index, id] of screenImageIds(scene, campaign).entries()) {
+      const size = imageSizes[id];
+      if (!size) continue;
+      const path = `assets.${id}.src`;
+      const aspect = size.width / size.height;
+      const dimensions = `${size.width}×${size.height}`;
+      if (aspect < MIN_ASPECT || aspect > MAX_ASPECT) {
+        issues.set(id, {
+          code: 'IMAGE_WRONG_SHAPE',
+          severity: 'error',
+          path,
+          message: `Image "${id}" is ${dimensions}, an aspect outside 1:3 to 4:1, so its browser frame would show it as a strip in which the product cannot be read.`,
+          fix: `Crop it to the part that matters, such as one screen of a full-page capture, and point ${path} at the cropped file.`,
+          upscale: Number.POSITIVE_INFINITY,
+        });
+        continue;
+      }
+      const view = definition.imageView({
+        props: definition.props.parse(scene.props),
+        stage,
+        image: { ...size, aspect },
+        index,
+        durationInFrames,
+        fps,
+      });
+      const upscale = (view.width * view.zoom) / size.width;
+      if (upscale <= MAX_UPSCALE || upscale <= (issues.get(id)?.upscale ?? 0)) continue;
       issues.set(id, {
-        code: 'IMAGE_WRONG_SHAPE',
+        code: 'IMAGE_TOO_SMALL',
         severity: 'error',
         path,
-        message: `Image "${id}" is ${dimensions}, an aspect outside 1:3 to 4:1, so its browser frame would show it as a strip in which the product cannot be read.`,
-        fix: `Crop it to the part that matters, such as one screen of a full-page capture, and point ${path} at the cropped file.`,
-        upscale: Number.POSITIVE_INFINITY,
+        message: `Image "${id}" is ${dimensions}, and a ${scene.type} scene draws it ${Math.round(view.width)} px wide, scaled up to ${view.zoom.toFixed(2)}× in ${format}, enlarging it ${upscale.toFixed(1)} times, so it would look blurred.`,
+        fix: `Supply a capture at least ${Math.ceil((view.width * view.zoom) / MAX_UPSCALE)} px wide at ${path}.`,
+        upscale,
       });
-      continue;
     }
-    const view = definition.imageView({
-      props: definition.props.parse(scene.props),
-      stage,
-      imageAspect: aspect,
-      featureCount: featureCount(scene),
-    });
-    const upscale = (view.width * view.zoom) / size.width;
-    if (upscale <= MAX_UPSCALE || upscale <= (issues.get(id)?.upscale ?? 0)) continue;
-    issues.set(id, {
-      code: 'IMAGE_TOO_SMALL',
-      severity: 'error',
-      path,
-      message: `Image "${id}" is ${dimensions}, and a ${scene.type} scene shows it ${Math.round(view.width)} px wide at up to ${view.zoom}× zoom in ${format}, enlarging it ${upscale.toFixed(1)} times, so it would look blurred.`,
-      fix: `Supply a capture at least ${Math.ceil((view.width * view.zoom) / MAX_UPSCALE)} px wide at ${path}, or lower the scene's zoom.`,
-      upscale,
-    });
   }
   return [...issues.values()].map(({ upscale: _upscale, ...issue }) => issue);
 }
@@ -130,7 +137,7 @@ export async function prepareFilm(
   { campaign: input, format, hookId, ctaId }: FilmRequest,
   probe: MediaProbe = browserProbe,
 ): Promise<FilmPlan> {
-  const written = await validateCampaign(input, { sceneRegistry });
+  const written = await validateForRender(input);
   if (!written.ok) throw new FilmRejected('validateCampaign', written.issues);
 
   const selection = { hookId, ctaId };
@@ -139,7 +146,7 @@ export async function prepareFilm(
     throw new FilmRejected('validateFilm', filmIssues);
   }
 
-  const cut = await validateCampaign(resolveCut(written.campaign, selection), { sceneRegistry });
+  const cut = await validateForRender(resolveCut(written.campaign, selection));
   if (!cut.ok) throw new FilmRejected('validateCampaign on the selected cut', cut.issues);
   const campaign = cut.campaign;
 
@@ -147,7 +154,7 @@ export async function prepareFilm(
   if (fontIssues.length > 0) throw new FilmRejected('loading the brand fonts', fontIssues);
 
   const imageIds = [
-    ...new Set(campaign.scenes.flatMap((scene) => screenImageId(scene, campaign) ?? [])),
+    ...new Set(campaign.scenes.flatMap((scene) => screenImageIds(scene, campaign))),
   ];
   const imageSizes: Record<string, ImageSize> = {};
   const unusable: FilmIssue[] = [];
@@ -188,11 +195,13 @@ export async function prepareFilm(
 
   const logoAsset = campaign.assets[campaign.brand.logoAssetId];
   const logoSrc = logoAsset?.src ?? '';
-  const logo = resolveLogo(
-    logoAsset ? await probe.image(assetUrl(logoSrc)) : { loaded: false },
-    logoSrc,
-    campaign.brand.colors.background,
-  );
+  const seenLogo = logoAsset ? await probe.image(assetUrl(logoSrc)) : { loaded: false };
+  const resolved = resolveLogo(seenLogo, logoSrc, campaign.brand.colors.background);
+  // A raster logo is never drawn above its own pixels. An SVG scales without limit.
+  const logo =
+    resolved.kind === 'image' && logoAsset?.kind === 'image' && seenLogo.width
+      ? { ...resolved, naturalWidth: seenLogo.width }
+      : resolved;
 
   return planFilm({ campaign, format, logo, imageSizes });
 }

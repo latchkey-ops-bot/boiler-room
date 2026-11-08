@@ -62,21 +62,15 @@
   "scenes": [
     {
       "id": "open",
-      "type": "kinetic-title",
+      "type": "word-slam",
       "start": 0,
       "end": 3.5,
-      "props": { "align": "left" },
+      "props": {},
       "text": [
         {
           "id": "open-headline",
           "role": "headline",
           "value": "Every draft, kept in one quiet room.",
-          "claimIds": []
-        },
-        {
-          "id": "open-subhead",
-          "role": "subhead",
-          "value": "A writing studio for people finishing long books.",
           "claimIds": []
         }
       ],
@@ -89,27 +83,15 @@
     },
     {
       "id": "revise",
-      "type": "interface-reveal",
+      "type": "site-hero",
       "start": 3.5,
       "end": 8.75,
-      "props": { "focus": { "x": 0.44, "y": 0.45 }, "zoom": 1.7 },
+      "props": { "focus": { "x": 720, "y": 360, "w": 1440, "h": 900 } },
       "text": [
         {
-          "id": "revise-label",
+          "id": "revise-address",
           "role": "label",
-          "value": "Revision history",
-          "claimIds": []
-        },
-        {
-          "id": "revise-headline",
-          "role": "headline",
-          "value": "Revise without losing a word",
-          "claimIds": []
-        },
-        {
-          "id": "revise-body",
-          "role": "body",
-          "value": "Every change is kept, so any passage can go back to how it read before.",
+          "value": "quillhaven.example.com/editor",
           "claimIds": []
         }
       ],
@@ -118,64 +100,36 @@
     },
     {
       "id": "features",
-      "type": "feature-sequence",
+      "type": "feature-card",
       "start": 8.75,
       "end": 14,
-      "props": {
-        "stops": [
-          { "x": 0.88, "y": 0.3, "zoom": 1.7 },
-          { "x": 0.1, "y": 0.25, "zoom": 1.7 },
-          { "x": 0.1, "y": 0.5, "zoom": 1.7 }
-        ]
-      },
+      "props": {},
       "text": [
         {
           "id": "features-headline",
           "role": "headline",
-          "value": "Built for the long haul",
+          "value": "Revise without losing a word",
           "claimIds": []
         },
-        {
-          "id": "features-notes",
-          "role": "body",
-          "value": "Notes from your editor sit beside the page.",
-          "claimIds": []
-        },
-        {
-          "id": "features-chapters",
-          "role": "body",
-          "value": "Chapters move with a drag, never a copy and paste.",
-          "claimIds": []
-        },
-        {
-          "id": "features-research",
-          "role": "body",
-          "value": "Research stays beside every chapter.",
-          "claimIds": []
-        }
+        { "id": "features-cause", "role": "label", "value": "Every change", "claimIds": [] },
+        { "id": "features-effect", "role": "label", "value": "Always kept", "claimIds": [] }
       ],
       "assetIds": ["editor-shot"]
     },
     {
       "id": "close",
-      "type": "cta",
+      "type": "end-card",
       "start": 14,
       "end": 18,
       "props": {},
       "text": [
+        { "id": "close-cta", "role": "cta", "value": "Start writing", "claimIds": [] },
         {
-          "id": "close-headline",
-          "role": "headline",
-          "value": "Finish the book.",
-          "claimIds": []
-        },
-        {
-          "id": "close-trial",
+          "id": "close-address",
           "role": "label",
-          "value": "Free for 30 days",
-          "claimIds": ["trial"]
-        },
-        { "id": "close-cta", "role": "cta", "value": "Start writing", "claimIds": [] }
+          "value": "quillhaven.example.com",
+          "claimIds": []
+        }
       ],
       "voiceover": {
         "text": "Try it free for 30 days.",
@@ -188,10 +142,10 @@
     "hooks": [
       {
         "id": "open-blank-page",
-        "type": "kinetic-title",
+        "type": "word-slam",
         "start": 0,
         "end": 3.5,
-        "props": { "align": "center" },
+        "props": {},
         "text": [
           {
             "id": "blank-page-headline",

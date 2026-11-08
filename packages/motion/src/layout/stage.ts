@@ -22,10 +22,14 @@ export interface Stage {
   safe: Rect;
 }
 
+/**
+ * The safe areas of `docs/motion/scenes/README.md`, as shares of the frame: 96 and 54 px at 16:9,
+ * 54 px at the sides with 192 above and 288 below at 9:16, and 54 px all round at 1:1.
+ */
 const SAFE_INSETS: Record<Orientation, { side: number; top: number; bottom: number }> = {
-  landscape: { side: 0.06, top: 0.09, bottom: 0.09 },
-  portrait: { side: 0.07, top: 0.1, bottom: 0.14 },
-  square: { side: 0.08, top: 0.08, bottom: 0.08 },
+  landscape: { side: 0.05, top: 0.05, bottom: 0.05 },
+  portrait: { side: 0.05, top: 0.1, bottom: 0.15 },
+  square: { side: 0.05, top: 0.05, bottom: 0.05 },
 };
 
 function orientationOf(width: number, height: number): Orientation {

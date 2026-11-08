@@ -7,17 +7,29 @@ export const SCREEN_PROVENANCES: ReadonlySet<Asset['provenance']> = new Set([
   'uploaded',
 ]);
 
-/** The image a scene shows: the first of its assets that is a captured or uploaded image. */
-export function screenImageId(
-  scene: Scene,
-  { assets }: Pick<Campaign, 'assets'>,
-): string | undefined {
-  if (definitionOf(scene.type)?.image === 'none') return undefined;
-  return scene.assetIds.find((id) => {
-    const asset = Object.hasOwn(assets, id) ? assets[id] : undefined;
-    return asset?.kind === 'image' && SCREEN_PROVENANCES.has(asset.provenance);
-  });
+const isScreen = (asset: Asset | undefined): boolean =>
+  asset?.kind === 'image' && SCREEN_PROVENANCES.has(asset.provenance);
+
+/**
+ * The images a scene shows, in the order of its `assetIds`: its captured or uploaded images, as
+ * many as its template draws with these props.
+ */
+export function screenImageIds(scene: Scene, { assets }: Pick<Campaign, 'assets'>): string[] {
+  const definition = definitionOf(scene.type);
+  if (!definition) return [];
+  const parsed = definition.props.safeParse(scene.props);
+  const shown =
+    parsed.success && definition.imagesShown
+      ? Math.min(definition.maxImages, definition.imagesShown(parsed.data))
+      : definition.maxImages;
+  return scene.assetIds
+    .filter((id) => isScreen(Object.hasOwn(assets, id) ? assets[id] : undefined))
+    .slice(0, shown);
 }
+
+/** The first image a scene shows, which is the one a carry moves. */
+export const screenImageId = (scene: Scene, campaign: Pick<Campaign, 'assets'>) =>
+  screenImageIds(scene, campaign)[0];
 
 export interface ImageSize {
   width: number;

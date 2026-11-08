@@ -9,16 +9,23 @@ export interface BrowserFrameProps {
   rect: Rect;
   src: string;
   pose: Pose;
+  /** The height of the bar across the top. 0 draws the image alone, with the frame's corners. */
+  chrome?: number;
+  /** Copy in the address bar, which comes from `scene.text`. Without it the bar is empty. */
+  address?: { text: string; opacity?: number } | undefined;
   /** Drawn over the frame and not clipped by it, such as a cursor. */
   overlay?: ReactNode;
   style?: CSSProperties;
 }
 
 /**
- * A browser window around an image. The address bar is a shape with no text in it: a URL would be
- * copy that does not come from `scene.text`. Its colours follow the brand, which is why this is
- * drawn here and not taken from a mockup package with a fixed palette.
+ * A browser window around an image, which fills the window and is cropped to it, centred. Its
+ * colours follow the brand, which is why this is drawn here and not taken from a mockup package
+ * with a fixed palette. The address bar shows copy only when the scene's text gives it some.
  */
+/** The address is set at half the bar's height: 22 px in a bar of 44, as `site-hero` gives it. */
+const ADDRESS_SHARE = 0.5;
+
 /** The rect with its edges on whole pixels. */
 const snap = ({ x, y, width, height }: Rect): Rect => {
   const left = Math.round(x);
@@ -31,12 +38,20 @@ const snap = ({ x, y, width, height }: Rect): Rect => {
   };
 };
 
-export const BrowserFrame = ({ rect: exact, src, pose, overlay, style }: BrowserFrameProps) => {
-  const { colors, radius } = useBrand();
+export const BrowserFrame = ({
+  rect: exact,
+  src,
+  pose,
+  chrome: chromeIn,
+  address,
+  overlay,
+  style,
+}: BrowserFrameProps) => {
+  const { colors, radius, fonts } = useBrand();
   // Whole pixels, because Chrome reuses a blurred shadow it drew at one sub-pixel offset for the
   // next, which made a moving frame's shadow differ by the frames rendered before it.
   const rect = snap(exact);
-  const chrome = chromeHeight(rect.width);
+  const chrome = Math.round(chromeIn ?? chromeHeight(rect.width));
   const dot = chrome * 0.26;
   return (
     <div
@@ -62,40 +77,64 @@ export const BrowserFrame = ({ rect: exact, src, pose, overlay, style }: Browser
           width: '100%',
         }}
       >
-        <div
-          style={{
-            alignItems: 'center',
-            background: colors.chrome,
-            display: 'flex',
-            gap: dot * 0.7,
-            height: chrome,
-            paddingLeft: chrome * 0.45,
-            position: 'relative',
-          }}
-        >
-          {[0, 1, 2].map((index) => (
-            <div
-              key={index}
-              style={{ background: colors.hairline, borderRadius: dot, height: dot, width: dot }}
-            />
-          ))}
+        {chrome > 0 ? (
           <div
             style={{
-              background: colors.surface,
-              borderRadius: chrome,
-              height: chrome * 0.52,
-              left: '30%',
-              position: 'absolute',
-              right: '30%',
+              alignItems: 'center',
+              background: colors.chrome,
+              display: 'flex',
+              gap: dot * 0.7,
+              height: chrome,
+              paddingLeft: chrome * 0.45,
+              position: 'relative',
             }}
-          />
-        </div>
+          >
+            {[0, 1, 2].map((index) => (
+              <div
+                key={index}
+                style={{ background: colors.hairline, borderRadius: dot, height: dot, width: dot }}
+              />
+            ))}
+            <div
+              style={{
+                alignItems: 'center',
+                background: colors.surface,
+                borderRadius: chrome,
+                display: 'flex',
+                height: chrome * 0.68,
+                justifyContent: 'center',
+                left: '28%',
+                overflow: 'hidden',
+                position: 'absolute',
+                right: '28%',
+              }}
+            >
+              {address ? (
+                <div
+                  style={{
+                    color: colors.muted,
+                    fontFamily: fonts.body,
+                    fontSize: chrome * ADDRESS_SHARE,
+                    lineHeight: 1,
+                    opacity: address.opacity ?? 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'pre',
+                  }}
+                >
+                  {address.text}
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         <div style={{ inset: `${chrome}px 0 0 0`, overflow: 'hidden', position: 'absolute' }}>
           <Img
             src={src}
             style={{
               display: 'block',
               height: '100%',
+              objectFit: 'cover',
               transform: poseTransform(pose),
               transformOrigin: '0 0',
               width: '100%',

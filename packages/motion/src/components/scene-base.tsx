@@ -22,10 +22,18 @@ export const cornerMark = (stage: Parameters<typeof markBox>[0]): MarkPlacement 
   align: 'start',
 });
 
-/** What every scene sits on. */
-export const SceneBase = ({ seed, children }: { seed: string; children: ReactNode }) => (
+/** What every scene sits on. `clock` stops the backdrop's drift, for a scene that holds still. */
+export const SceneBase = ({
+  seed,
+  clock,
+  children,
+}: {
+  seed: string;
+  clock?: number;
+  children?: ReactNode;
+}) => (
   <>
-    <Backdrop seed={seed} />
+    <Backdrop seed={seed} {...(clock === undefined ? {} : { clock })} />
     {children}
   </>
 );

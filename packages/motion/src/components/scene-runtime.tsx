@@ -5,6 +5,13 @@ import type { Stage } from '../layout/stage.ts';
 
 export type CarryElement = { kind: 'image'; assetId: string } | { kind: 'mark' };
 
+export interface RuntimeImage {
+  src: string;
+  aspect: number;
+  width: number;
+  height: number;
+}
+
 /** What a scene is told about itself each frame, on top of its campaign data. */
 export interface SceneRuntime {
   /** Frames from the scene's own start. Negative during a pre-roll, past its end during a post-roll. */
@@ -13,8 +20,10 @@ export interface SceneRuntime {
   durationInFrames: number;
   stage: Stage;
   timing: SceneTiming;
-  /** The image this scene shows, as a URL, with its aspect. */
-  image: { src: string; aspect: number } | undefined;
+  /** The images this scene shows, as URLs with their sizes, in the order of its `assetIds`. */
+  images: RuntimeImage[];
+  /** The first of them, which is the one a carry moves. */
+  image: RuntimeImage | undefined;
   /** What arrives from the scene before and what leaves for the scene after. */
   carriedIn: CarryElement['kind'] | undefined;
   carriedOut: CarryElement['kind'] | undefined;

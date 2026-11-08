@@ -12,6 +12,7 @@ import type { CutSelection } from './cut.ts';
 import { screenImageId } from './media.ts';
 
 export const FILM_ISSUE_CODES = [
+  'SCENE_TYPE_UNBUILT',
   'PROPS_INVALID',
   'TEXT_UNUSED',
   'TEXT_MISSING',
@@ -50,11 +51,41 @@ const scenesOf = (campaign: Campaign) => [
   ...campaign.variants.hooks.map((scene, index) => ({ scene, path: `variants.hooks[${index}]` })),
 ];
 
+const wordsIn = (value: string) => value.trim().split(/\s+/).filter(Boolean).length;
+
+/** `props.accent` names a text item of its own scene, and words that the item has. */
+function checkAccent(scene: Scene, path: string, accent: unknown): FilmIssue[] {
+  if (typeof accent !== 'object' || accent === null) return [];
+  const { textId, to } = accent as { textId: string; to: number };
+  const where = `${path}.props.accent`;
+  const item = scene.text.find(({ id }) => id === textId);
+  if (!item) {
+    return [
+      error(
+        'PROPS_INVALID',
+        `${where}.textId`,
+        `${where}.textId is "${textId}", which is not a text item of ${path}.`,
+        `Change ${where}.textId to the id of one of ${path}.text: ${scene.text.map(({ id }) => id).join(', ')}.`,
+      ),
+    ];
+  }
+  const count = wordsIn(item.value);
+  if (to <= count) return [];
+  return [
+    error(
+      'PROPS_INVALID',
+      `${where}.to`,
+      `${where}.to is ${to}, but "${item.value}" has ${count} words.`,
+      `Change ${where}.to to ${count} or less. Words are counted from 0, and the end is exclusive.`,
+    ),
+  ];
+}
+
 function checkProps(scene: Scene, path: string): FilmIssue[] {
   const definition = definitionOf(scene.type);
   if (!definition) return [];
   const parsed = definition.props.safeParse(scene.props);
-  if (parsed.success) return [];
+  if (parsed.success) return checkAccent(scene, path, (parsed.data as { accent?: unknown }).accent);
   return parsed.error.issues.map((zodIssue) => {
     const where = [`${path}.props`, ...zodIssue.path.map(String)].join('.');
     return error(
@@ -100,13 +131,22 @@ function checkRoles(scene: Scene, path: string): FilmIssue[] {
 }
 
 function checkImage(scene: Scene, path: string, campaign: Campaign): FilmIssue[] {
-  if (definitionOf(scene.type)?.image !== 'required') return [];
-  if (screenImageId(scene, campaign)) return [];
+  const definition = definitionOf(scene.type);
+  if (!definition) return [];
+  const parsed = definition.props.safeParse(scene.props);
+  const needed =
+    definition.image === 'required' ||
+    (parsed.success && definition.imageNeeded?.(parsed.data) === true);
+  if (!needed || screenImageId(scene, campaign)) return [];
+  const why =
+    definition.image === 'required'
+      ? `${scene.type} shows the product`
+      : `${scene.type} with these props shows a crop of the product`;
   return [
     error(
       'IMAGE_MISSING',
       `${path}.assetIds`,
-      `${scene.type} shows the product, but ${path} lists no captured or uploaded image.`,
+      `${why}, but ${path} lists no captured or uploaded image.`,
       `Add the id of an image asset with provenance "captured" or "uploaded" to ${path}.assetIds.`,
     ),
   ];
@@ -177,7 +217,7 @@ function checkSelection(campaign: Campaign, format: Format, selection: CutSelect
         'VARIANT_UNUSED',
         'scenes',
         `CTA "${ctaId}" was chosen, but no scene has text with role "cta" for its label to replace.`,
-        'Add a cta scene, or render without a CTA id.',
+        'Add an end-card scene with a cta text item, or render without a CTA id.',
       ),
     );
   }

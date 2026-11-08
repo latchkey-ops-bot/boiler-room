@@ -6,7 +6,7 @@ import { DEFAULT_TEXT_LIMITS, ISSUE_CODES, validateCampaign } from '../src/valid
 import { negativeFixtures, novaCopy } from './negative-fixtures.ts';
 
 const at = <T>(list: T[], index: number): T => list[index] as T;
-const registry = { 'kinetic-title': {}, 'interface-reveal': {}, 'feature-sequence': {}, cta: {} };
+const registry = { 'word-slam': {}, 'feature-card': {}, 'site-hero': {}, 'end-card': {} };
 const codes = async (campaign: Campaign) =>
   (await validateCampaign(campaign)).issues.map((issue) => issue.code);
 
@@ -160,7 +160,7 @@ describe('validateCampaign', () => {
       const { issues } = await validateCampaign(campaign, {
         sceneRegistry: registry,
       });
-      expect(issues[0]?.fix).toContain('kinetic-title, interface-reveal, feature-sequence, cta');
+      expect(issues[0]?.fix).toContain('word-slam, feature-card, site-hero, end-card');
     });
 
     it('reports why an asset check failed', async () => {
@@ -258,7 +258,7 @@ describe('validateCampaign', () => {
 
     it('checks the cited quote and ignores the other claims in the campaign', async () => {
       const campaign = novaCopy();
-      at(at(campaign.scenes, 2).text, 0).claimIds = ['deploy-rate'];
+      at(at(campaign.scenes, 1).text, 0).claimIds = ['deploy-rate'];
       expect(await codes(campaign)).toEqual(['CLAIM_UNBACKED']);
     });
 
@@ -336,8 +336,11 @@ describe('validateCampaign', () => {
 
       it('does not join a voiceover to the text', async () => {
         const campaign = novaCopy();
-        at(at(campaign.scenes, 0).text, 1).value = 'Ship it';
-        Object.assign(at(campaign.scenes, 0).voiceover as object, { text: 'percent faster' });
+        const effect = at(at(campaign.scenes, 1).text, 2);
+        effect.value = '1,200';
+        effect.claimIds = ['team-count'];
+        // Joined to the text, this voiceover would make the cited count read as 1,200%.
+        Object.assign(at(campaign.scenes, 1).voiceover as object, { text: 'percent faster' });
         expect(await codes(campaign)).toEqual([]);
       });
     });
@@ -509,7 +512,7 @@ describe('validateCampaign', () => {
       const campaign = novaCopy();
       at(at(campaign.scenes, 0).text, 0).value = 'x'.repeat(DEFAULT_TEXT_LIMITS.headline + 1);
       const { issues } = await validateCampaign(campaign, {
-        sceneRegistry: { ...registry, 'kinetic-title': { text: { headline: 200 } } },
+        sceneRegistry: { ...registry, 'word-slam': { text: { headline: 200 } } },
       });
       expect(issues).toEqual([]);
     });

@@ -1,7 +1,6 @@
-import { validateCampaign } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
 import { resolveCut } from '../src/film/cut.ts';
-import { sceneRegistry } from '../src/scenes/registry.ts';
+import { validateForRender } from '../src/film/validate-render.ts';
 import { at, novaCopy, quillhavenCopy } from './fixtures.ts';
 
 describe('resolveCut', () => {
@@ -13,7 +12,7 @@ describe('resolveCut', () => {
     expect(cut.scenes.slice(1)).toEqual(campaign.scenes.slice(1));
   });
 
-  it('puts the chosen CTA label in every cta text item, citing nothing', () => {
+  it('puts the chosen CTA label in the end card, citing nothing', () => {
     const cut = resolveCut(novaCopy(), { ctaId: 'book-demo' });
     const cta = at(cut.scenes, 3).text.find(({ role }) => role === 'cta');
     expect(cta).toMatchObject({ value: 'Book a demo', claimIds: [] });
@@ -22,7 +21,7 @@ describe('resolveCut', () => {
   it('removes the hooks, so the cut validates as it stands', async () => {
     const cut = resolveCut(quillhavenCopy(), { hookId: 'open-blank-page', ctaId: 'see-pricing' });
     expect(cut.variants.hooks).toEqual([]);
-    expect((await validateCampaign(cut, { sceneRegistry })).ok).toBe(true);
+    expect((await validateForRender(cut)).ok).toBe(true);
   });
 
   it('changes nothing it was not asked to', () => {

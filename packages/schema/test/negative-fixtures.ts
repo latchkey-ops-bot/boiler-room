@@ -20,11 +20,12 @@ export interface NegativeFixture {
 const at = <T>(list: T[], index: number): T => list[index] as T;
 
 const longText = 'x'.repeat(61);
+/** Nova's scene types with no limits of their own, so a fixture sees only the rule it is about. */
 const registry = {
-  'kinetic-title': {},
-  'interface-reveal': {},
-  'feature-sequence': {},
-  cta: {},
+  'word-slam': {},
+  'feature-card': {},
+  'site-hero': {},
+  'end-card': {},
 };
 
 export const novaCopy = () => structuredClone(nova) as Campaign;
@@ -102,9 +103,9 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a duplicate text id within a scene',
     code: 'SCHEMA_INVALID',
-    path: 'scenes[0].text[1].id',
+    path: 'scenes[1].text[1].id',
     build: (c) => {
-      at(at(c.scenes, 0).text, 1).id = at(at(c.scenes, 0).text, 0).id;
+      at(at(c.scenes, 1).text, 1).id = at(at(c.scenes, 1).text, 0).id;
     },
   },
   {
@@ -475,9 +476,11 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a number that is only a substring of the quoted number',
     code: 'CLAIM_UNBACKED',
-    path: 'scenes[2].text[0].value',
+    path: 'scenes[1].text[0].value',
     build: (c) => {
-      at(at(c.scenes, 2).text, 0).value = '200 teams';
+      const headline = at(at(c.scenes, 1).text, 0);
+      headline.value = '200 teams';
+      headline.claimIds = ['team-count'];
     },
   },
   {
@@ -520,9 +523,9 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a number in a scene CTA',
     code: 'CLAIM_UNBACKED',
-    path: 'scenes[3].text[2].value',
+    path: 'scenes[3].text[0].value',
     build: (c) => {
-      at(at(c.scenes, 3).text, 2).value = 'Try it for 30 days';
+      at(at(c.scenes, 3).text, 0).value = 'Try it for 30 days';
     },
   },
   {
@@ -1033,7 +1036,7 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a headline over a limit the registry lowers',
     code: 'TEXT_TOO_LONG',
     path: 'scenes[0].text[0].value',
-    options: { sceneRegistry: { ...registry, 'kinetic-title': { text: { headline: 10 } } } },
+    options: { sceneRegistry: { ...registry, 'word-slam': { text: { headline: 10 } } } },
     build: () => undefined,
   },
   {

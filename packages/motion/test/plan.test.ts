@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { planFilm } from '../src/film/plan.ts';
 import { FilmRejected, prepareFilm } from '../src/film/prepare.ts';
-import { featurePose, featureSteps } from '../src/scenes/feature-sequence.tsx';
-import { interfacePose } from '../src/scenes/interface-reveal.tsx';
+import { stageFor } from '../src/layout/stage.ts';
+import { sceneImplementations } from '../src/scenes/registry.ts';
 import { at, exampleProbe, novaCopy, quillhavenCopy } from './fixtures.ts';
 
 const novaPlan = () =>
@@ -38,15 +38,29 @@ describe('planFilm', () => {
     const carry = at(plan.carries, 0);
     const before = at(plan.scenes, carry.outgoing);
     const after = at(plan.scenes, carry.incoming);
-    const campaign = plan.campaign;
-    const handOff = carry.window.from - before.span.from;
-    const takeBack = carry.window.to - after.span.from;
-    expect(carry.image?.from.pose).toEqual(
-      interfacePose(handOff, before.span.durationInFrames, at(campaign.scenes, 1).props),
-    );
-    expect(carry.image?.to.pose).toEqual(
-      featurePose(takeBack, featureSteps(1, after.timing), at(campaign.scenes, 2).props),
-    );
+    const { campaign } = plan;
+    const stage = stageFor(plan.width, plan.height);
+    const image = { width: 2880, height: 1800, aspect: 1.6 };
+    const anchor = (index: number, frame: number, scenePlan: typeof before) => {
+      const scene = at(campaign.scenes, index);
+      const definition = sceneImplementations[scene.type];
+      return definition?.imageAnchor?.({
+        props: definition.props.parse(scene.props),
+        stage,
+        image,
+        durationInFrames: scenePlan.span.durationInFrames,
+        fps: plan.fps,
+        timing: scenePlan.timing,
+        frame,
+        text: scene.text,
+      });
+    };
+    // From the cause node of the feature card to the site hero's browser frame and its address.
+    expect(carry.image?.from).toEqual(anchor(1, carry.window.from - before.span.from, before));
+    expect(carry.image?.to).toEqual(anchor(2, carry.window.to - after.span.from, after));
+    expect(carry.image?.from.chrome).toBe(0);
+    expect(carry.image?.to).toMatchObject({ address: 'nova.example.com/product' });
+    expect(carry.image?.to.chrome).toBeGreaterThan(0);
   });
 
   it('times each scene for the transitions on either side of it', () => {
@@ -59,6 +73,8 @@ describe('planFilm', () => {
     const pushEnds = (speed?.span.in?.to ?? 0) - (speed?.span.from ?? 0);
     expect(pushEnds).toBeGreaterThan(0);
     expect(speed?.timing.text.enterAt).toBeGreaterThan(pushEnds);
+    // Its own entry starts once the push has finished.
+    expect(speed?.timing.entryAt).toBe(pushEnds);
     // Words leave before a carry starts.
     const out = adoption?.span.out;
     const clearBy = (out?.from ?? 0) - (adoption?.span.from ?? 0);
@@ -90,6 +106,35 @@ describe('prepareFilm', () => {
     const rejection = prepareFilm({ campaign, format: '16:9' }, exampleProbe());
     await expect(rejection).rejects.toThrow(FilmRejected);
     await expect(rejection).rejects.toThrow(/CLAIM_UNBACKED at scenes\[1\]\.text\[0\]\.value/);
+  });
+
+  it('refuses a scene type that has no template yet, by name', async () => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 1).type = 'stat-counter';
+    const rejection = prepareFilm({ campaign, format: '16:9' }, exampleProbe());
+    await expect(rejection).rejects.toThrow(
+      /SCENE_TYPE_UNBUILT at scenes\[1\]\.type: Scene type "stat-counter" is in the scene library, but motion has no template for it yet/,
+    );
+  });
+
+  it('shows a raster logo no larger than its own pixels', async () => {
+    const campaign = novaCopy();
+    const logo = campaign.assets.logo;
+    if (logo) Object.assign(logo, { kind: 'image', src: 'assets/nova/logo.png' });
+    const plan = await prepareFilm(
+      { campaign, format: '16:9' },
+      exampleProbe({
+        'logo.png': {
+          loaded: true,
+          width: 373,
+          height: 112,
+          animated: false,
+          coverage: 0.4,
+          palette: [{ color: '#7799FF', share: 1 }],
+        },
+      }),
+    );
+    expect(plan.logo).toMatchObject({ kind: 'image', naturalWidth: 373 });
   });
 
   it('refuses a cut whose selection does not exist', async () => {
@@ -180,15 +225,26 @@ describe('prepareFilm', () => {
     await expect(rejection).rejects.toThrow(/IMAGE_WRONG_SHAPE at assets\.dashboard-shot\.src/);
   });
 
-  it.each([
-    ['a laptop capture', 1280, 800],
-    ['a phone screenshot', 1170, 2532],
-  ])('takes %s in every format', async (_kind, width, height) => {
+  it('takes a laptop capture at device scale 2 in every format', async () => {
     for (const format of ['16:9', '9:16', '1:1'] as const) {
       await expect(
-        prepareFilm({ campaign: novaCopy(), format }, withShot(width, height)),
+        prepareFilm({ campaign: novaCopy(), format }, withShot(2560, 1600)),
       ).resolves.toMatchObject({ format });
     }
+  });
+
+  it('refuses a capture at device scale 1, which a 9:16 site hero shows as a column', async () => {
+    const rejection = prepareFilm({ campaign: novaCopy(), format: '9:16' }, withShot(1280, 800));
+    await expect(rejection).rejects.toThrow(/IMAGE_TOO_SMALL at assets\.dashboard-shot\.src/);
+  });
+
+  it('takes a phone screenshot in 9:16, and refuses it across a 16:9 frame', async () => {
+    await expect(
+      prepareFilm({ campaign: novaCopy(), format: '9:16' }, withShot(1170, 2532)),
+    ).resolves.toMatchObject({ format: '9:16' });
+    await expect(
+      prepareFilm({ campaign: novaCopy(), format: '16:9' }, withShot(1170, 2532)),
+    ).rejects.toThrow(/IMAGE_TOO_SMALL/);
   });
 
   it('sets the name as a wordmark when the logo animates', async () => {

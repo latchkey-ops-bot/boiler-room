@@ -14,9 +14,55 @@ describe('validateFilm', () => {
 
   it('rejects props a template does not accept', () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 1).props = { zoom: 9 };
+    at(campaign.scenes, 1).props = { demo: 'video' };
     expect(validateFilm(campaign, '16:9')).toEqual([
-      expect.objectContaining({ code: 'PROPS_INVALID', path: 'scenes[1].props.zoom' }),
+      expect.objectContaining({ code: 'PROPS_INVALID', path: 'scenes[1].props.demo' }),
+    ]);
+  });
+
+  it.each([
+    ['frame', 'plane', /Plane mode tilts the page in 3D/],
+    ['layers', [], /does not draw layers yet/],
+    ['activeLayer', 0, /does not light a layer yet/],
+  ])('rejects the site-hero prop %s, which is not built, saying so', (key, value, message) => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 2).props = { [key]: value };
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({
+        code: 'PROPS_INVALID',
+        path: `scenes[2].props.${key}`,
+        message: expect.stringMatching(message),
+      }),
+    ]);
+  });
+
+  it('takes a site-hero focus box in capture pixels', () => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 2).props = { frame: 'browser', focus: { x: 0, y: 0, w: 1440, h: 900 } };
+    expect(validateFilm(campaign, '16:9')).toEqual([]);
+    at(campaign.scenes, 2).props = { focus: { x: 0.2, y: 0.3 } };
+    expect(codes(validateFilm(campaign, '16:9'))).toEqual(['PROPS_INVALID', 'PROPS_INVALID']);
+  });
+
+  it.each([
+    [{ textId: 'nope', from: 0, to: 1 }, 'scenes[1].props.accent.textId'],
+    [{ textId: 'speed-headline', from: 0, to: 4 }, 'scenes[1].props.accent.to'],
+    [{ textId: 'speed-headline', from: 2, to: 1 }, 'scenes[1].props.accent.to'],
+  ])('rejects an accent that names no words of the scene: %o', (accent, path) => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 1).props = { accent };
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({ code: 'PROPS_INVALID', path }),
+    ]);
+  });
+
+  it('rejects a feature card set to show a crop it has no image for', () => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 1).assetIds = [];
+    expect(validateFilm(campaign, '16:9')).toEqual([]);
+    at(campaign.scenes, 1).props = { demo: 'crop' };
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({ code: 'IMAGE_MISSING', path: 'scenes[1].assetIds' }),
     ]);
   });
 
@@ -38,11 +84,11 @@ describe('validateFilm', () => {
     expect(codes(validateFilm(campaign, '16:9'))).toEqual(['TEXT_MISSING']);
   });
 
-  it('rejects an interface scene with no captured or uploaded image', () => {
+  it('rejects a site hero with no captured or uploaded image', () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 1).assetIds = ['logo'];
+    at(campaign.scenes, 2).assetIds = ['logo'];
     expect(validateFilm(campaign, '16:9')).toEqual([
-      expect.objectContaining({ code: 'IMAGE_MISSING', path: 'scenes[1].assetIds' }),
+      expect.objectContaining({ code: 'IMAGE_MISSING', path: 'scenes[2].assetIds' }),
     ]);
   });
 
@@ -79,9 +125,9 @@ describe('validateFilm', () => {
 
   it('checks hooks too, since any of them may open the film', () => {
     const campaign = novaCopy();
-    at(campaign.variants.hooks, 0).props = { align: 'justify' };
+    at(campaign.variants.hooks, 0).props = { accent: 'loud' };
     expect(validateFilm(campaign, '16:9')).toEqual([
-      expect.objectContaining({ code: 'PROPS_INVALID', path: 'variants.hooks[0].props.align' }),
+      expect.objectContaining({ code: 'PROPS_INVALID', path: 'variants.hooks[0].props.accent' }),
     ]);
   });
 });

@@ -97,7 +97,10 @@ const SceneHost = ({
   const definition = definitionOf(scene.type);
   if (!definition) throw new Error(`Scene type "${scene.type}" is not registered.`);
   const props = useMemo(() => definition.props.parse(scene.props), [definition, scene.props]);
-  const asset = plan.image ? film.campaign.assets[plan.image.assetId] : undefined;
+  const images = plan.images.flatMap(({ assetId, width, height }) => {
+    const asset = film.campaign.assets[assetId];
+    return asset ? [{ src: assetUrl(asset.src), width, height, aspect: width / height }] : [];
+  });
   const { in: incoming, out: outgoing } = plan.span;
 
   const overlayHides = (element: CarryElement['kind']) =>
@@ -114,10 +117,8 @@ const SceneHost = ({
           durationInFrames: plan.span.durationInFrames,
           stage,
           timing: plan.timing,
-          image:
-            plan.image && asset
-              ? { src: assetUrl(asset.src), aspect: plan.image.aspect }
-              : undefined,
+          images,
+          image: images[0],
           carriedIn: plan.carriedIn?.kind,
           carriedOut: plan.carriedOut?.kind,
           overlayHides,

@@ -92,34 +92,28 @@
   "scenes": [
     {
       "id": "open",
-      "type": "kinetic-title",
+      "type": "word-slam",
       "start": 0,
       "end": 4,
-      "props": { "align": "center" },
+      "props": {},
       "text": [
         {
           "id": "open-headline",
           "role": "headline",
           "value": "Your builds are waiting.",
           "claimIds": []
-        },
-        {
-          "id": "open-subhead",
-          "role": "subhead",
-          "value": "Nova gets them moving.",
-          "claimIds": []
         }
       ],
       "voiceover": { "text": "Your builds are waiting. Nova gets them moving.", "claimIds": [] },
-      "assetIds": ["logo"],
+      "assetIds": [],
       "transitionOut": "push"
     },
     {
       "id": "speed",
-      "type": "interface-reveal",
+      "type": "feature-card",
       "start": 4,
       "end": 9,
-      "props": { "focus": { "x": 0.8, "y": 0.4 }, "zoom": 1.6 },
+      "props": { "accent": { "textId": "speed-headline", "from": 0, "to": 1 } },
       "text": [
         {
           "id": "speed-headline",
@@ -127,12 +121,8 @@
           "value": "40% faster builds",
           "claimIds": ["build-times"]
         },
-        {
-          "id": "speed-label",
-          "role": "label",
-          "value": "in the first month",
-          "claimIds": ["build-times"]
-        }
+        { "id": "speed-cause", "role": "label", "value": "Every commit", "claimIds": [] },
+        { "id": "speed-effect", "role": "label", "value": "Built sooner", "claimIds": [] }
       ],
       "voiceover": {
         "text": "Teams on Nova cut build times by 40% in their first month.",
@@ -143,22 +133,16 @@
     },
     {
       "id": "adoption",
-      "type": "feature-sequence",
+      "type": "site-hero",
       "start": 9,
       "end": 14,
-      "props": { "stops": [{ "x": 0.4, "y": 0.3, "zoom": 1.5 }] },
+      "props": {},
       "text": [
         {
-          "id": "adoption-headline",
-          "role": "headline",
-          "value": "1,200 teams",
-          "claimIds": ["team-count"]
-        },
-        {
-          "id": "adoption-body",
-          "role": "body",
-          "value": "Deploying 3x more often.",
-          "claimIds": ["deploy-rate"]
+          "id": "adoption-address",
+          "role": "label",
+          "value": "nova.example.com/product",
+          "claimIds": []
         }
       ],
       "voiceover": {
@@ -170,19 +154,13 @@
     },
     {
       "id": "close",
-      "type": "cta",
+      "type": "end-card",
       "start": 14,
       "end": 20,
       "props": {},
       "text": [
-        { "id": "close-headline", "role": "headline", "value": "Ship with Nova.", "claimIds": [] },
-        {
-          "id": "close-price",
-          "role": "label",
-          "value": "From $29 per seat",
-          "claimIds": ["pricing"]
-        },
-        { "id": "close-cta", "role": "cta", "value": "Start free", "claimIds": [] }
+        { "id": "close-cta", "role": "cta", "value": "Start free", "claimIds": [] },
+        { "id": "close-address", "role": "label", "value": "nova.example.com", "claimIds": [] }
       ],
       "voiceover": {
         "text": "Plans start at $29 per seat. Start free today.",
@@ -200,10 +178,10 @@
     "hooks": [
       {
         "id": "open-question",
-        "type": "kinetic-title",
+        "type": "word-slam",
         "start": 0,
         "end": 4,
-        "props": { "align": "left" },
+        "props": {},
         "text": [
           {
             "id": "question-headline",
@@ -213,7 +191,7 @@
           }
         ],
         "voiceover": { "text": "Still waiting on CI?", "claimIds": [] },
-        "assetIds": ["logo"]
+        "assetIds": []
       }
     ],
     "formats": ["16:9", "9:16", "1:1"],

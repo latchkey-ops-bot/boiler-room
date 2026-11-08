@@ -3,7 +3,7 @@ import { assetUrl } from '../brand/assets.ts';
 import { BrandMark, type MarkPlacement, useMarkRect } from '../components/brand-mark.tsx';
 import { BrowserFrame } from '../components/browser-frame.tsx';
 import { lerpPose } from '../core/camera.ts';
-import { bezier } from '../core/time.ts';
+import { bezier, lerp } from '../core/time.ts';
 import type { CarryPlan } from '../film/plan.ts';
 import { lerpRect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
@@ -16,14 +16,27 @@ const curve = bezier(easing.expressive);
 export const carryProgress = (frame: number, carry: Pick<CarryPlan, 'window'>): number =>
   curve(windowProgress(frame, carry.window));
 
+/**
+ * The image moves and resizes between where the two scenes hold it, and its browser bar grows or
+ * shrinks with it. An address in the bar that the other end does not share fades out, or in.
+ */
 const CarriedImage = ({ carry, src, t }: { carry: CarryPlan; src: string; t: number }) => {
   if (!carry.image) return null;
   const { from, to } = carry.image;
+  const same = from.address === to.address;
+  const address =
+    from.address && (same || t < 0.5)
+      ? { text: from.address, opacity: same ? 1 : 1 - t * 2 }
+      : to.address && t >= 0.5
+        ? { text: to.address, opacity: t * 2 - 1 }
+        : undefined;
   return (
     <BrowserFrame
       rect={lerpRect(from.rect, to.rect, t)}
       src={src}
       pose={lerpPose(from.pose, to.pose, t)}
+      chrome={lerp(from.chrome, to.chrome, t)}
+      address={address}
     />
   );
 };

@@ -1,8 +1,14 @@
 /**
- * PROVISIONAL. Every value in this file is a first pass, and a reference-driven motion spec will
- * tune them. Change motion here, not in a template, so that the spec has one file to replace.
+ * PROVISIONAL, for the transitions and the scene clocks around them: `duration`, `easing`,
+ * `spring`, `stagger`, `transition` and `travel` are a first pass that `docs/motion/transitions.md`
+ * will replace. Change motion here, not in a template, so that the spec has one file to replace.
  *
- * Times are seconds, because a campaign sets its own fps. Convert them with `framesFor`.
+ * The scene values below them are not provisional. They are the measured values of
+ * `docs/motion/reference-spec.md` and the scene files in `docs/motion/scenes`, in pixels at a short
+ * side of 1080 and in frames at 30 fps, as the spec writes them. `core/curves.ts` has the curves.
+ *
+ * Times in the provisional tokens are seconds, because a campaign sets its own fps. Convert them
+ * with `framesFor`.
  *
  * The easing curves are the values of IBM Carbon's motion tokens (`@carbon/motion`, Apache-2.0).
  * The duration scale follows Carbon's names, stretched for film, where a move has to be seen rather
@@ -34,10 +40,6 @@ export const easing = {
 export const spring = {
   /** A container coming to rest, with no overshoot to read as bounce. */
   settle: { damping: 26, mass: 1, stiffness: 120 },
-  /** A word landing. */
-  word: { damping: 22, mass: 0.7, stiffness: 170 },
-  /** A pressed button, which is allowed a little overshoot. */
-  press: { damping: 12, mass: 0.5, stiffness: 240 },
 } as const;
 
 /** Seconds between neighbours. `maxSpread` caps a whole run, so long copy cannot overrun a scene. */
@@ -59,27 +61,135 @@ export const travel = {
   container: 7,
 } as const;
 
-/** Beats of the scenes, as fractions of the scene. */
-export const beat = {
-  cursorIn: 0.14,
-  cursorArrives: 0.42,
-  cameraSettled: 0.82,
-  ctaCursorIn: 0.3,
-  ctaPress: 0.56,
-} as const;
-
-/** How a browser frame opens, and how far the camera zooms by default. */
-export const camera = {
-  startScale: 0.93,
-  defaultZoom: 1.4,
-} as const;
-
-/** Typography rules. Sizes are in stage units, where one unit is 1% of the short side. */
+/** Typography rules. */
 export const type = {
   weight: { display: 700, strong: 600, body: 400 },
   lineHeight: { display: 1.06, body: 1.32, label: 1.2 },
   tracking: { display: '-0.022em', label: '0.08em' },
 } as const;
 
-/** Used only when a brand leaves `radius` out. */
-export const fallbackRadius = 10;
+/** Used only when a brand leaves `radius` out, as the scene files give it. */
+export const fallbackRadius = 16;
+
+/**
+ * Type of the scene library, from cap height, never from font size: `capS` is the cap height of a
+ * sentence, 7.2% of the short side, and `capD` of a display word, 2.7 times that. A line of copy
+ * is at most `lineBox` of the frame's width. [M] at 16:9; the other formats are [N].
+ */
+export const specType = {
+  capS: 78,
+  capD: 211,
+  lineHeight: 1.1,
+  tracking: '-0.01em',
+  lineBox: { landscape: 0.65, portrait: 0.86, square: 0.8 },
+} as const;
+
+/** `arriveN` constants: `k` is the travel left after each frame, and `D` the frame it settles. */
+export const arrival = {
+  slam: { k: 0.3, D: 6 },
+  snap: { k: 0.5, D: 8 },
+  fast: { k: 0.72, D: 14 },
+  slow: { k: 0.82, D: 23 },
+  long: { k: 0.88, D: 35 },
+} as const;
+
+/** Word rises: `rise` px below rest on the first frame, closing by `k` a frame, 1 frame apart. */
+export const rise = {
+  long: { rise: 72, k: 0.75 },
+  short: { rise: 26, k: 0.5 },
+} as const;
+
+/** Slow motion while a scene holds: type scales about the frame centre, a captured page pushes. */
+export const drift = {
+  type: 0.0013,
+  push: 0.0015,
+  /** px a frame that the nodes of a feature card move sideways. */
+  node: 0.3,
+} as const;
+
+/** `word-slam`: the slam, the collapse to sentence size, and the sentence building around it. */
+export const slam = {
+  /** Scale over rest on frame 0, then `excess * decay ** (f - 1)`. */
+  firstExcess: 4.4,
+  excess: 1.5,
+  decay: 0.7,
+  /** The collapse starts from the scale of this frame. */
+  collapseFrom: 9,
+  collapseFrames: 13,
+  collapseCurve: [0.94, 0.12, 0.34, 0.82],
+  /** The second word pops in on this frame, and each word after it this many frames later. */
+  appendAt: 23,
+  appendStagger: 3,
+  /** Each line re-centres on this arrival as words join it. */
+  recentre: { k: 0.72, D: 14 },
+  /** A second line pushes the first up on `arrive` with this `k`. */
+  push: 0.4,
+  /** The display word may fill this share of the frame's width. */
+  displayWidth: 0.8,
+  /** Blurred by this share of its cap height while its scale changes by more than the gate. */
+  blurShare: 0.08,
+  blurGate: 0.18,
+} as const;
+
+/** `site-hero`. */
+export const hero = {
+  /** Frame width and top edge, as shares of the frame. */
+  frame: {
+    landscape: { width: 0.78, top: 0.14 },
+    portrait: { width: 0.92, top: 0.18 },
+    square: { width: 0.86, top: 0.12 },
+  },
+  /** The browser bar's height. The address in it is set at half that, 22 px. */
+  chrome: 44,
+  /** The page rises this far into place on `arrival.slow`. */
+  entryTravel: 200,
+  /** With no focus box, the push centres on the top share of the crop. */
+  defaultFocusTop: 0.4,
+} as const;
+
+/** `feature-card`. */
+export const card = {
+  /** Cap top of the headline slot, as a share of the height. */
+  headlineTop: { landscape: 0.16, portrait: 0.14, square: 0.14 },
+  /** The demo panel: width and height as shares of the frame, centred at `centreY` of the height. */
+  panel: {
+    landscape: { width: 0.56, height: 0.5, centreY: 0.62 },
+    portrait: { width: 0.86, height: 0.46, centreY: 0.56 },
+    square: { width: 0.8, height: 0.52, centreY: 0.62 },
+  },
+  panelTravel: 40,
+  /** Node labels, as a share of the sentence cap height. */
+  labelCap: 0.6,
+  /** The frames the demo plays on, from the scene's first frame. */
+  beats: {
+    panel: 6,
+    causeLight: 14,
+    lightFrames: 12,
+    connector: 20,
+    effect: 26,
+    causeLabel: 14,
+    effectLabel: 30,
+  },
+} as const;
+
+/** `end-card`: the lockup of logo, CTA and URL. */
+export const lockup = {
+  /** The logo box, and the baselines of the CTA and the URL, as shares of the frame. */
+  layout: {
+    landscape: { logo: { width: 0.36, height: 0.2, centreY: 0.4 }, cta: 0.66, url: 0.76 },
+    portrait: { logo: { width: 0.7, height: 0.12, centreY: 0.4 }, cta: 0.58, url: 0.65 },
+    square: { logo: { width: 0.6, height: 0.2, centreY: 0.38 }, cta: 0.64, url: 0.75 },
+  },
+  logoTravel: 200,
+  /** The URL's cap height, as a share of the sentence cap height. */
+  urlCap: 0.5,
+  ctaAt: 4,
+  urlAt: 6,
+  /** Letters of a decoding URL start this many code points on, within their case. */
+  decodeShift: 3,
+  /** A typed URL shows this many characters every `typeFrames` frames. */
+  typeChars: 18,
+  typeFrames: 40,
+  /** Nothing moves for this many frames at the end of the film. */
+  hold: 69,
+} as const;

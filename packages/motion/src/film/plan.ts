@@ -6,13 +6,20 @@ import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
 import type { ImageAnchor } from '../scenes/definition.ts';
 import { definitionOf } from '../scenes/registry.ts';
 import { buildTimeline, type SceneSpan, type TransitionWindow } from '../transitions/timeline.ts';
-import { type ImageSize, screenImageId } from './media.ts';
+import { type ImageSize, screenImageIds } from './media.ts';
+
+export interface PlannedImage {
+  assetId: string;
+  width: number;
+  height: number;
+}
 
 export interface ScenePlan {
   index: number;
   span: SceneSpan;
   timing: SceneTiming;
-  image: { assetId: string; aspect: number } | undefined;
+  /** The images the scene shows, in the order of its `assetIds`. A carry moves the first. */
+  images: PlannedImage[];
   carriedIn: CarryElement | undefined;
   carriedOut: CarryElement | undefined;
 }
@@ -51,47 +58,41 @@ export interface PlanInputs {
   imageSizes: Record<string, ImageSize>;
 }
 
-function exitOf(span: SceneSpan, isLast: boolean): SceneExit {
-  if (span.out?.name === 'push') return 'hold';
-  if (span.out?.name === 'carry') return 'text';
-  return isLast ? 'hold' : 'all';
+/**
+ * A push moves the scene, a carry clears the words for the element it moves, and a cut or the end
+ * of the film keeps everything to the last frame, as a dead-stop cut does.
+ */
+function exitOf(span: SceneSpan): SceneExit {
+  return span.out?.name === 'carry' ? 'text' : 'hold';
 }
 
-function imageOf(scene: Scene, campaign: Campaign, sizes: Record<string, ImageSize>) {
-  const assetId = screenImageId(scene, campaign);
-  if (!assetId) return undefined;
-  const size = sizes[assetId];
-  if (!size) throw new Error(`The size of image "${assetId}" was not measured.`);
-  return { assetId, aspect: size.width / size.height };
+function imagesOf(scene: Scene, campaign: Campaign, sizes: Record<string, ImageSize>) {
+  return screenImageIds(scene, campaign).map((assetId): PlannedImage => {
+    const size = sizes[assetId];
+    if (!size) throw new Error(`The size of image "${assetId}" was not measured.`);
+    return { assetId, width: size.width, height: size.height };
+  });
 }
-
-/** A carry moves the product when both scenes show the same image, and the brand mark otherwise. */
-function carryElement(before: ScenePlan, after: ScenePlan): CarryElement {
-  if (before.image && after.image && before.image.assetId === after.image.assetId) {
-    return { kind: 'image', assetId: before.image.assetId };
-  }
-  return { kind: 'mark' };
-}
-
-export const featureCount = (scene: Scene) =>
-  scene.text.filter(({ role }) => role !== 'headline').length;
 
 function imageAnchor(
   plan: ScenePlan,
   scene: Scene,
   stage: ReturnType<typeof stageFor>,
+  fps: number,
   frame: number,
 ): ImageAnchor | undefined {
   const definition = definitionOf(scene.type);
-  if (!definition?.imageAnchor || !plan.image) return undefined;
+  const [first] = plan.images;
+  if (!definition?.imageAnchor || !first) return undefined;
   return definition.imageAnchor({
     props: definition.props.parse(scene.props),
     stage,
-    imageAspect: plan.image.aspect,
+    image: { width: first.width, height: first.height, aspect: first.width / first.height },
     durationInFrames: plan.span.durationInFrames,
+    fps,
     timing: plan.timing,
     frame,
-    featureCount: featureCount(scene),
+    text: scene.text,
   });
 }
 
@@ -108,12 +109,12 @@ export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): Fi
       timing: sceneTiming({
         durationInFrames: span.durationInFrames,
         fps: timeline.fps,
-        exit: exitOf(span, index === timeline.spans.length - 1),
+        exit: exitOf(span),
         enterAfter: span.in ? span.in.to - span.in.boundary : 0,
         clearBefore: span.out ? span.out.boundary - span.out.from : 0,
         arrivesWhole: span.in?.name === 'push',
       }),
-      image: imageOf(scene, campaign, imageSizes),
+      images: imagesOf(scene, campaign, imageSizes),
       carriedIn: undefined,
       carriedOut: undefined,
     };
@@ -124,21 +125,29 @@ export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): Fi
     const after = scenes[index + 1];
     const window = before.span.out;
     if (!after || window?.name !== 'carry') continue;
-    const element = carryElement(before, after);
-    before.carriedOut = element;
-    after.carriedIn = element;
     const from = imageAnchor(
       before,
       campaign.scenes[index] as Scene,
       stage,
+      timeline.fps,
       window.from - before.span.from,
     );
     const to = imageAnchor(
       after,
       campaign.scenes[index + 1] as Scene,
       stage,
+      timeline.fps,
       window.to - after.span.from,
     );
+    // The product moves when both scenes hold the same image where a carry can meet it, and the
+    // brand mark moves otherwise.
+    const shared = before.images[0]?.assetId;
+    const element: CarryElement =
+      shared && shared === after.images[0]?.assetId && from && to
+        ? { kind: 'image', assetId: shared }
+        : { kind: 'mark' };
+    before.carriedOut = element;
+    after.carriedIn = element;
     carries.push({
       window,
       element,
