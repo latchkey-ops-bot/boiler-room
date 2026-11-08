@@ -73,6 +73,25 @@ limit it to (`STAGING_DOMAIN`).
 Not provisioned yet, because nothing uses them until GTM is activated: the GTM persona and the
 inbox reader's AgentMail vault credential. The activation checklist is in `docs/company/roles/gtm.md`.
 
+Verified on 2026-11-07, on the real company:
+
+- A second sync changed nothing: nine agents `unchanged`, the board `existing`, the sweep
+  `unchanged` and paused, every `~/.netrc` `unchanged`.
+- `~/.netrc` survives into a later session. `company:verify` waited until each computer was
+  `paused`, then a new session on the same computer found the file (mode 600), ran `git ls-remote`,
+  got `"push": true` from the REST API with `curl --netrc`, and an authenticated `git push --dry-run`.
+  No token appeared in any session's events or in the computers' command history. Whether the file
+  survives Naive replacing the machine is untested; the engineer's first step checks for it.
+- The board: `br-ceo` created a card assigned to `br-product`, `br-product` was started on it about
+  4 s later, moved it to `doing` and `done` with a note, and the board started a `br-ceo` digest
+  session about 48 s after `done`, which read the card and created nothing.
+
+In the Naive dashboard (from its route table, not an API): each agent has a page under
+`/agents/<agt_ id>`, with its sessions and transcripts under `/sessions`, and `br-ceo`'s settings list
+its roster as team members. The `/board` page shows only the board of the company's platform CEO
+(`ceo_agent_id`), which this company does not use, so read the board with `pnpm company:status` or
+`naive board show <br-ceo's agt_ id>`.
+
 ## The Researcher
 
 ```sh

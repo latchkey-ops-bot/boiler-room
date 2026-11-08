@@ -18,5 +18,5 @@ if (status.board) {
 console.log('Sweep');
 console.table(status.deployments);
 console.log(
-  `Spend: company ${status.spend.company_30d} over 30 days; org balance ${status.spend.org_balance}`,
+  `Spend: company ${status.spend.company_total} in all, from the ledger; org balance ${status.spend.org_balance}`,
 );

@@ -9,14 +9,23 @@ export interface StatusAgent {
   daily_cap: string | null;
   task_ceiling: string | null;
   computer: string | null;
-  spent_30d: string;
+  /** Spent in the agent's current budget period, against `daily_cap`. */
+  spent_today: string;
+  /** Every debit the ledger books to the agent. Computer time books a few minutes late. */
+  spent_total: string;
+}
+
+/** The sum of the ledger's debits for one agent. */
+async function ledgerTotal(client: Naive, agentId: string): Promise<number> {
+  const entries = await listAll((query) => client.credits.ledger({ ...query, agent_id: agentId }));
+  return entries
+    .filter((entry) => entry.type === 'debit')
+    .reduce((sum, entry) => sum + Math.abs(entry.amount_micro_usd), 0);
 }
 
 /** What `pnpm company:status` prints: the agents, br-ceo's roster, the board, the sweep, and spend. */
 export async function companyStatus(client: Naive) {
   const existing = await listAll((query) => client.agents.list(query));
-  const spend = await client.credits.spend({ days: 30 });
-  const spentBy = new Map(spend.by_agent.map((item) => [item.agent_id, item.spent_micro_usd]));
   const byId = new Map(existing.map((agent) => [agent.id, agent]));
 
   const agents: StatusAgent[] = [];
@@ -24,7 +33,8 @@ export async function companyStatus(client: Naive) {
   for (const definition of company) {
     const agent = existing.find((item) => item.name === definition.name);
     const computer = agent ? await client.agents.computer(agent.id) : null;
-    const spent = agent ? (spentBy.get(agent.id) ?? 0) : 0;
+    const today = agent ? (await client.agents.spend(agent.id)).spent_micro_usd : 0;
+    const spent = agent ? await ledgerTotal(client, agent.id) : 0;
     total += spent;
     agents.push({
       name: definition.name,
@@ -34,7 +44,8 @@ export async function companyStatus(client: Naive) {
       daily_cap: agent ? usd(agent.budget.cap_micro_usd) : null,
       task_ceiling: agent ? usd(agent.budget.max_task_micro_usd) : null,
       computer: computer ? `${computer.id} ${computer.status}` : null,
-      spent_30d: usd(spent),
+      spent_today: usd(today),
+      spent_total: usd(spent),
     });
   }
 
@@ -82,6 +93,6 @@ export async function companyStatus(client: Naive) {
       next_run_at: deployment.next_run_at,
       budget: usd(deployment.budget_micro_usd),
     })),
-    spend: { company_30d: usd(total), org_balance: usd(balance.balance_micro_usd) },
+    spend: { company_total: usd(total), org_balance: usd(balance.balance_micro_usd) },
   };
 }
