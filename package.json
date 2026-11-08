@@ -11,7 +11,8 @@
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
-    "format": "biome format --write ."
+    "format": "biome format --write .",
+    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

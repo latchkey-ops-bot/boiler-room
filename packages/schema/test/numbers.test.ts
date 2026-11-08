@@ -227,8 +227,37 @@ describe('extractNumericTokens', () => {
   });
 
   it.each([
+    ['Arabic-Indic digits and percent sign', 'Builds ٧٠٪ faster', { kind: 'percent', value: 70 }],
+    ['Eastern Arabic digits', 'أسرع بنسبة ۷۰٪', { kind: 'percent', value: 70 }],
+    ['Devanagari digits', 'Builds ७०% faster', { kind: 'percent', value: 70 }],
+    ['Bengali digits', '৩x faster', { kind: 'multiplier', value: 3 }],
+    ['an Arabic decimal separator', '٣٫٥x', { kind: 'multiplier', value: 3.5 }],
+    ['an Arabic thousands separator', '١٬٢٠٠ فريق', { kind: 'number', value: 1200 }],
+  ])('reads %s', (_name, text, expected) => {
+    expect(kinds(text)).toEqual([expect.objectContaining(expected)]);
+  });
+
+  it.each([
+    ['a percent glued to a word', 'Cut build costs by40%', { kind: 'percent', value: 40 }],
+    ['a percent glued to a verb', 'Get50% off', { kind: 'percent', value: 50 }],
+    ['a multiplier glued to a letter', 'Ship l0x faster', { kind: 'multiplier', value: 0 }],
+    ['a multiplier word glued to a word', 'up to3 times faster', { kind: 'multiplier', value: 3 }],
+    ['money glued to a word', 'Get$50 off', { kind: 'money', value: 50 }],
+    ['a rank glued to a word', 'Rated#1', { kind: 'rank', value: 1 }],
+    [
+      'a percent behind an invisible letter',
+      'Builds \u316470% faster',
+      { kind: 'percent', value: 70 },
+    ],
+  ])('reads %s', (_name, text, expected) => {
+    expect(kinds(text)).toEqual([expect.objectContaining(expected)]);
+  });
+
+  it.each([
     ['a digit inside a word', 'Web3 tooling'],
     ['a digit inside an acronym', 'B2B teams'],
+    ['a digit inside a chemical formula', 'H2O and CO2'],
+    ['a digit inside a file type', 'mp4 and h264'],
     ['the word one', 'one click, the one tool, someone'],
     ['a one-time fee', 'a one-time fee'],
     ['the verb won after one', 'the one won the award'],
