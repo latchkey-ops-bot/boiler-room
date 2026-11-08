@@ -1,5 +1,6 @@
+import type { MeasuredColor } from '../researcher/output.ts';
 import { blend, chroma, contrast, distance, hueDistance, luminance, readableOn } from './color.ts';
-import type { RawStyles, SeenColor, WeightedColor } from './types.ts';
+import type { PagePoint, RawStyles, SeenColor, WeightedColor } from './types.ts';
 
 /** Contrast the campaign validator demands: 4.5:1 for text and 3:1 for the primary colour. */
 const MIN_TEXT = 4.5;
@@ -17,6 +18,15 @@ export interface Candidate {
   sources: string[];
   /** How many elements paint it: buttons, links and runs of text. A custom property is none. */
   count?: number;
+  /** The first element that painted it, and how. Absent for captures without points. */
+  seen?: Seen;
+}
+
+/** Where a colour was painted and how: the point, the property read and what it painted. */
+export interface Seen {
+  at: PagePoint;
+  property: MeasuredColor['property'];
+  seenAs: MeasuredColor['seen_as'];
 }
 
 export interface DerivedColors {
@@ -31,6 +41,13 @@ export interface DerivedColors {
   cssVariables: boolean;
   /** Every candidate brand colour, best first, with where it was seen. */
   candidates: Candidate[];
+  /**
+   * Every colour above that was measured, each with the point and element its computed style was
+   * read at: the page surfaces (with their share of the samples and the body's own colour), the
+   * text colours, the brand colours and the accents. Only these may be used. A black or white
+   * foreground chosen because no text colour clears 4.5:1 was not measured and is not listed.
+   */
+  measured: MeasuredColor[];
   notes: string[];
 }
 
@@ -68,34 +85,60 @@ const WRAPPER_SHARE = 0.5;
  * while the body's colour is on less than a quarter. With html and body both transparent, the most
  * sampled surface wins.
  */
-export function pickBackground(styles: RawStyles): { hex: string; surfaces: string[] } {
-  const totals: { hex: string; score: number }[] = [];
+export function pickBackground(styles: RawStyles): {
+  hex: string;
+  surfaces: string[];
+  /** Every sampled surface, most painted first, with its share of the samples and first point. */
+  painted: { hex: string; share: number; at?: PagePoint }[];
+  /** Where the chosen colour was read. */
+  at?: PagePoint;
+} {
+  const totals: { hex: string; score: number; at?: PagePoint }[] = [];
   for (const sample of styles.backgrounds) {
     if (sample.alpha < 0.5) continue;
     tally(totals, sample.hex.toUpperCase(), sample.weight, () => ({
       hex: sample.hex.toUpperCase(),
       score: 0,
+      ...(sample.at ? { at: sample.at } : {}),
     }));
   }
   totals.sort((a, b) => b.score - a.score);
   const all = totals.reduce((sum, item) => sum + item.score, 0);
   const surfaces = totals.filter((item) => item.score >= all * 0.05).map((item) => item.hex);
+  const painted = totals.map((item) => ({
+    hex: item.hex,
+    share: Math.round((item.score / (all || 1)) * 1000) / 1000,
+    ...(item.at ? { at: item.at } : {}),
+  }));
   const root = styles.root?.toUpperCase();
-  const rootShare = root
-    ? (totals.find((item) => distance(item.hex, root) < SAME)?.score ?? 0) / (all || 1)
-    : 0;
+  const rootItem = root ? totals.find((item) => distance(item.hex, root) < SAME) : undefined;
+  const rootShare = (rootItem?.score ?? 0) / (all || 1);
   const top = totals[0];
-  if (!root || styles.rootSet === false) return { hex: top?.hex ?? root ?? '#FFFFFF', surfaces };
-  if (all === 0 || rootShare >= ROOT_SHARE) return { hex: root, surfaces };
+  // The root colour is read from the body's (or html's) own computed style.
+  const rootAt = styles.rootAt ?? rootItem?.at;
+  const result = (hex: string, at: PagePoint | undefined) => ({
+    hex,
+    surfaces,
+    painted,
+    ...(at ? { at } : {}),
+  });
+  if (!root || styles.rootSet === false) {
+    if (top) return result(top.hex, top.at);
+    return result(root ?? '#FFFFFF', rootAt);
+  }
+  if (all === 0 || rootShare >= ROOT_SHARE) return result(root, rootAt);
   const wrapper = top && distance(top.hex, root) >= SAME && top.score >= all * WRAPPER_SHARE;
-  return { hex: wrapper ? top.hex : root, surfaces };
+  return wrapper && top ? result(top.hex, top.at) : result(root, rootAt);
 }
 
-function textTotals(texts: WeightedColor[], background: string): { hex: string; score: number }[] {
-  const totals: { hex: string; score: number }[] = [];
+function textTotals(
+  texts: WeightedColor[],
+  background: string,
+): { hex: string; score: number; at?: PagePoint }[] {
+  const totals: { hex: string; score: number; at?: PagePoint }[] = [];
   for (const text of texts) {
     const hex = opaque(text, background);
-    tally(totals, hex, text.weight, () => ({ hex, score: 0 }));
+    tally(totals, hex, text.weight, () => ({ hex, score: 0, ...(text.at ? { at: text.at } : {}) }));
   }
   return totals.sort((a, b) => b.score - a.score);
 }
@@ -241,7 +284,13 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
     .filter(
       (hex) => chroma(hex) < MIN_BRAND_CHROMA && fills.some((fill) => distance(fill, hex) < SAME),
     );
-  const add = (color: SeenColor | null, weight: number, source: string, elements = 1) => {
+  const add = (
+    color: SeenColor | null,
+    weight: number,
+    source: string,
+    elements = 1,
+    seen?: Seen,
+  ) => {
     if (!color || color.alpha < 0.5) return;
     const hex = opaque(color, background);
     if (distance(hex, background) < SAME || BROWSER_DEFAULTS.has(hex)) return;
@@ -249,26 +298,54 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
     if (chroma(hex) < MIN_BRAND_CHROMA && !neutralBrand) return;
     const item = tally(list, hex, weight, () => ({ hex, score: 0, sources: [], count: 0 }));
     item.count = (item.count ?? 0) + elements;
+    item.seen ??= seen;
     if (!item.sources.includes(source)) item.sources.push(source);
   };
+  const seenAt = (
+    at: PagePoint | undefined,
+    property: Seen['property'],
+    seenAs: Seen['seenAs'],
+  ): Seen | undefined => (at ? { at, property, seenAs } : undefined);
   for (const cta of styles.ctas) {
     const prominence = cta.placement === 'nav' || cta.placement === 'hero' ? 2 : 1;
     const filled =
       cta.background &&
       cta.background.alpha >= 0.5 &&
       distance(opaque(cta.background, background), background) >= SAME;
-    if (filled) add(cta.background, 6 * prominence, `${cta.placement} button fill`);
+    if (filled)
+      add(
+        cta.background,
+        6 * prominence,
+        `${cta.placement} button fill`,
+        1,
+        seenAt(cta.at, 'background-color', 'button'),
+      );
     else {
-      add(cta.border, 3 * prominence, `${cta.placement} button border`);
-      add(cta.color, 2 * prominence, `${cta.placement} button text`);
+      add(
+        cta.border,
+        3 * prominence,
+        `${cta.placement} button border`,
+        1,
+        seenAt(cta.at, 'border-color', 'button'),
+      );
+      add(
+        cta.color,
+        2 * prominence,
+        `${cta.placement} button text`,
+        1,
+        seenAt(cta.textAt ?? cta.at, 'color', 'button'),
+      );
     }
   }
-  for (const link of styles.links) add(link, Math.min(link.weight, 8), 'links', link.weight);
+  for (const link of styles.links)
+    add(link, Math.min(link.weight, 8), 'links', link.weight, seenAt(link.at, 'color', 'link'));
   for (const text of styles.texts) {
     add(
       text,
       Math.min(text.weight / (text.heading ? 10 : 40), text.heading ? 8 : 4),
       text.heading ? 'headings' : 'text',
+      1,
+      seenAt(text.at, 'color', 'text'),
     );
   }
   // A custom property only declares a colour; it counts for the colour a visitor sees on the
@@ -349,9 +426,11 @@ export function pickRadius(styles: RawStyles): number | null {
  * fails 3:1 on the background, the next real candidate or another real page surface is used, and
  * the adjustment is noted.
  */
-export function deriveColors(styles: RawStyles): DerivedColors {
+export function deriveColors(styles: RawStyles, pageUrl = ''): DerivedColors {
   const notes: string[] = [];
-  let { hex: background, surfaces } = pickBackground(styles);
+  const picked = pickBackground(styles);
+  let { hex: background } = picked;
+  const { surfaces } = picked;
   if (styles.backgrounds.length === 0)
     notes.push('No painted background was sampled, so white was assumed.');
   if (styles.overlays)
@@ -458,6 +537,14 @@ export function deriveColors(styles: RawStyles): DerivedColors {
       'The site also has a dark scheme for visitors whose system is set to dark; these colours are its light scheme, the one it showed the capture.',
     );
 
+  const measured = measuredColors(styles, pageUrl, picked.painted, {
+    background,
+    foreground,
+    primary,
+    accent,
+    muted,
+    accents,
+  });
   return {
     background,
     foreground,
@@ -469,6 +556,129 @@ export function deriveColors(styles: RawStyles): DerivedColors {
     radius: pickRadius(styles),
     cssVariables: styles.colorVariables.length > 0,
     candidates: candidates.slice(0, 8),
+    measured,
     notes,
   };
+}
+
+/** A surface on less than this share of the samples is a detail, not a ground a film could use. */
+const SURFACE_SHARE = 0.02;
+const MAX_SURFACES = 8;
+
+/**
+ * The measured record of the colours `deriveColors` chose: each with the point and element its
+ * computed style was read at, the brand tokens set to it, and, for a page surface, its share of
+ * the background samples. Every sampled surface on at least 2% of the samples is listed, and the
+ * body's own colour whatever its share, so a film that cannot use the background has measured
+ * grounds to choose from instead of making one up. A colour with no recorded point (a black or
+ * white foreground no text on the site has, or a capture from before points were recorded) is
+ * not listed.
+ */
+export function measuredColors(
+  styles: RawStyles,
+  pageUrl: string,
+  painted: { hex: string; share: number; at?: PagePoint }[],
+  chosen: {
+    background: string;
+    foreground: string;
+    primary: string;
+    accent: string | null;
+    muted: string | null;
+    accents: string[];
+  },
+): MeasuredColor[] {
+  const list: MeasuredColor[] = [];
+  // Surfaces are one colour within rounding; a chosen token must be listed at its exact value.
+  const near = (hex: string) => list.find((item) => distance(item.hex, hex) < SAME);
+  const exact = (hex: string) => list.find((item) => item.hex === hex.toUpperCase());
+  const push = (hex: string, seen: Seen, share: number | null, merge = true) => {
+    if (merge ? near(hex) : exact(hex)) return;
+    list.push({
+      hex: hex.toUpperCase(),
+      property: seen.property,
+      seen_as: seen.seenAs,
+      element: seen.at.element,
+      page_url: pageUrl,
+      x: seen.at.x,
+      y: seen.at.y,
+      share,
+      tokens: [],
+    });
+  };
+  const shareOf = (hex: string) =>
+    painted.find((item) => distance(item.hex, hex) < SAME)?.share ?? 0;
+  // The chosen background first, then the other surfaces, then the body's own colour.
+  const ground = painted.find((item) => distance(item.hex, chosen.background) < SAME);
+  const root = styles.root?.toUpperCase();
+  const rootSeen = (at: PagePoint): Seen => ({
+    at,
+    property: at.element === 'canvas' ? 'canvas' : 'background-color',
+    seenAs: 'surface',
+  });
+  const groundAt =
+    root && styles.rootAt && root === chosen.background.toUpperCase() ? styles.rootAt : ground?.at;
+  if (groundAt) push(chosen.background, rootSeen(groundAt), shareOf(chosen.background));
+  for (const item of painted.slice(0, MAX_SURFACES)) {
+    if (item.share >= SURFACE_SHARE && item.at) push(item.hex, rootSeen(item.at), item.share);
+  }
+  // The body's own colour at its exact value, with the share painted exactly so.
+  if (root && styles.rootAt)
+    push(
+      root,
+      rootSeen(styles.rootAt),
+      painted.find((item) => item.hex === root)?.share ?? 0,
+      false,
+    );
+
+  // Text, links and buttons, wherever each chosen colour was first painted.
+  const texts = textTotals(copyTexts(styles), chosen.background);
+  const allTexts = textTotals(styles.texts, chosen.background);
+  const candidates = brandCandidates(styles, chosen.background);
+  // A text colour is shown where text is set in it; a brand colour where it was first painted as
+  // a candidate, which is a button before a link before text.
+  const seenFor = (hex: string, asText: boolean): Seen | undefined => {
+    const text = [...texts, ...allTexts].find((item) => item.at && distance(item.hex, hex) < SAME);
+    const candidate = candidates.find((item) => item.seen && distance(item.hex, hex) < SAME);
+    if (!asText && candidate?.seen) return candidate.seen;
+    if (text?.at) return { at: text.at, property: 'color', seenAs: 'text' };
+    if (candidate?.seen) return candidate.seen;
+    for (const cta of styles.ctas) {
+      if (
+        cta.background &&
+        cta.at &&
+        distance(opaque(cta.background, chosen.background), hex) < SAME
+      )
+        return { at: cta.at, property: 'background-color', seenAs: 'button' };
+      if (cta.border && cta.at && distance(opaque(cta.border, chosen.background), hex) < SAME)
+        return { at: cta.at, property: 'border-color', seenAs: 'button' };
+      const textAt = cta.textAt ?? cta.at;
+      if (textAt && distance(opaque(cta.color, chosen.background), hex) < SAME)
+        return { at: textAt, property: 'color', seenAs: 'button' };
+    }
+    const link = styles.links.find(
+      (item) => item.at && distance(opaque(item, chosen.background), hex) < SAME,
+    );
+    if (link?.at) return { at: link.at, property: 'color', seenAs: 'link' };
+    return undefined;
+  };
+  const tokens: [MeasuredColor['tokens'][number], string | null][] = [
+    ['background', chosen.background],
+    ['foreground', chosen.foreground],
+    ['primary', chosen.primary],
+    ['accent', chosen.accent],
+    ['muted', chosen.muted],
+    ...chosen.accents.map((hex): [MeasuredColor['tokens'][number], string] => ['accents', hex]),
+  ];
+  for (const [token, hex] of tokens) {
+    if (!hex) continue;
+    if (token !== 'background' && !exact(hex)) {
+      const seen = seenFor(hex, token === 'foreground' || token === 'muted');
+      if (seen) push(hex, seen, null, false);
+    }
+    const item = exact(hex);
+    // The background is a surface: a text colour of the same value does not stand in for it.
+    if (!item || (token === 'background' && item.seen_as !== 'surface')) continue;
+    if (!item.tokens.includes(token)) item.tokens.push(token);
+  }
+  return list;
 }

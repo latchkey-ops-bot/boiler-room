@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Naive } from '../src/naive/client.ts';
-import { CommandFailed, runCommand } from '../src/naive/exec.ts';
+import { CommandFailed, outputOf, runCommand } from '../src/naive/exec.ts';
 
 type Frame =
   | { stdout: string }
@@ -34,6 +34,39 @@ describe('runCommand', () => {
     await expect(runCommand(streaming(lost), 'cmp_1', 'node worker.ts')).rejects.toThrow(
       CommandFailed,
     );
+  });
+
+  it('treats an exit frame with no real exit code as an unknown status', async () => {
+    // Seen live: chunks that printed `done` with their bytes, then an exit frame with code -1.
+    for (const code of [-1, null]) {
+      const frames = [
+        { stdout: '{"type":"done","seconds":8.7,"bytes":3567488}\n' },
+        { exit: { exit_code: code, timed_out: false } },
+      ];
+      const result = await runCommand(streaming(frames), 'cmp_1', 'node worker.ts', {
+        check: false,
+      });
+      expect(result).toMatchObject({ exitCode: -1, exited: false, timedOut: false });
+      await expect(runCommand(streaming(frames), 'cmp_1', 'node worker.ts')).rejects.toThrow(
+        CommandFailed,
+      );
+    }
+  });
+
+  it('keeps what a command printed before its stream broke', async () => {
+    const client = {
+      computers: {
+        execStream: async function* () {
+          yield { stderr: 'TYPE_CARD_LAYOUT at scene "a", text "b": too long.\n' };
+          throw new Error('ended without an exit frame');
+        },
+      },
+    } as unknown as Naive;
+    const error = await runCommand(client, 'cmp_1', 'node worker.ts').catch((cause) => cause);
+    expect(outputOf(error)).toEqual({
+      stdout: '',
+      stderr: 'TYPE_CARD_LAYOUT at scene "a", text "b": too long.\n',
+    });
   });
 
   it('fails a command that exits non-zero or times out', async () => {

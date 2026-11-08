@@ -30,7 +30,13 @@ import { Aborted, withRetry } from './naive/exec.ts';
 import { ComputerPool } from './naive/pool.ts';
 import { newRunId, RUN_PREFIX, reapOrphans } from './naive/reap.ts';
 import { FS_WRITE_LIMIT, uploadBytes } from './naive/transfer.ts';
-import { type RenderedChunk, renderChunkOnNaive, type WorkerContext } from './naive/workers.ts';
+import {
+  chunksFailure,
+  MotionRefused,
+  type RenderedChunk,
+  renderChunkOnNaive,
+  type WorkerContext,
+} from './naive/workers.ts';
 import { planQuality, writeQualityArtifacts } from './quality.ts';
 import { checkFilm, compareSeams } from './verify.ts';
 import { REMOTION_VERSION, templateVersion } from './versions.ts';
@@ -84,6 +90,34 @@ export interface DryRunResult {
   plan: ChunkPlan;
   durationInFrames: number;
   base: 'snapshot' | 'cold' | null;
+}
+
+/** What the computers of a run that failed cost, attached to its error as `charges`. */
+export interface RenderCharges {
+  chargedUsd: number;
+  computerIds: string[];
+}
+
+/** The charges a failed `renderCampaign` attached to its error, if it had created computers. */
+export function chargesOf(error: unknown): RenderCharges | undefined {
+  const charges = (error as { charges?: RenderCharges } | null)?.charges;
+  return charges && typeof charges.chargedUsd === 'number' ? charges : undefined;
+}
+
+/**
+ * An error thrown in the page, such as `calculateMetadata`'s `FilmRejected`, reaches here with only
+ * its first line as its message: the issues it lists, one a line, are only in its stack. This puts
+ * them back in the message, so a caller that reads the message, such as `pnpm film` deciding what
+ * to send back to the Director, sees every issue.
+ */
+export function withPageMessage(error: unknown): unknown {
+  if (!(error instanceof Error) || typeof error.stack !== 'string') return error;
+  const lines = error.stack.split('\n');
+  const end = lines.findIndex((line) => /^\s+at /.test(line));
+  const head = (end < 0 ? lines : lines.slice(0, end)).join('\n').trimEnd();
+  const more = head.split('\n').length > error.message.split('\n').length;
+  if (more && head.includes(error.message)) error.message = head;
+  return error;
 }
 
 export const DEFAULT_MAX_COST_USD = 2;
@@ -242,6 +276,7 @@ export async function renderCampaign(
     ? new ComputerPool(client, { runId, limitUsd, log, onStop: stop })
     : undefined;
   const naiveFiles: string[] = [];
+  let failure: unknown;
   let computersLeft: string[] = [];
   let filesDeleted = 0;
 
@@ -274,6 +309,8 @@ export async function renderCampaign(
       inputProps,
       chromiumOptions: { gl: 'swangle' },
       logLevel: 'error',
+    }).catch((error: unknown) => {
+      throw withPageMessage(error);
     });
     lap('select', step);
     if (
@@ -342,13 +379,17 @@ export async function renderCampaign(
       const workerContext = context;
       const tasks = plan.chunks.map((chunk) =>
         renderChunkOnNaive(workerContext, chunk).catch((error: unknown) => {
-          stop(error instanceof Error ? error : new Error(String(error)));
+          // A refusal stops only its own chunk. The others draw on, so that their refusals, if
+          // any, are named in the same failure: each takes seconds, and is not tried again.
+          if (!(error instanceof MotionRefused)) {
+            stop(error instanceof Error ? error : new Error(String(error)));
+          }
           throw error;
         }),
       );
       const settled = await Promise.allSettled(tasks);
-      const failure = settled.find((result) => result.status === 'rejected');
-      if (failure) throw signal.reason instanceof Error ? signal.reason : failure.reason;
+      const failed = chunksFailure(settled, signal.aborted ? signal.reason : undefined);
+      if (failed) throw failed;
       rendered = settled.map((result) => (result as PromiseFulfilledResult<RenderedChunk>).value);
     } else {
       rendered = [];
@@ -550,6 +591,7 @@ export async function renderCampaign(
     return { output, manifestFile, manifest };
   } catch (error) {
     if (error instanceof Error) error.message = scrub(error.message);
+    failure = error;
     throw error;
   } finally {
     if (pool) {
@@ -559,6 +601,14 @@ export async function renderCampaign(
         else log('no computers of this run remain');
       } catch (error) {
         log(`could not confirm the computers were destroyed: ${scrub(String(error))}`);
+      }
+      // A failed run's computers were still paid for: the error says what they cost.
+      if (failure instanceof Error) {
+        const charges: RenderCharges = {
+          chargedUsd: pool.chargedUsd(),
+          computerIds: pool.records.map(({ id }) => id),
+        };
+        Object.assign(failure, { charges });
       }
     }
     if (client && naiveFiles.length > 0) {

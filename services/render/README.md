@@ -44,6 +44,12 @@ printed, logged, put in a command or sent to a computer.
    file and why) and that every scene image loads and is still. `--dry-run` stops after this step,
    so a corrupt or blocked font is caught before any computer exists. Its `composition` is what
    every chunk renders, as Remotion's distributed rendering asks.
+
+   `checkCopyFit({ campaignFile, formats })` is this step on its own for a script nobody has
+   approved yet: it bundles once and selects the `CopyFit` composition in each format, which
+   validates the cut, loads both brand fonts and measures every type card, feature-card headline
+   and stat-counter, loading no picture. It returns each format's refusal, or null, and creates
+   no computer. The crew runs it on every passing Director submission, in about 4 s.
 5. **Render.** The frames are split with `splitFrames`: every chunk has `ceil(frames / workers)`
    frames except the last, because `combineChunks` takes one `framesPerChunk`. Each chunk renders
    on its own computer with `renderMedia({ codec: 'h264-ts', frameRange, compositionStart: 0,

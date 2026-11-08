@@ -5,10 +5,14 @@ import type { AgentCreate } from '@usenaive-sdk/managed-agents';
 import type { AgentDefinition, SkillDefinition } from './define.ts';
 import { listAll, type Naive } from './naive/client.ts';
 
-const SKILLS_DIR = new URL('../skills/', import.meta.url);
+const SKILLS_DIRS = {
+  agents: new URL('../skills/', import.meta.url),
+  repo: new URL('../../skills/', import.meta.url),
+} as const;
 
 export function skillContent(skill: SkillDefinition): string {
-  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, SKILLS_DIR)), 'utf8');
+  const dir = SKILLS_DIRS[skill.root ?? 'agents'];
+  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, dir)), 'utf8');
 }
 
 /** JSON with object keys sorted, so equal configs hash equally. */
@@ -185,4 +189,124 @@ export async function syncAgents(
     if (!result) throw new Error(`${definition.name} was not synced.`);
     return result;
   });
+}
+
+/**
+ * How a run gets its agents: `sync` makes Naive match the definitions first (`syncAgents`), and
+ * `verify` changes nothing on Naive, creates no agent and pushes no skill, and refuses to run
+ * agents whose deployed definition is not this checkout's. The film computer runs with `verify`,
+ * so its key needs no `agents:write`.
+ */
+export type AgentSync = 'sync' | 'verify';
+
+/** One way a deployed agent differs from the definition this checkout holds. */
+export interface Drift {
+  name: string;
+  problem: string;
+}
+
+/** The deployed agents differ from the definitions: run `pnpm agents:sync`, then try again. */
+export class AgentDrift extends Error {
+  readonly drift: readonly Drift[];
+  constructor(drift: readonly Drift[]) {
+    super(
+      `The deployed agents do not match this checkout's definitions, so nothing was run: ${drift.map((each) => `${each.name}: ${each.problem}`).join('; ')}. Run pnpm agents:sync from this checkout first.`,
+    );
+    this.name = 'AgentDrift';
+    this.drift = drift;
+  }
+}
+
+const sha256Text = (text: string) => createHash('sha256').update(text).digest('hex');
+
+/**
+ * Compares each deployed agent with its definition, reading only: its definition hash against the
+ * hash of the config this checkout would write with the skill versions the agent pins, and each
+ * pinned skill version's content against the skill file here. Returns the agents as they are, and
+ * every difference found.
+ */
+export async function checkAgents(
+  client: Naive,
+  definitions: readonly AgentDefinition[],
+): Promise<{ results: SyncResult[]; drift: Drift[] }> {
+  const existing = await listAll((query) => client.agents.list(query));
+  const members = new Map<string, AgentRef>();
+  for (const agent of existing)
+    members.set(agent.name, { id: agent.id, version: agent.current_version });
+  const results: SyncResult[] = [];
+  const drift: Drift[] = [];
+  const skillShas = new Map<string, Map<number, string>>();
+  const versionsOf = async (slug: string) => {
+    let known = skillShas.get(slug);
+    if (!known) {
+      const rows = await listAll((query) => client.skills.listVersions(slug, query));
+      known = new Map(rows.map((row) => [row.version, row.sha256]));
+      skillShas.set(slug, known);
+    }
+    return known;
+  };
+  for (const definition of definitions) {
+    const matches = existing.filter((agent) => agent.name === definition.name);
+    const current = matches[0];
+    if (!current || matches.length > 1) {
+      drift.push({
+        name: definition.name,
+        problem: current
+          ? `${matches.length} agents have this name`
+          : 'no agent of this name is deployed',
+      });
+      continue;
+    }
+    const pinned = new Map<string, number>();
+    for (const ref of current.skills ?? []) {
+      const at = ref.lastIndexOf('@');
+      if (at > 0) pinned.set(ref.slice(0, at), Number(ref.slice(at + 1)));
+    }
+    let skillsMatch = true;
+    for (const skill of definition.skills) {
+      const version = pinned.get(skill.slug);
+      if (version === undefined) {
+        drift.push({ name: definition.name, problem: `it does not pin the skill ${skill.slug}` });
+        skillsMatch = false;
+        continue;
+      }
+      const deployed = (await versionsOf(skill.slug)).get(version);
+      if (deployed !== sha256Text(skillContent(skill))) {
+        drift.push({
+          name: definition.name,
+          problem: `its skill ${skill.slug}@${version} is not the one in this checkout`,
+        });
+        skillsMatch = false;
+      }
+    }
+    if (skillsMatch) {
+      const wanted = agentConfig(definition, pinned, members).metadata?.[HASH_KEY];
+      if (current.metadata?.[HASH_KEY] !== wanted)
+        drift.push({
+          name: definition.name,
+          problem: `its definition hash is ${String(current.metadata?.[HASH_KEY] ?? 'missing').slice(0, 12)}, and this checkout's is ${String(wanted).slice(0, 12)}`,
+        });
+      else if (!definition.mcp_servers?.length && (current.mcp_servers?.length ?? 0) > 0)
+        drift.push({ name: definition.name, problem: 'it still holds an MCP server' });
+    }
+    results.push({
+      name: definition.name,
+      id: current.id,
+      version: current.current_version,
+      action: 'unchanged',
+    });
+  }
+  return { results, drift };
+}
+
+/** The agents to run: synced first with `sync`, or checked and never changed with `verify`. */
+export async function ensureAgents(
+  client: Naive,
+  definitions: readonly AgentDefinition[],
+  mode: AgentSync = 'sync',
+): Promise<SyncResult[]> {
+  if (mode === 'sync') return syncAgents(client, definitions);
+  const { results, drift } = await checkAgents(client, definitions);
+  if (drift.length > 0) throw new AgentDrift(drift);
+  return results;
 }

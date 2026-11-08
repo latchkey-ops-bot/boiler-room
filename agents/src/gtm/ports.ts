@@ -1,5 +1,4 @@
 import type { DataToolKey, GtmAgentName } from './config.ts';
-import { stableId } from './domain.ts';
 import type { BoardComment } from './removal.ts';
 
 /**
@@ -10,99 +9,14 @@ import type { BoardComment } from './removal.ts';
 // ---------------------------------------------------------------------------------------------
 // Films
 
-/** What GTM needs from the film pipeline. Implemented by DryRunFilmOrder and AppFilmOrder. */
-export interface FilmOrder {
-  readonly kind: 'dry-run' | 'app';
-  /** Orders a Short (25 s), 16:9 outreach sample of `url`. The same key returns the same order. */
-  order(input: {
-    url: string;
-    idempotencyKey: string;
-    budgetMicroUsd: number;
-    leadRef: string;
-  }): Promise<{ orderId: string }>;
-  status(orderId: string): Promise<FilmOrderStatus>;
-  /** Publishes the film's unlisted page and returns its address. Only for a ready film. */
-  share(orderId: string): Promise<{ pageUrl: string; shareId: string }>;
-  /** A short-lived link to the 16:9 MP4, for the X post. */
-  file(orderId: string): Promise<FilmFile>;
-  /** Takes the page down (410 from then on) and deletes the files. Safe to call twice. */
-  withdraw(orderId: string, reason: 'removal' | 'opt_out' | 'failed' | 'manual'): Promise<void>;
-}
-
-export interface FilmOrderStatus {
-  orderId: string;
-  state: 'queued' | 'working' | 'ready' | 'failed' | 'withdrawn';
-  /** The app's Stage, such as 'render'. */
-  stage: string | null;
-  qc: 'pending' | 'pass' | 'fail';
-  /** True for DryRunFilmOrder and the app's SimulatedPipeline. */
-  simulated: boolean;
-  /** What the pipeline spent, media and repair rounds included. Null until the app knows it. */
-  costMicroUsd: number | null;
-  failure: string | null;
-  /** The film's on-screen and voiceover text, for the brand-safety screen. Null until ready. */
-  script: string | null;
-}
-
-export interface FilmFile {
-  url: string;
-  expiresAt: string;
-  contentType: 'video/mp4';
-  bytes: number;
-  durationSeconds: number;
-  sha256: string;
-}
-
 /**
- * Needs no network. An order moves from `queued` to `ready` over three status reads, is always
- * `simulated`, has a page address marked as not real, and has no file. A simulated film can only
- * ever produce drafts.
+ * What GTM needs from the film pipeline: `FilmOrder`, shared with the web app and the film command
+ * in `../film/order.ts`. Implemented by DryRunFilmOrder (there), AppFilmOrder (`live.ts`) and
+ * LocalFilmOrder (`../film/local-order.ts`, which runs `pnpm film`). Only an `app` order is live
+ * here: GTM shares a film through the app's page.
  */
-export class DryRunFilmOrder implements FilmOrder {
-  readonly kind = 'dry-run' as const;
-  private readonly reads = new Map<string, number>();
-  readonly withdrawn: string[] = [];
-  private readonly appBase: string;
-  constructor(appBase: string) {
-    this.appBase = appBase;
-  }
-  async order(input: { idempotencyKey: string }) {
-    const orderId = stableId('fo-dry', input.idempotencyKey);
-    if (!this.reads.has(orderId)) this.reads.set(orderId, 0);
-    return { orderId };
-  }
-  async status(orderId: string): Promise<FilmOrderStatus> {
-    const reads = (this.reads.get(orderId) ?? 0) + 1;
-    this.reads.set(orderId, reads);
-    const state = this.withdrawn.includes(orderId)
-      ? 'withdrawn'
-      : reads >= 3
-        ? 'ready'
-        : reads === 2
-          ? 'working'
-          : 'queued';
-    return {
-      orderId,
-      state,
-      stage: state === 'ready' ? 'delivered' : state === 'working' ? 'render' : null,
-      qc: state === 'ready' ? 'pass' : 'pending',
-      simulated: true,
-      costMicroUsd: 0,
-      failure: null,
-      script: state === 'ready' ? '' : null,
-    };
-  }
-  async share(orderId: string) {
-    const shareId = `dry-run-${orderId.slice(-6)}`;
-    return { pageUrl: `${this.appBase}/f/${shareId}`, shareId };
-  }
-  async file(): Promise<FilmFile> {
-    throw new Error('a dry-run film has no file');
-  }
-  async withdraw(orderId: string) {
-    if (!this.withdrawn.includes(orderId)) this.withdrawn.push(orderId);
-  }
-}
+export type { FilmDecisions, FilmFile, FilmOrder, FilmOrderStatus } from '../film/order.ts';
+export { DryRunFilmOrder } from '../film/order.ts';
 
 // ---------------------------------------------------------------------------------------------
 // X

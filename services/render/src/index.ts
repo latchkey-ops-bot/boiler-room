@@ -2,6 +2,8 @@ export type { Chunk, ChunkPlan, FrameRange, Seam } from './chunks.ts';
 export { interiorPair, seamsOf, splitFrames } from './chunks.ts';
 export type { Difference } from './compare.ts';
 export { compareFrames } from './compare.ts';
+export type { CopyFitOptions, CopyFitResult } from './copy-fit.ts';
+export { checkCopyFit } from './copy-fit.ts';
 export type { BaseState, ComputerSize, CostEstimate, EstimateInput, TimeModel } from './cost.ts';
 export {
   BLOCK_MS,
@@ -20,13 +22,20 @@ export type { ChunkAttempt, ChunkRecord, Manifest } from './manifest.ts';
 export type { BaseRecord } from './naive/base.ts';
 export { findBase, RECIPE_HASH } from './naive/base.ts';
 export { Aborted } from './naive/exec.ts';
+export { MotionRefused } from './naive/workers.ts';
 export type { QualityIndex, QualityPlan } from './quality.ts';
 export { planQuality } from './quality.ts';
 export type {
   DryRunResult,
   RenderCampaignOptions,
   RenderCampaignResult,
+  RenderCharges,
 } from './render-campaign.ts';
-export { DEFAULT_MAX_COST_USD, DEFAULT_WORKERS, renderCampaign } from './render-campaign.ts';
+export {
+  chargesOf,
+  DEFAULT_MAX_COST_USD,
+  DEFAULT_WORKERS,
+  renderCampaign,
+} from './render-campaign.ts';
 export type { FilmCheck, SeamCheck, SeamReport } from './verify.ts';
 export { checkFilm, judgeSeam, SEAM_ALLOWANCE_DB } from './verify.ts';

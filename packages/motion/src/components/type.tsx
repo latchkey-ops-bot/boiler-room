@@ -129,6 +129,27 @@ export function specFit(
   return result;
 }
 
+/**
+ * Copy fitted at a cap height of at least `style.cap` spec px, fit or fail. `specFit` sets the
+ * largest whole size at or under the size it is asked for, so it is asked for the whole size just
+ * over the cap: a 78 px cap is never drawn at 77.7. `fits` is false when the copy needs a smaller
+ * size than that, or more lines than `box.maxLines`.
+ */
+export function specFitAtCap(
+  text: string,
+  style: SpecTypeStyle,
+  stage: Pick<Stage, 'width' | 'height'>,
+  box: { width: number; maxLines: number },
+  fonts: { display: string; body: string },
+): { fit: SpecFit; size: number; fits: boolean } {
+  const metrics = fontMetrics(fonts[style.font], style.weight);
+  const size = Math.ceil(specPx(stage, style.cap) / metrics.cap - 1e-9);
+  const asked = ((size + 1e-6) * metrics.cap * 1080) / Math.min(stage.width, stage.height);
+  const fit = specFit(text, { ...style, cap: asked }, stage, box, fonts);
+  const fits = fit.fontSize >= size && fit.lines.length > 0 && fit.lines.length <= box.maxLines;
+  return { fit, size, fits };
+}
+
 /** `specFit` with the brand's fonts, as a hook. */
 export function useSpecFit(
   text: string,

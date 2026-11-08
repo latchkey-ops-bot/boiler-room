@@ -26,10 +26,9 @@ import {
 } from '../components/scene-runtime.tsx';
 import {
   baselineOffset,
-  fontMetrics,
   lineBox,
   type SpecFit,
-  specFit,
+  specFitAtCap,
   specPx,
   widthAt,
 } from '../components/type.tsx';
@@ -214,31 +213,21 @@ export const typeCardBox = (layout: Pick<TypeCardLayout, 'block' | 'centre'>, f:
 
 const weight = typography.weight.display;
 
-/**
- * Copy fitted at a cap height of at least `cap` spec px. `specFit` sets the largest whole size at
- * or under the size it is asked for, so it is asked for the whole size just over `cap`: a 78 px cap
- * is never drawn at 77.7. A fit at a smaller size than that did not fit.
- */
-function fitAtCap(
+/** Copy fitted in the line box at a cap height of at least `cap` spec px, fit or fail. */
+const fitAtCap = (
   value: string,
   cap: number,
   maxLines: number,
   stage: Stage,
   fonts: { display: string; body: string },
-): { fit: SpecFit; size: number; fits: boolean } {
-  const metrics = fontMetrics(fonts.display, weight);
-  const size = Math.ceil(specPx(stage, cap) / metrics.cap - 1e-9);
-  const asked = ((size + 1e-6) * metrics.cap * 1080) / Math.min(stage.width, stage.height);
-  const fit = specFit(
+): { fit: SpecFit; size: number; fits: boolean } =>
+  specFitAtCap(
     value,
-    { font: 'display', weight, cap: asked },
+    { font: 'display', weight, cap },
     stage,
     { width: lineBox(stage), maxLines },
     fonts,
   );
-  const fits = fit.fontSize >= size && fit.lines.length > 0 && fit.lines.length <= maxLines;
-  return { fit, size, fits };
-}
 
 const layoutCache = new Map<string, TypeCardLayout>();
 
@@ -420,8 +409,8 @@ const still = (visible: boolean): WordState => ({ visible, x: 0, y: 0 });
  * Every word of the card at a spec frame, for an entry. Native: words pop in at full opacity and
  * rise on `wordRise`, the name rises as one unit, and line 2 pushes line 1 up. T1: every word at
  * rest and visible from frame 0, each word of a line moving `seamIn * gain(i)` with the word-gap
- * gain. T5: every word at full ink from the blank frames on, racked
- * into focus as one block. The drift runs on every frame.
+ * gain, the words on the side the seam leaves furthest. T5: every word at full ink from the blank
+ * frames on, racked into focus as one block. The drift runs on every frame.
  */
 export function typeCardState(
   f: number,
@@ -443,12 +432,19 @@ export function typeCardState(
   if (entry.kind === 't1') {
     const { seam } = entry;
     const offset = seam !== undefined && seam.axis === 'x' ? seamIn(f, seam) : 0;
+    const sign = seam?.sign ?? 1;
     return {
       drift,
       blur: 0,
       y: 0,
       lines: atRest((line, index) => {
-        const d = index - (line.words.length - 1) / 2;
+        // `d` counts words from the middle towards the trailing side, the side the seam moves away
+        // from: the left on a seam moving right. Those words travel furthest, so the gaps start
+        // stretched and close up, as in ref A. Counted the other way they start closed, and words
+        // collide. A right-to-left line runs its words from the right, so its order is reversed.
+        const rtl = textDirection(line.words.join(' ')) === 'rtl';
+        const fromMiddle = (index - (line.words.length - 1) / 2) * (rtl ? -1 : 1);
+        const d = -sign * fromMiddle;
         const x = offset * (wordGapGain(d) - 1);
         // `+ 0` turns a negative zero, from a still word, into a plain zero.
         return { visible: true, x: x + 0, y: 0 };

@@ -32,6 +32,9 @@ export const FILM_ISSUE_CODES = [
   'FORMAT_UNLISTED',
   'VARIANT_UNKNOWN',
   'VARIANT_UNUSED',
+  // Copy a template refuses to set, measured with the brand fonts in `prepareFilm`.
+  'TYPE_CARD_LAYOUT',
+  'LAYOUT_UNFIT',
 ] as const;
 
 export type FilmIssueCode = (typeof FILM_ISSUE_CODES)[number];

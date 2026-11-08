@@ -25,8 +25,18 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    as an uncropped full-page capture, or one the scene would enlarge more than 1.5 times by its
    last frame in this format, is refused with the size to supply instead. So is a page too short
    for a `site-scroll`. Every image is checked, so one refusal names every capture to replace. A
-   `site-hero` needs a capture at device scale 2, as its scene file says;
-6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
+   `site-hero` needs a capture at device scale 2, as its scene file says. This fit check is
+   exported as `checkImageFit`: it needs only the images' sizes, so the Director runs it on every
+   submission from the sizes the research recorded, before anything is rendered;
+6. loads the brand fonts and lays out every `type-card`, `feature-card` headline and
+   `stat-counter` of the cut (`copyFitIssues`). Copy a template would refuse to set at its cap
+   height is refused here as `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`, every scene at once, rather
+   than while frames are drawn. The render service selects the film on its own machine, so this
+   costs no computer. `layoutRefusals` reads the same refusals out of any text, such as a failed
+   render's output. `prepareCopy` is steps 1 to 3, the fonts and this step alone, with no picture
+   loaded: the `CopyFit` composition runs it in `calculateMetadata`, so a script can be measured
+   before its pictures are chosen;
+7. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with
@@ -124,9 +134,14 @@ arrives on the seam, at rest from frame 14, and a long CTA can then be the last 
 cut being rendered, and names the longest URL that fits and the length that fits this one.
 
 `feature-card` draws no corner mark, as its scene file has none: in 9:16 the mark sat just above
-the headline. Its headline drifts larger to the scene's last frame, so it is set narrower than the
-line box wherever that drift would otherwise carry it out of the safe area, which is every card in
-9:16 and a long one in 1:1. Stacked in 9:16, its connector starts under the cause's label.
+the headline. Its headline is set at the sentence cap height on at most two lines, fit or fail:
+copy that needs a smaller size or a third line stops the render with `LAYOUT_UNFIT`, naming the
+scene and text id. It drifts larger to the scene's last frame, so its lines are set in the line box
+divided by that drift, and no line is wider than the line box, 0.65 W in 16:9, or outside the safe
+area on any frame. The panel moves down, keeping its size, until it clears two lines of headline at
+their last-frame drift, so it sits in one place across a group. On a T1 the headline enters on the
+seam with the panel, never on the anchor carry, and it is drawn above the panel. Stacked in 9:16,
+its connector starts under the cause's label.
 
 `stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
 no quote states. The count-up is built to its scene file and tested, so approving it means removing
@@ -146,7 +161,9 @@ cropped from its top to at most three times as tall as it is wide, which holds p
 every format, and never cropped to one screen. A page too short for its part of the fling is refused in
 `calculateMetadata`, with the length to capture. The gate checks one image, not two, so a
 `site-scroll` with one page stops at render time. It checks that a `tile-wall` has one captured
-tile, not six: the Director writes the row as a `feature-card` when the site gives fewer.
+tile, not six: the Director writes the row as a `feature-card` when the site gives fewer. In the
+same way the Director writes the `site-scroll` row as a `site-hero` when the research has no two
+long captures that fit, page 2 with a `ctaBox` or `targetY`.
 
 `tile-wall` draws its T9 ramp into the cut only once a pin plays T9, which none does yet, so its
 rows cruise to the last frame. `motionBlur` draws `CameraMotionBlur`'s five samples from the

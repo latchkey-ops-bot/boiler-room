@@ -1,7 +1,7 @@
 import type { NeedUpload, ResearchOutput } from '../researcher/output.ts';
 import { NAIVE_FILE_PREFIX } from '../researcher/output.ts';
 import { describeSubstitute, type ResolvedFont } from './fonts.ts';
-import type { LogoSource } from './logo.ts';
+import type { LogoPlacement, LogoSource } from './logo.ts';
 import type { LinkKind, ProbeResult } from './pages.ts';
 import type { DerivedColors } from './tokens.ts';
 import type { RawCta, RawLink, RawUiCandidate, UiGrade } from './types.ts';
@@ -73,11 +73,17 @@ export interface CaptureManifest {
     fonts: ResolvedFont[];
     logo: {
       source: LogoSource;
+      /** Where it was found. Absent in captures from before it was recorded. */
+      found_in?: LogoPlacement;
+      /** Why this candidate was chosen, in a few words. */
+      why?: string;
       file: string;
       url: string | null;
       kind: 'svg' | 'image';
       width: number | null;
       height: number | null;
+      /** Width over height of the file. Absent in captures from before it was recorded. */
+      aspect?: number | null;
     };
   };
   login_links: RawLink[];
@@ -128,14 +134,29 @@ function productUiStatus(
 function needs(manifest: CaptureManifest, status: string): NeedUpload[] {
   const list: NeedUpload[] = [];
   const signIn = manifest.login_links[0]?.url ?? null;
+  const request =
+    'Please send your logo as an SVG, or a PNG at least 1000 px wide, ideally one version for light and one for dark backgrounds.';
+  const foundIn = manifest.brand.logo.found_in;
   if (manifest.brand.logo.source === 'generated') {
     list.push({
       id: 'logo',
       kind: 'logo',
-      what: 'The logo. The site shows no logo file, inline logo or favicon that could be downloaded.',
+      what: 'The logo. The site shows no logo file, inline logo, icon or social image that could be downloaded.',
       why: 'Without it the film opens and closes on the product name set in type instead of the real mark.',
-      request:
-        'Please send your logo as an SVG, or a PNG at least 1000 px wide, ideally one version for light and one for dark backgrounds.',
+      request,
+      blocking: false,
+      evidence_url: manifest.site,
+    });
+  } else if (foundIn === 'og-image' || foundIn === 'icon' || foundIn === 'apple-touch-icon') {
+    list.push({
+      id: 'logo',
+      kind: 'logo',
+      what:
+        foundIn === 'og-image'
+          ? "The logo. The site's header shows no logo that could be downloaded, so the film would use its social sharing image."
+          : "The logo. The site's header shows no logo that could be downloaded, so the film would use its app icon.",
+      why: 'An icon or a social card is not the full logo, and may not hold up at film size.',
+      request,
       blocking: false,
       evidence_url: manifest.site,
     });
@@ -307,6 +328,7 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
       })),
       radius_px: colors.radius,
       css_variables: colors.cssVariables,
+      measured: colors.measured ?? [],
       notes: [
         ...colors.notes,
         ...brand.fonts.filter((item) => item.method === 'substitute').map(describeSubstitute),
@@ -356,6 +378,13 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
       logo: {
         asset_id: 'logo',
         source: brand.logo.source,
+        found_in:
+          brand.logo.found_in ?? (brand.logo.source === 'generated' ? 'generated' : 'header'),
+        aspect:
+          brand.logo.aspect ??
+          (brand.logo.width && brand.logo.height
+            ? Math.round((brand.logo.width / brand.logo.height) * 1000) / 1000
+            : null),
         url: brand.logo.url?.startsWith('http') ? brand.logo.url : null,
       },
       material: manifest.material.map((item) => ({

@@ -54,6 +54,12 @@ function readableMuted(muted: string | undefined, foreground: string, background
 /** A family name as CSS needs it, since a name such as `Source Serif 4` is not a valid identifier. */
 export const cssFamily = (family: string): string => JSON.stringify(family);
 
+/** Each role's own family, as `loadBrandFonts` registers it, never the brand's shared name. */
+export const themeFonts = (brand: Pick<Campaign['brand'], 'fonts'>): BrandTheme['fonts'] => ({
+  display: cssFamily(brandFontFamily('display', brand.fonts.display)),
+  body: cssFamily(brandFontFamily('body', brand.fonts.body)),
+});
+
 export function resolveTheme(brand: Campaign['brand'], logo: ResolvedLogo): BrandTheme {
   const { background, foreground, primary, accent, muted } = brand.colors;
   const isDark = readableOn(background) !== BLACK;
@@ -75,11 +81,7 @@ export function resolveTheme(brand: Campaign['brand'], logo: ResolvedLogo): Bran
       shadow: withAlpha(mix(background, BLACK, 0.8), isDark ? 0.7 : 0.2),
       glow: withAlpha(primary, isDark ? 0.2 : 0.12),
     },
-    // Each role's own family, as `loadBrandFonts` registers it, never the brand's shared name.
-    fonts: {
-      display: cssFamily(brandFontFamily('display', brand.fonts.display)),
-      body: cssFamily(brandFontFamily('body', brand.fonts.body)),
-    },
+    fonts: themeFonts(brand),
     radius: brand.radius ?? fallbackRadius,
     logo,
   };

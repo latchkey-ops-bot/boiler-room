@@ -50,7 +50,8 @@ substitutions in `director-beat-templates` give the seams after each swap.
    rule here.
 2. **Dead stops.** With `s` seams, `count(t3)` is in `[floor(s / 3), ceil(s / 3)]`: 3 or 4 of 10,
    5 or 6 of 17, 8 or 9 of 26. The Short default has 4, Standard 6 and Long 9: each is at the
-   ceiling, so a changed plan never adds a `t3`.
+   ceiling, so a changed plan never adds a `t3`. The one exception is a `site-hero` standing in
+   for the `site-scroll` row: it leaves on scale, so its seam is `t3` (rule 6).
 3. **Exempt.** `t1` and `t3` anywhere. `t5` between consecutive scenes of the same type.
 4. **Limited.** Every other id at most 3 times per film, and never on two adjacent seams. A pinned
    seam wins over this.

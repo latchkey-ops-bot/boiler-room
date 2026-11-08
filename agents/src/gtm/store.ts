@@ -159,7 +159,8 @@ export interface FilmRow {
   lead_id: string;
   domain: string;
   order_id: string;
-  kind: 'dry-run' | 'app';
+  /** The `FilmOrder` that took it. Only `app` is live: `local` films have no page to share. */
+  kind: 'dry-run' | 'app' | 'local';
   state: 'queued' | 'working' | 'ready' | 'failed' | 'withdrawn' | 'late';
   qc: 'pending' | 'pass' | 'fail';
   simulated: boolean;

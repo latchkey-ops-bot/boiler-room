@@ -25,7 +25,7 @@ import {
   substituteCssUrl,
 } from './fonts.ts';
 import { isFontHost, urlGuard } from './guard.ts';
-import { type LogoSource, pngSize, rankLogos, sniff, wordmarkSvg } from './logo.ts';
+import { imageSize, normaliseSvg, rankLogos, sniff, wordmarkSvg } from './logo.ts';
 import {
   brandNameGuess,
   buildTemplate,
@@ -1173,18 +1173,41 @@ async function downloadLogo(
   color: string,
   generic: 'serif' | 'sans-serif' | 'monospace',
 ): Promise<CaptureManifest['brand']['logo']> {
-  for (const ranked of rankLogos(raw.logos).slice(0, 8)) {
+  // Every picture is tried before the name is set in type: a header with a logo never ends on a
+  // generated wordmark because its first candidates would not download.
+  for (const ranked of rankLogos(raw.logos)) {
     const { candidate } = ranked;
-    if (candidate.kind === 'inline-svg' && candidate.svg) {
-      writeFileSync(join(paths.out, 'logo.svg'), candidate.svg);
+    const chosen = (
+      file: string,
+      kind: 'svg' | 'image',
+      width: number | null,
+      height: number | null,
+      url: string | null,
+    ) => {
+      log(`  logo: ${ranked.why} (${ranked.placement}) -> ${file}`);
       return {
-        source: 'inline-svg',
-        file: 'logo.svg',
-        url: site,
-        kind: 'svg',
-        width: candidate.width || null,
-        height: candidate.height || null,
+        source: ranked.source,
+        found_in: ranked.placement,
+        why: ranked.why,
+        file,
+        url,
+        kind,
+        width,
+        height,
+        aspect: width && height ? Math.round((width / height) * 1000) / 1000 : null,
       };
+    };
+    if (candidate.kind === 'inline-svg' && candidate.svg) {
+      const fixed = normaliseSvg(candidate.svg, candidate);
+      writeFileSync(join(paths.out, 'logo.svg'), fixed?.svg ?? candidate.svg);
+      const logo = chosen(
+        'logo.svg',
+        'svg',
+        fixed?.width ?? (candidate.width || null),
+        fixed?.height ?? (candidate.height || null),
+        site,
+      );
+      return fixed ? { ...logo, aspect: Math.round(fixed.aspect * 1000) / 1000 } : logo;
     }
     if (!candidate.url) continue;
     let bytes: Buffer | null = null;
@@ -1210,25 +1233,53 @@ async function downloadLogo(
       continue;
     }
     if (kind === 'ico' && ranked.source !== 'favicon') continue;
+    const url = candidate.url.startsWith('data:') ? site : candidate.url;
+    if (kind === 'svg') {
+      const text = bytes.toString('utf8');
+      const fixed = normaliseSvg(text, candidate);
+      writeFileSync(join(paths.out, 'logo.svg'), fixed?.svg ?? text);
+      const logo = chosen(
+        'logo.svg',
+        'svg',
+        fixed?.width ?? (candidate.width || null),
+        fixed?.height ?? (candidate.height || null),
+        url,
+      );
+      return {
+        ...logo,
+        source: ranked.source === 'favicon' ? 'favicon' : 'svg',
+        ...(fixed ? { aspect: Math.round(fixed.aspect * 1000) / 1000 } : {}),
+      };
+    }
     const file = `logo.${kind === 'jpeg' ? 'jpg' : kind}`;
     writeFileSync(join(paths.out, file), bytes);
-    const size = pngSize(bytes);
-    const source: LogoSource =
-      ranked.source === 'favicon' ? 'favicon' : kind === 'svg' ? 'svg' : 'png';
-    return {
-      source,
+    const size = imageSize(bytes);
+    const logo = chosen(
       file,
-      url: candidate.url.startsWith('data:') ? site : candidate.url,
-      kind: kind === 'svg' ? 'svg' : 'image',
-      width: size?.width ?? (candidate.width || null),
-      height: size?.height ?? (candidate.height || null),
-    };
+      'image',
+      size?.width ?? (candidate.width || null),
+      size?.height ?? (candidate.height || null),
+      url,
+    );
+    return { ...logo, source: ranked.source === 'favicon' ? 'favicon' : 'png' };
   }
-  log('  no logo, inline logo or favicon could be downloaded; writing a wordmark of the name');
+  log(
+    '  no logo, inline logo, icon or social image could be downloaded; writing a wordmark of the name',
+  );
   const svg = wordmarkSvg(name, wordmark.family, color, generic, wordmark.weight);
   writeFileSync(join(paths.out, 'logo.svg'), svg);
   const width = Number(/width="(\d+)"/.exec(svg)?.[1] ?? 0) || null;
-  return { source: 'generated', file: 'logo.svg', url: null, kind: 'svg', width, height: 96 };
+  return {
+    source: 'generated',
+    found_in: 'generated',
+    why: 'no picture of a logo could be downloaded',
+    file: 'logo.svg',
+    url: null,
+    kind: 'svg',
+    width,
+    height: 96,
+    aspect: width ? Math.round((width / 96) * 1000) / 1000 : null,
+  };
 }
 
 /** Text and images the customer supplied, fetched next to the tool, with `materials.json` beside them. */
@@ -1249,7 +1300,7 @@ function readMaterial(base: string): { entries: MaterialEntry[]; pages: StoredPa
       const bytes = readFileSync(path);
       const type = item.content_type.toLowerCase();
       if (/^image\//.test(type)) {
-        const size = pngSize(bytes);
+        const size = imageSize(bytes);
         image = { width: size?.width ?? null, height: size?.height ?? null };
       } else if (/pdf/.test(type)) {
         let result = spawnSync('pdftotext', ['-layout', path, '-'], {
@@ -1428,7 +1479,7 @@ export async function capture(
 
     const fetchContext = await (await browsers.get()).newContext({ viewport: VIEWPORT });
     const request = fetchContext.request;
-    const colors = deriveColors(raw.styles);
+    const colors = deriveColors(raw.styles, home?.record.final_url ?? site);
     const { fonts, notes: fontNotes } = await resolveBrandFonts(request, raw, site);
     colors.notes.push(...fontNotes);
     const logoAlt = raw.logos.find((logo) => logo.alt)?.alt ?? '';
@@ -1507,11 +1558,14 @@ export async function capture(
     await fetchContext.close().catch(() => {});
 
     const material = readMaterial(base);
+    // The measured colours travel in the bundle, whose digest binds it to this run, so the gate
+    // can check every brand colour of the result against what was measured.
     const bundle: PagesBundle = {
       version: 1,
       site,
       captured_at: new Date().toISOString(),
       pages: [...pages.map((page) => page.stored), ...material.pages],
+      measured_colors: colors.measured,
     };
     const bundleText = `${JSON.stringify(bundle)}\n`;
     writeFileSync(join(paths.out, 'pages.json'), bundleText);
@@ -1606,7 +1660,12 @@ function captureSummary(manifest: CaptureManifest, paths: Paths, script: string)
     `  brand colour candidates: ${c.candidates.map((item) => `${item.hex} (${item.sources.join(', ')})`).join('; ') || 'none'}`,
     ...c.notes.map((note) => `  note: ${note}`),
     `  fonts: ${brand.fonts.map((font) => `${font.role} ${font.family} [${font.method}] ${font.url ?? ''}`).join(' | ')}`,
-    `  logo: ${brand.logo.source} -> ${join(paths.out, brand.logo.file)}${brand.logo.url ? ` from ${brand.logo.url}` : ''}`,
+    '  measured colours (only these may be brand colours; the background must be a surface):',
+    ...c.measured.map(
+      (item) =>
+        `    ${item.hex} ${item.seen_as}${item.share !== null ? ` ${Math.round(item.share * 100)}%` : ''} ${item.property} of ${item.element} at (${item.x}, ${item.y})${item.tokens.length ? ` -> ${item.tokens.join(', ')}` : ''}`,
+    ),
+    `  logo: ${brand.logo.source}, ${brand.logo.found_in ?? '?'}${brand.logo.why ? ` (${brand.logo.why})` : ''}, ${brand.logo.width ?? '?'} x ${brand.logo.height ?? '?'}, aspect ${brand.logo.aspect ?? '?'} -> ${join(paths.out, brand.logo.file)}${brand.logo.url ? ` from ${brand.logo.url}` : ''}`,
     '',
     'Calls to action seen (verbatim, with the page they are on):',
     ...manifest.pages.flatMap((page) =>
