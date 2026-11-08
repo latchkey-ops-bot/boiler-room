@@ -1,0 +1,354 @@
+/* The delivery screen, settings, and the app's empty and error states. The player is the script
+   review sample's (boiler-room-design design-system/samples/script-review.html), the cards and
+   rhythm are the dashboard sample's. Components stay in components.css; this file only places
+   them. Imported by the pages that use it. */
+
+.card-title {
+  font-size: 24px;
+}
+
+/* ---------- Delivery: the player and the change request on the left, the files on the right.
+   On a phone: the player, the files, then the change request. ---------- */
+
+.delivery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 380px;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "player side"
+    "change side";
+  gap: var(--br-space-6);
+  align-items: start;
+}
+.delivery-player {
+  grid-area: player;
+  min-width: 0;
+}
+.delivery-side {
+  grid-area: side;
+  display: grid;
+  gap: var(--br-space-6);
+  align-content: start;
+  min-width: 0;
+}
+.delivery-change {
+  grid-area: change;
+  min-width: 0;
+  max-width: 640px;
+}
+
+/* The player wears an ink frame, as in the script review sample. The screen keeps 16:9 and a
+   tall or square film sits in the middle of it, on ink. */
+.player {
+  --frame: var(--br-ink);
+  --drop: var(--br-sky);
+  padding: 0;
+  background: var(--br-ink);
+}
+.player .screen {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--br-ink);
+}
+.player .shape {
+  height: 100%;
+  max-width: 100%;
+}
+.player video {
+  display: block;
+  background: var(--br-ink);
+}
+.player .controls {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-3) var(--br-space-4);
+  flex-wrap: wrap;
+  padding: var(--br-space-3) var(--br-space-4);
+  background: var(--br-white);
+}
+.player fieldset.seg {
+  min-inline-size: 0;
+  padding: 0;
+  border: 0;
+}
+.player .time {
+  font-family: var(--br-font-mono);
+  font-size: 13px;
+  color: var(--br-ink);
+  white-space: nowrap;
+}
+.player .download {
+  margin-left: auto;
+}
+
+/* The preview of a film with no file, in the customer's brand, never ours. Sizes follow the
+   stage, so a tall film reads as well as a wide one. */
+.stage {
+  position: relative;
+  container-type: size;
+  overflow: hidden;
+  font-family: var(--brand-body);
+}
+.stage-in {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  padding: 0 9cqw;
+}
+.stage .copy {
+  display: grid;
+  gap: 3cqmin;
+  max-width: 84%;
+}
+.stage .big {
+  font: 800 max(20px, 12.5cqmin) / 1 var(--brand-display);
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.stage .small {
+  font: 600 max(12px, 4.8cqmin) / 1.35 var(--brand-body);
+  color: var(--brand-muted);
+}
+.stage .cta {
+  justify-self: start;
+  margin-top: 2cqmin;
+  padding: 2.4cqmin 4.4cqmin;
+  border-radius: var(--brand-radius);
+  background: var(--brand-primary);
+  color: var(--brand-background);
+  font: 700 max(12px, 4.4cqmin) / 1 var(--brand-body);
+}
+.stage .sign {
+  position: absolute;
+  left: 9cqw;
+  bottom: 8cqmin;
+  color: var(--brand-primary);
+  font: 800 max(12px, 4.4cqmin) / 1 var(--brand-display);
+}
+/* The simulated label sits on a solid chip, so it reads on any customer's colours. */
+.stage .tag {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  max-width: calc(100% - 20px);
+  padding: 3px 7px 2px;
+  background: var(--br-ink);
+  color: var(--br-sky-soft);
+  font: 600 10px / 1.4 var(--br-font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.stage .where {
+  position: absolute;
+  right: 10px;
+  bottom: 8px;
+  color: var(--brand-muted);
+  font: 600 10px / 1.4 var(--br-font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.stage-none {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  color: var(--br-sky-soft);
+}
+
+/* Files: one row per shape, on one card */
+.files-card {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.files-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--br-space-2);
+  flex-wrap: wrap;
+}
+.files-card .files {
+  gap: 0;
+}
+.files-card .file {
+  display: grid;
+  grid-template-columns: 62px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--br-space-2) var(--br-space-3);
+  padding: var(--br-space-4) 0;
+  border-bottom: 2px dashed var(--br-cream-deep);
+}
+/* The download sits under the words, so the words keep the width. */
+.files-card .file > :last-child {
+  grid-column: 2;
+  justify-self: start;
+}
+.files-card .file:last-child {
+  border-bottom: 0;
+}
+.files-card .shape-score {
+  padding-top: 2px;
+  font-size: 24px;
+}
+.files-card .what {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.files-card .what strong {
+  color: var(--br-deep);
+  font: 700 17px / 1.2 var(--br-font-display);
+}
+.files-card .use {
+  color: var(--br-muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.files-card .name {
+  color: var(--br-muted);
+  font: 400 12px / 1.4 var(--br-font-mono);
+  overflow-wrap: anywhere;
+}
+.files-card .size {
+  white-space: nowrap;
+}
+.files-card .file-compact {
+  padding: var(--br-space-3) 0;
+}
+.earlier {
+  padding-top: var(--br-space-3);
+  border-top: 2px solid var(--br-sky-soft);
+}
+.earlier summary {
+  color: var(--br-deep);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.showcase-card {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.showcase-card .toggle {
+  align-items: flex-start;
+}
+
+/* ---------- Empty and error states ---------- */
+
+.empty .empty-title {
+  font-size: 28px;
+}
+.empty h1.empty-title {
+  font-size: 34px;
+}
+.empty-text {
+  display: grid;
+  gap: var(--br-space-2);
+  justify-items: center;
+}
+.empty-actions {
+  display: flex;
+  justify-content: center;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.empty-failed {
+  --frame: var(--br-error-ink);
+  --lift: 0px;
+}
+.crew-failed {
+  --frame: var(--br-error-ink);
+  width: 64px;
+  height: 64px;
+  background: var(--br-error-soft);
+  color: var(--br-error-ink);
+}
+.crew-failed .icon {
+  width: 36px;
+  height: 36px;
+}
+.global-error {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--br-space-5) var(--br-space-4);
+}
+.global-error .empty {
+  width: min(640px, 100%);
+}
+
+/* ---------- Settings: one column, one card per thing ---------- */
+
+.settings {
+  display: grid;
+  gap: var(--br-space-6);
+  max-width: 720px;
+}
+.settings-card {
+  display: grid;
+  gap: var(--br-space-5);
+}
+.person {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+}
+.person .who {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.person .who .muted {
+  overflow-wrap: anywhere;
+}
+.crew-person {
+  --frame: var(--br-steel);
+  width: 56px;
+  height: 56px;
+  background: var(--br-cream);
+}
+.settings-list {
+  align-items: baseline;
+}
+.settings-list dd {
+  overflow-wrap: anywhere;
+}
+.settings-out {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1100px) {
+  .delivery {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-template-areas:
+      "player"
+      "side"
+      "change";
+  }
+}
+@media (max-width: 640px) {
+  /* On a phone a tall or square film gets the room it needs, not a pillarbox. */
+  .player .screen[data-shape="9:16"] {
+    aspect-ratio: 4 / 5;
+  }
+  .player .screen[data-shape="1:1"] {
+    aspect-ratio: 1 / 1;
+  }
+  .player .download {
+    width: calc(100% - 4 * var(--br-px));
+    margin-left: var(--br-px);
+  }
+  .settings-list {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .settings-list dd {
+    margin-bottom: var(--br-space-3);
+  }
+}

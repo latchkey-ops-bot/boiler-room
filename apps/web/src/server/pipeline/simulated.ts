@@ -20,8 +20,8 @@ import {
 
 /**
  * A pipeline that makes no film. It walks a run through all ten stages with the events a real
- * crew would write, pauses for the customer's approval, rewrites on a note, and "delivers" files
- * that do not exist. Every screen labels a simulated film as one.
+ * crew would write, pauses for the customer's approval, rewrites on a note, "delivers" files that
+ * do not exist, and goes round again on a revision. Every screen labels a simulated film as one.
  *
  * It keeps no state of its own, because a Worker keeps nothing between requests. The run is a pure
  * function of when it started, what the customer decided and when, and the clock. The app supplies
@@ -38,10 +38,19 @@ export interface ScriptDecision {
   at: Date;
 }
 
+/** The customer asked for changes to delivered version `version`. */
+export interface ScriptRevision {
+  version: number;
+  note: string;
+  at: Date;
+}
+
 export interface SimulatedRun {
   url: string;
   startedAt: Date;
   decisions: ScriptDecision[];
+  /** Revisions asked for after delivery. None when left out. */
+  revisions?: ScriptRevision[];
 }
 
 export interface SimulationLedger {
@@ -121,21 +130,39 @@ export class SimulatedPipeline implements PipelineClient {
     const run = await this.requireRun(runId);
     const status = await this.status(runId);
     if (status.status !== 'done') return [];
-    const approved = run.decisions.find((decision) => decision.decision === 'approved');
+    // The files of the version that was delivered last, which is the one the run is on.
+    const version = status.scriptVersion;
+    const approved = run.decisions.find(
+      (decision) => decision.decision === 'approved' && decision.version === version,
+    );
     if (!approved) return [];
     const slug = displayHost(run.url).replace(/[^a-z0-9]+/g, '-');
     const opening = approved.hookId ?? 'main';
+    const cut = version > 1 ? `-v${version}` : '';
     return approved.formats.map((format) => ({
       variantKey: `${format}.${opening}.${approved.ctaId ?? 'none'}`,
       format,
       hookId: approved.hookId,
       ctaId: approved.ctaId,
-      fileName: `${slug}-${format.replace(':', 'x')}-${opening}.mp4`,
+      fileName: `${slug}-${format.replace(':', 'x')}-${opening}${cut}.mp4`,
       contentType: 'video/mp4',
       r2Key: null,
       bytes: null,
       durationSeconds: SAMPLE_CAMPAIGN.durationSeconds,
+      scriptVersion: version,
     }));
+  }
+
+  async requestRevision(runId: string, input: { version: number; note: string }): Promise<void> {
+    const status = await this.status(runId);
+    if (status.status !== 'done') {
+      throw new PipelineConflictError('The film is not delivered yet.');
+    }
+    if (status.scriptVersion !== input.version) {
+      throw new PipelineConflictError(
+        `Version ${input.version} is not the delivered film. Version ${status.scriptVersion} is.`,
+      );
+    }
   }
 
   private async assertAwaiting(runId: string, version: number): Promise<void> {
@@ -186,21 +213,36 @@ export function timeline(runId: string, run: SimulatedRun, pace = 1): TimedEvent
 
   add(run.startedAt.getTime(), firstScript(host));
   let version = 1;
-  let readyAt = events[events.length - 1]?.at.getTime() ?? run.startedAt.getTime();
+  const lastAt = (fallback: number) => events[events.length - 1]?.at.getTime() ?? fallback;
+  let readyAt = lastAt(run.startedAt.getTime());
 
-  const decisions = [...run.decisions].sort((a, b) => a.at.getTime() - b.at.getTime());
-  for (const decision of decisions) {
+  const byTime = <T extends { at: Date }>(items: T[]) =>
+    [...items].sort((a, b) => a.at.getTime() - b.at.getTime());
+  const decisions = byTime(run.decisions);
+  const revisions = byTime(run.revisions ?? []);
+  for (;;) {
     // A decision counts only on the version that was waiting, once it was waiting.
-    if (decision.version !== version || decision.at.getTime() < readyAt) continue;
+    const decision = decisions.find(
+      (item) => item.version === version && item.at.getTime() >= readyAt,
+    );
+    if (!decision) break;
     const base = decision.at.getTime();
     if (decision.decision === 'changes_requested') {
       add(base, rewrite(version, decision.note ?? ''));
       version += 1;
-      readyAt = events[events.length - 1]?.at.getTime() ?? base;
+      readyAt = lastAt(base);
       continue;
     }
     add(base, production(version, decision.formats));
-    break;
+    // A revision counts only on the version that was delivered, once it was delivered.
+    const deliveredAt = lastAt(base);
+    const revision = revisions.find(
+      (item) => item.version === version && item.at.getTime() >= deliveredAt,
+    );
+    if (!revision) break;
+    add(revision.at.getTime(), revise(version, revision.note));
+    version += 1;
+    readyAt = lastAt(revision.at.getTime());
   }
   return events;
 }
@@ -325,6 +367,61 @@ function rewrite(version: number, note: string): Planned[] {
       next,
     ),
   ];
+}
+
+function revise(version: number, note: string): Planned[] {
+  const next = version + 1;
+  return [
+    step(
+      0,
+      'customer',
+      'sent_back',
+      'script',
+      'working',
+      `Asked for changes to version ${version}: "${shorten(note)}"`,
+      version,
+    ),
+    step(
+      2,
+      'account_manager',
+      'decision',
+      'script',
+      'working',
+      `Took your note to the Director. The files of version ${version} stay ready to download.`,
+      version,
+    ),
+    step(
+      7,
+      'director',
+      'decision',
+      'checks',
+      'working',
+      `Rewrote the script from your note. This is version ${next}.`,
+      version,
+    ),
+    step(
+      10,
+      'validator',
+      'passed',
+      'approval',
+      'working',
+      `Checked version ${next}. Every number is backed by a quote.`,
+      version,
+    ),
+    step(
+      11,
+      'coordinator',
+      'needs_you',
+      'approval',
+      'needs_you',
+      `Version ${next} is ready. Paused until you approve it.`,
+      next,
+    ),
+  ];
+}
+
+function shorten(note: string): string {
+  return note.length > 80 ? `${note.slice(0, 79)}…` : note;
 }
 
 function production(version: number, formats: Format[]): Planned[] {

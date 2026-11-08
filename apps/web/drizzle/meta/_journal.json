@@ -15,6 +15,13 @@
       "when": 1794102780577,
       "tag": "0001_launch_plan",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794104609067,
+      "tag": "0002_delivery_revisions",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,6 @@
 import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
-import { approvals, films } from '../../db/schema.ts';
+import { approvals, films, revisions } from '../../db/schema.ts';
 import { FORMATS, type Format, PIPELINE_KINDS, type PipelineKind } from '../../lib/film.ts';
 import { NaivePipeline } from './naive.ts';
 import { SimulatedPipeline, type SimulationLedger } from './simulated.ts';
@@ -20,17 +20,27 @@ export function createPipeline(kind: PipelineKind, db: Db, clock?: () => Date): 
   return new NaivePipeline();
 }
 
-/** Reads a simulated run from D1: the film's start time and the customer's decisions. */
+/**
+ * Reads a simulated run from D1: the film's start time, the customer's decisions on each script,
+ * and the revisions they asked for after delivery.
+ */
 export function d1Ledger(db: Db): SimulationLedger {
   return {
     async run(runId) {
       const film = await db.query.films.findFirst({ where: eq(films.pipelineRunId, runId) });
       if (!film) return null;
-      const rows = await db
-        .select()
-        .from(approvals)
-        .where(eq(approvals.filmId, film.id))
-        .orderBy(asc(approvals.decidedAt));
+      const [rows, asked] = await Promise.all([
+        db
+          .select()
+          .from(approvals)
+          .where(eq(approvals.filmId, film.id))
+          .orderBy(asc(approvals.decidedAt)),
+        db
+          .select()
+          .from(revisions)
+          .where(eq(revisions.filmId, film.id))
+          .orderBy(asc(revisions.requestedAt)),
+      ]);
       return {
         url: film.url,
         startedAt: film.createdAt,
@@ -42,6 +52,11 @@ export function d1Ledger(db: Db): SimulationLedger {
           ctaId: row.chosenCta,
           formats: parseFormats(row.formatsJson),
           at: row.decidedAt,
+        })),
+        revisions: asked.map((row) => ({
+          version: row.scriptVersion,
+          note: row.note,
+          at: row.requestedAt,
         })),
       };
     },

@@ -711,7 +711,7 @@
 .callout .text {
   display: grid;
   gap: 2px;
-  /* Room for a sentence before the button drops below it on a phone */
+  /* A basis, so on a phone the button wraps under the words instead of squeezing them. */
   flex: 1 1 14em;
 }
 .callout h3 {
