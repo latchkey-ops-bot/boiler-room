@@ -1,0 +1,58 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // The top level is local development only: `pnpm web:dev` and `pnpm web:preview`.
+  // D1 and R2 are simulated on disk in .wrangler/state. Staging and production are under "env".
+  // Bindings, vars and services are not inherited, so each environment states all of them.
+  "name": "boiler-room-web",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": { "directory": ".open-next/assets", "binding": "ASSETS" },
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+  "vars": { "APP_ENV": "development", "PIPELINE": "simulated" },
+  "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web" }],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "boiler-room-local",
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "drizzle"
+    }
+  ],
+  "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-local" }],
+  "env": {
+    "staging": {
+      "name": "boiler-room-web-staging",
+      "vars": { "APP_ENV": "staging", "PIPELINE": "simulated" },
+      "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-staging" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "boiler-room-staging",
+          // Written by `pnpm web:provision:staging`, then committed by pull request.
+          "database_id": "PROVISION_ME",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-staging" }]
+    },
+    "production": {
+      "name": "boiler-room-web-production",
+      // Production makes no simulated films. Until the Naive pipeline is wired, starting a film
+      // there answers 503.
+      "vars": { "APP_ENV": "production", "PIPELINE": "naive" },
+      "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-production" }],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "boiler-room-production",
+          // Written by `pnpm web:provision:production`, which only the founder runs.
+          "database_id": "PROVISION_ME",
+          "migrations_dir": "drizzle"
+        }
+      ],
+      "r2_buckets": [{ "binding": "FILMS", "bucket_name": "boiler-room-films-production" }]
+    }
+  }
+}
