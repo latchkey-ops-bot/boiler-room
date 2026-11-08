@@ -369,7 +369,7 @@ export function rankCandidates(
 const RELEVANT = 30;
 /** What each earlier use of a picture costs it, outside `tile-wall`. */
 const REUSE = 50;
-/** Candidates offered to the agent per scene, besides `tile-wall`, which is offered its maximum. */
+/** Candidates offered to the agent per scene. `tile-wall` is offered four more than it fills. */
 export const OFFER = 6;
 
 export interface Proposal {
@@ -425,7 +425,7 @@ export function proposeAssets(campaign: Campaign, infos: readonly AssetInfo[]): 
     }
     const tiers = assetIds.flatMap((id) => tierOf.get(id) ?? []);
     // The agent sees the best few, and always the default, so its view stays small.
-    const offer = scene.type === 'tile-wall' ? slot.max : OFFER;
+    const offer = scene.type === 'tile-wall' ? slot.fill + 4 : OFFER;
     const offered = candidates.filter(
       (candidate, index) => index < offer || assetIds.includes(candidate.id),
     );

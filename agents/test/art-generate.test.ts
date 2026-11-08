@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { oklchLightness, toOklch } from '@boiler-room/schema';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
+  colourWords,
   DEFAULT_CAP,
   GENERATED_LICENSE,
   generateImages,
@@ -84,6 +85,21 @@ describe('generationNeeds', () => {
     campaign.assets['hero-texture'] = { kind: 'svg', src: 'x.svg', provenance: 'captured' };
     const style = decideStyle(campaign.brand.colors);
     expect(generationNeeds(campaign, style)[0]?.assetId).toBe('hero-texture-b');
+  });
+});
+
+describe('colourWords', () => {
+  it('names a colour for an image model that reads names better than hex', () => {
+    expect(colourWords('#08090A')).toBe('near-black');
+    expect(colourWords('#FFFFFF')).toBe('white');
+    expect(colourWords('#828FFF')).toBe('light vivid blue-violet');
+    expect(colourWords('#FF0000')).toMatch(/red$/);
+    expect(colourWords('#1A1A40')).toBe('near-black with a blue-violet tint');
+  });
+
+  it('puts the names and the hex in the texture prompt', () => {
+    const { needs } = needsFor('#5850EC');
+    expect(needs[0]?.prompt).toContain('mid vivid blue-violet (#5850EC) on white (#FFFFFF)');
   });
 });
 

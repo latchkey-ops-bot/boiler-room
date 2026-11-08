@@ -42,6 +42,39 @@ export const DEFAULT_CAP: GenerationCap = {
 
 export const GENERATED_LICENSE = 'Generated for this campaign. Not a capture.';
 
+const HUES: [number, string][] = [
+  [35, 'red'],
+  [75, 'orange'],
+  [115, 'yellow'],
+  [165, 'green'],
+  [215, 'teal'],
+  [250, 'sky blue'],
+  [285, 'blue-violet'],
+  [320, 'violet'],
+  [345, 'pink'],
+  [361, 'red'],
+];
+
+/**
+ * A colour in words, for an image model that follows names better than hex codes: "near-black",
+ * "light blue-violet". The hex follows in the prompt for models that read it.
+ */
+export function colourWords(hex: string): string {
+  const { l, c, h } = toOklch(hex);
+  const tone =
+    l < 0.25 ? 'near-black' : l < 0.45 ? 'dark' : l < 0.6 ? 'mid' : l < 0.88 ? 'light' : 'pale';
+  if (c < 0.03 || h === undefined) {
+    return l < 0.25 ? 'near-black' : l > 0.95 ? 'white' : `${tone} grey`;
+  }
+  const hue = HUES.find(([limit]) => h < limit)?.[1] ?? 'red';
+  const strength = c > 0.15 ? ' vivid' : c < 0.07 ? ' greyish' : '';
+  return tone === 'near-black'
+    ? `near-black with a${strength} ${hue} tint`
+    : `${tone}${strength} ${hue}`;
+}
+
+const named = (hex: string) => `${colourWords(hex)} (${hex})`;
+
 const NEVER =
   'No text, no letters, no words, no digits, no numbers, no logos, no symbols, no icons, no user interface, no screens, no people, no faces, no hands. Do not draw any colour code.';
 
@@ -102,7 +135,7 @@ export function generationNeeds(campaign: Campaign, style: StyleDecision): Gener
       purpose: 'event-field',
       sceneIds: events.map((scene) => scene.id),
       aspectRatio: '16:9',
-      prompt: `Full-frame abstract colour field for a video background. A smooth radial gradient from ${deep} at the edges through ${mid} to a soft glow of ${far} off centre. Flat and minimal: no objects, no texture noise, no grain, no hard edges. ${NEVER}`,
+      prompt: `Full-frame abstract colour field for a video background. A smooth radial gradient from ${named(deep)} at the edges through ${named(mid)} to a soft glow of ${named(far)} off centre. Flat and minimal: no objects, no texture noise, no grain, no hard edges. ${NEVER}`,
     });
   }
 
@@ -113,7 +146,7 @@ export function generationNeeds(campaign: Campaign, style: StyleDecision): Gener
       purpose: 'hero-texture',
       sceneIds: [chain.id],
       aspectRatio: '1:1',
-      prompt: `Flat, full-bleed, seamless abstract surface texture, seen straight on: a fine regular geometric pattern in ${colors.primary} on ${colors.background}, matte, low contrast. The pattern runs off all four edges of the square. No border, no frame, no tile, no slab, no object, no shadow, no perspective. ${NEVER}`,
+      prompt: `Flat, full-bleed, seamless abstract surface texture, seen straight on: a fine regular geometric pattern in ${named(colors.primary)} on ${named(colors.background)}, matte, low contrast. Keep to these two colours. The pattern runs off all four edges of the square. No border, no frame, no tile, no slab, no object, no shadow, no perspective. ${NEVER}`,
     });
   }
   return needs;
