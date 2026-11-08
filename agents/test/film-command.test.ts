@@ -474,6 +474,46 @@ describe('the film command, as the film runner calls it', () => {
     expect(crew.direct.mock.calls[0]?.[0].brief.kind).toBe('outreach-sample');
   });
 
+  it('holds a sample film to one cap across its script and its render', async () => {
+    const { runDir, eventsFile } = setup();
+    const crew = fakeCrew();
+    const code = await runFilmCommand(
+      argsFor(runDir, eventsFile('all'), 'all', { maxUsd: 2.5 }),
+      deps(crew),
+    );
+    expect(code).toBe(0);
+    // The Director leaves Quality Check its $1, and the render half gets only what is left.
+    expect(crew.research.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(0.5));
+    expect(crew.direct.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(1.45));
+    expect(crew.art.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(0.95));
+    expect(crew.qc.mock.calls[0]?.[0].ceilingMicroUsd).toBe(usd(1.5));
+    const costs = readEvents(eventsFile('all')).filter((event) => event.type === 'cost');
+    expect(costs.at(-1)?.totalMicroUsd).toBe(usd(0.95));
+    for (const cost of costs) expect(cost.totalMicroUsd).toBeLessThanOrEqual(usd(2.5));
+  });
+
+  it('stops a sample film whose script left too little to render it', async () => {
+    const { runDir, eventsFile } = setup();
+    const crew = fakeCrew();
+    crew.direct.mockImplementationOnce(async ({ dir }) => ({
+      ok: true,
+      value: {
+        campaignFile: write(join(dir, 'campaign.json'), novaCampaign()),
+        handoffFile: write(join(dir, 'handoff.json'), '{}'),
+      },
+      cost: { ...NO_COST, modelMicroUsd: usd(1.45) },
+      sessionIds: [],
+      decisions: [],
+    }));
+    const code = await runFilmCommand(
+      argsFor(runDir, eventsFile('all'), 'all', { maxUsd: 2.4 }),
+      deps(crew),
+    );
+    expect(code).toBe(4);
+    expect(crew.art).not.toHaveBeenCalled();
+    expect(readEvents(eventsFile('all')).at(-1)).toMatchObject({ type: 'error', code: 'cost_cap' });
+  });
+
   it('refuses a send-back it cannot write yet, as bad input', async () => {
     const { runDir, eventsFile } = setup();
     const argv = [

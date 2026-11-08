@@ -361,7 +361,17 @@ export async function runFilmCommand(args: ContractArgs, deps: CommandDeps): Pro
       throw new Stop('bad_input', 'A sample film is Short.', FILM_EXIT.badInput);
 
     if (args.phase !== 'render') {
-      const written = await writeScript({ ...options, formats }, filmDeps);
+      // A sample film is made in one go, so its script leaves room for its render and review.
+      const written = await writeScript(
+        { ...options, formats },
+        filmDeps,
+        sample
+          ? {
+              research: FLOORS.director + formats.length * perFormat,
+              director: formats.length * perFormat,
+            }
+          : undefined,
+      );
       if (!written.script)
         throw new Stop(
           written.capped ? 'cost_cap' : 'script_failed',
@@ -376,8 +386,22 @@ export async function runFilmCommand(args: ContractArgs, deps: CommandDeps): Pro
         formats,
         confirmedClaimIds: [],
       };
+      // The render half has what the script half left of the one cap, never the cap again.
+      const left = maxMicroUsd - written.manifest.spend.totalMicroUsd;
+      if (left < formats.length * perFormat)
+        throw new Stop(
+          'cost_cap',
+          `The script took ${usd(written.manifest.spend.totalMicroUsd)} of the ${usd(maxMicroUsd)} budget, and the film needs ${usd(formats.length * perFormat)} more to be rendered and checked.`,
+          FILM_EXIT.costCap,
+        );
       return deliver(
-        await renderApproved(options, approval, filmDeps, written.script, 'sample'),
+        await renderApproved(
+          { ...options, maxMicroUsd: left },
+          approval,
+          filmDeps,
+          written.script,
+          'sample',
+        ),
         approval,
       );
     }

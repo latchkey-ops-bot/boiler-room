@@ -1390,7 +1390,15 @@ export interface PhaseResult {
  * top of the run dir as `campaign.json` (version 1), with `script.json` for the render phase, and
  * says `script_ready`. The cap is this phase's alone: the website checks it again at approval.
  */
-export async function writeScript(options: FilmOptions & { dir: string }, deps: FilmDeps) {
+export async function writeScript(
+  options: FilmOptions & { dir: string },
+  deps: FilmDeps,
+  /**
+   * What the Researcher and the Director each leave for the steps after them. A script alone
+   * leaves the render to its own budget at approval; a sample film made in one go leaves it here.
+   */
+  reserves?: { research: number; director: number },
+) {
   const film = new FilmRun(options, deps);
   mkdirSync(film.dir, { recursive: true });
   // A relaunch starts the script again from nothing: files of an earlier try are not this one's.
@@ -1404,7 +1412,7 @@ export async function writeScript(options: FilmOptions & { dir: string }, deps: 
     deps.crew,
     options,
     brief,
-    { research: film.floors.director, director: 0 },
+    reserves ?? { research: film.floors.director, director: 0 },
     (researchFile) => film.events.artifact('research', researchFile, 'application/json', 0),
     deps.signal,
   );
