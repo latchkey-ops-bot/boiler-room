@@ -20,9 +20,11 @@ export const artDirector: AgentDefinition = {
   harness: 'pi',
   window: 'immediate',
   system: ART_DIRECTOR_SYSTEM,
+  // Only what a review needs: code holds the spend, so session_spend is off too.
   tools: toolset(
-    ['view_image', 'read_skill', 'session_spend'],
+    ['view_image', 'read_skill'],
     [
+      'session_spend',
       'bash',
       'read',
       'write',

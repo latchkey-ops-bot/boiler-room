@@ -262,10 +262,6 @@ export async function buildSheets(input: SheetInput): Promise<SheetImage[]> {
       frames: [...new Set(made.map((tile) => tile.frame))],
     });
   };
-  const scene = (frame: number) =>
-    sceneFrames(cut).scenes.find(
-      ({ from, durationInFrames }) => frame >= from && frame < from + durationInFrames,
-    )?.id ?? '';
   const clock = (frame: number) => timecode(frame, fps).replace(/\.\d+$/, '');
 
   const contact = await tiles(
@@ -278,7 +274,7 @@ export async function buildSheets(input: SheetInput): Promise<SheetImage[]> {
     contact,
     layout.contactColumns,
     `CONTACT SHEET  1 FRAME PER SECOND  ${size.frames} FRAMES AT ${fps} FPS`,
-    `Contact sheet, decoded from the film: one frame per second, each labelled with its time and frame number (${contact.map((tile) => `F${tile.frame} ${scene(tile.frame)}`).join(', ')}).`,
+    `Contact sheet, decoded from the film: one frame per second, F${contact[0]?.frame ?? 0} to F${contact.at(-1)?.frame ?? 0}, each labelled with its time and frame number.`,
   );
 
   const transitions = transitionStills(cut, input.index, size.frames);

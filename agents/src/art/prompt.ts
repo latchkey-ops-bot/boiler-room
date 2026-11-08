@@ -92,7 +92,7 @@ export function reviewTask(
     `One review for ${film}.`,
     `File ids, in order: ${JSON.stringify(files)}. Call view_image once with exactly these.`,
     'The review, as JSON. The pictures are listed in the same order as the file ids.',
-    JSON.stringify(review, null, 1),
+    JSON.stringify(review),
     `${answer} Then call submit_output once.`,
   ].join('\n\n');
 }

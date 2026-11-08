@@ -22,9 +22,11 @@ export const qualityCheck: AgentDefinition = {
   window: 'immediate',
   system: QUALITY_CHECK_SYSTEM,
   tools: toolset(
-    ['view_image', 'read_skill', 'session_spend'],
+    ['view_image', 'read_skill'],
     // It judges images it is given. It has no shell, no files, no web and no way to publish.
+    // Code holds the spend, so session_spend is off too.
     [
+      'session_spend',
       'bash',
       'read',
       'write',

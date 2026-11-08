@@ -1137,7 +1137,7 @@ describe('the quality-check agent', () => {
       .filter(([, config]) => config.permission === 'allow')
       .map(([name]) => name)
       .sort();
-    expect(allowed).toEqual(['read_skill', 'session_spend', 'view_image']);
+    expect(allowed).toEqual(['read_skill', 'view_image']);
     for (const name of ['bash', 'publish_file', 'web_fetch', 'vetta.tools_execute']) {
       expect(qualityCheck.tools.configs[name], name).toEqual({
         enabled: false,
@@ -1205,5 +1205,34 @@ describe('the quality-check agent', () => {
     for (const check of VISUAL_CHECKS) expect(task).toContain(`- ${check.id} (`);
     expect(task).toContain('"40% faster builds" cites build-times');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
+  });
+
+  // The skill was read in full before any image, then carried through every later model request.
+  // The criteria each check needs are in the task now, and code results are one short line each.
+  it('needs no skill read, and keeps each code result to one short line', () => {
+    const task = reviewTask({
+      campaign: example(),
+      format: '16:9',
+      width: 1920,
+      height: 1080,
+      images: [{ fileId: 'fil_a', name: 'contact.png', what: 'Contact sheet' }],
+      codeChecks: [
+        {
+          id: 'static-runs',
+          result: 'pass',
+          measured: 'x'.repeat(2_000),
+          threshold: 't',
+          frames: [],
+          source: 'code',
+        },
+      ],
+      researchSupplied: true,
+      budgetUsd: 1,
+    });
+    expect(task).not.toContain('read_skill quality-check');
+    expect(task).toContain('78 px at 1080');
+    const line = task.split('\n').find((each) => each.startsWith('- static-runs:'));
+    expect(line?.length).toBeLessThanOrEqual(230);
+    expect(task.length).toBeLessThan(9_000);
   });
 });

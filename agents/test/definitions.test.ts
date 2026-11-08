@@ -147,7 +147,7 @@ describe('the art director definition', () => {
       .filter(([, config]) => config.permission === 'allow')
       .map(([name]) => name)
       .sort();
-    expect(allowed).toEqual(['read_skill', 'session_spend', 'view_image']);
+    expect(allowed).toEqual(['read_skill', 'view_image']);
     for (const name of [
       ...ALWAYS_OFF,
       'bash',
@@ -195,10 +195,23 @@ describe('the art director definition', () => {
     if (!calendar) throw new Error('fixture changed');
     const task = reviewTask(calendar, { campaign, style, infos });
     expect(task).toMatch(/File ids, in order: \["fil_featuresui1",/);
-    expect(task).toContain('"scene_id": "calendar"');
+    expect(task).toContain('"scene_id":"calendar"');
     expect(task).toContain('Call view_image once');
     expect(task).toContain('submit_output');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
+  });
+
+  // A review's input is the harness, the system prompt, at most 4 pictures and this task. Measured
+  // live at about 26k tokens a review, under the 40k target; the task itself stays a small part.
+  it('keeps every review task small: no page text, no base64, only the batch', () => {
+    const campaign = artCampaign();
+    const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
+    const style = decideStyle(campaign.brand.colors);
+    for (const batch of planBatches(proposeAssets(campaign, infos), [])) {
+      const task = reviewTask(batch, { campaign, style, infos });
+      expect(task.length, batch.id).toBeLessThan(2_500);
+      expect(task).not.toMatch(/base64|data:image/);
+    }
   });
 });
 

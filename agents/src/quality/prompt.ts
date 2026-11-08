@@ -19,7 +19,7 @@ Rules that always apply:
 9. Your verdict is "pass" only when every check is "pass" or "n/a" and you opened every image. Otherwise it is "fail".
 10. A check passes only on what an image showed you. If no image you were given can show it, such as a seam you were not shown, its result is "n/a" or "fail", never "pass", and "measured" says why. In "frames" list the frames your result rests on, read off the image labels; each must be a frame an image you opened shows. A pass that says it could not check, or names no frame you were shown, is thrown out and the review is blocked.
 
-The skill "quality-check" holds the criteria. Read it with read_skill before you look at any image.`;
+Each visual check in the task states its pass criteria with the skill's thresholds, which is all you need to judge it. The skill "quality-check" holds the full method; read it with read_skill only if a check leaves you unable to judge.`;
 
 export interface ReviewImage {
   fileId: string;
@@ -33,12 +33,12 @@ export const VISUAL_CHECKS: { id: string; section: string; pass: string }[] = [
   {
     id: 'frame-0',
     section: 'Contact sheet',
-    pass: 'Frame 0 shows content, not an empty ground or a poster that then disappears.',
+    pass: 'Frame 0 shows content (pixel variance above 0), not an empty ground or a poster that then disappears.',
   },
   {
     id: 'one-idea-per-shot',
     section: 'Contact sheet',
-    pass: 'Each scene reads as one subject. No full-window screenshot left uncomposed.',
+    pass: 'Each still reads as its scene type with one subject. No full-window screenshot left uncomposed.',
   },
   {
     id: 'no-invented-product',
@@ -53,12 +53,12 @@ export const VISUAL_CHECKS: { id: string; section: string; pass: string }[] = [
   {
     id: 'no-cross-dissolve',
     section: 'Transitions',
-    pass: 'No frame shows outgoing and incoming content both at partial opacity.',
+    pass: 'No frame shows outgoing and incoming content both at partial opacity. Allowed: the one overlap frame of t4, the overlays of t12 and t14, the black of t16. t1: the outgoing element moves into the cut and the incoming one on from it, same axis and direction. t3: the frame before the boundary is not frozen, and the boundary frame already shows the incoming motion.',
   },
   {
     id: 'no-blank-flash',
     section: 'Transitions',
-    pass: 'The boundary frame is not empty ground.',
+    pass: 'The boundary frame is not empty ground, except after t5: exactly 2 frames of uniform ground (5 for the chapter blink into a pivot card), and inside t16.',
   },
   {
     id: 'chunk-seams',
@@ -68,32 +68,32 @@ export const VISUAL_CHECKS: { id: string; section: string; pass: string }[] = [
   {
     id: 'words-recovered',
     section: 'Phone-size legibility',
-    pass: 'At 390 px wide every word of each scene text item can be read.',
+    pass: 'On the phone sheet (390 px wide) every word of each scene text item can be read at sentence size. Exempt small slots: the end-card URL, the site-hero and site-scroll address pill, feature-card node labels and proof-bars bar names.',
   },
   {
     id: 'lines',
     section: 'Phone-size legibility',
-    pass: 'At most 2 lines per text item; no story text set far smaller than the rest.',
+    pass: 'At most 2 lines per text item, each static line at most 65% of the frame width. On the full-size frames, a capital of every headline, subhead, CTA and story label is at least 7.2% of the frame height tall (78 px at 1080).',
   },
   {
     id: 'inside-frame',
     section: 'Phone-size legibility',
-    pass: 'Every text box is wholly inside the frame and its own box: no overflow, cropping, clipping or collision with another element.',
+    pass: 'Every text box is wholly inside the safe area and its own box: no overflow, cropping, clipping or collision with another element.',
   },
   {
     id: 'ink-and-accent',
     section: 'Brand match',
-    pass: 'Type in the foreground colour; the only saturated hue is the primary (on a dark film the plate may carry it).',
+    pass: 'Type in the foreground colour, or its readable fallback. On a light (Neutral Cut) film the only saturated hue outside the colour event is the primary; on a dark (Kinetic Plate) film the plate carries the saturation and type stays neutral.',
   },
   {
     id: 'logo',
     section: 'Brand match',
-    pass: 'The logo matches the brand: same shape and colours, not stretched.',
+    pass: 'The logo matches the brand: same shape and colours, never stretched, a raster logo never above its natural size.',
   },
   {
     id: 'accent-ration',
     section: 'Brand match',
-    pass: 'At most one accent phrase and one lit element per shot.',
+    pass: 'At most one accent phrase per scene, none on colour-event, and one lit element per shot.',
   },
   {
     id: 'numbers-on-screen',
@@ -123,6 +123,11 @@ export interface ReviewTaskInput {
   budgetUsd: number;
 }
 
+/** The most of a code check's measured value the task repeats. */
+const MEASURED_CHARS = 200;
+const clip = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max - 3)}...` : text;
+
 /** The first message of a review session: the film as it should be, the images, and the checks. */
 export function reviewTask(input: ReviewTaskInput): string {
   const { campaign } = input;
@@ -146,14 +151,21 @@ export function reviewTask(input: ReviewTaskInput): string {
   const quoted = campaign.claims.map(
     (claim) => `- ${claim.id}: "${claim.quote}" (${claim.sourceUrl})`,
   );
+  // Only the pictures the film can show: those its scenes use, and the logo.
+  const used = new Set([
+    campaign.brand.logoAssetId,
+    ...[...campaign.scenes, ...campaign.variants.hooks].flatMap((scene) => scene.assetIds),
+  ]);
   const assets = Object.entries(campaign.assets)
-    .filter(([, asset]) => asset.kind === 'image' || asset.kind === 'svg')
+    .filter(([id, asset]) => used.has(id) && (asset.kind === 'image' || asset.kind === 'svg'))
     .map(
       ([id, asset]) =>
         `- ${id}: ${asset.kind}, ${asset.provenance}${asset.sourceUrl ? `, from ${asset.sourceUrl}` : ''}`,
     );
+  // One line per code check: the agent does not repeat them, it only needs their results.
   const measured = input.codeChecks.map(
-    (check) => `- ${check.id}: ${check.result.toUpperCase()}. ${check.measured}`,
+    (check) =>
+      `- ${check.id}: ${check.result.toUpperCase()}. ${clip(check.measured, MEASURED_CHARS)}`,
   );
   const images = input.images.map((image) => `- ${image.fileId}: ${image.what}`);
   const checks = VISUAL_CHECKS.map((check) => `- ${check.id} (${check.section}): ${check.pass}`);
@@ -183,10 +195,9 @@ export function reviewTask(input: ReviewTaskInput): string {
     ...checks,
     '',
     'Steps.',
-    '1. read_skill quality-check.',
-    `2. view_image with file_ids ${JSON.stringify(input.images.map((image) => image.fileId))}. Look at each one closely; open one again on its own if you need it larger.`,
-    '3. Judge each visual check. Read every word of overlaid copy in every image against the scene text above.',
-    '4. Call submit_output with your verdict, every image in "inspected", one entry per visual check with the frames it rests on, and one issue per failure with its scene, frame, owner and fix. A check no image could show is "n/a" or "fail", never "pass".',
+    `1. view_image with file_ids ${JSON.stringify(input.images.map((image) => image.fileId))}. Look at each one closely; open one again on its own only if its text is too small to read.`,
+    '2. Judge each visual check by its criteria above. Read every word of overlaid copy in every image against the scene text above.',
+    '3. Call submit_output with your verdict, every image in "inspected", one entry per visual check with the frames it rests on, and one issue per failure with its scene, frame, owner and fix. A check no image could show is "n/a" or "fail", never "pass".',
   ].join('\n');
 }
 

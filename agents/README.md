@@ -434,17 +434,24 @@ frames of empty ground on a light film were both missed by code and agent before
 
 ### Then the agent
 
-`br-quality-check` runs Sonnet 5.5 with `view_image`, `read_skill` and `session_spend` and nothing
-else: no shell, no files, no web, no computer. Its skill is `skills/quality-check`, pushed from the
+`br-quality-check` runs Sonnet 5.5 with `view_image` and `read_skill` and nothing else: no shell,
+no files, no web, no computer, and no `session_spend`, since code holds the spend. Its skill is `skills/quality-check`, pushed from the
 repo root. Code builds every image it uploads from frames it decodes from the film itself, never
 from the render folder: the contact sheet, the transitions sheet (during is the boundary from
 `sceneFrames`), the phone sheet, a seams sheet (the frames before and at every chunk seam, every
 `framesPerChunk` frames, and at every run code flagged as blank or a flash), and every scene's rest
 frame at full size. It uploads them as Naive files, starts one session with
-`output_schema`, and deletes the files afterwards. The agent reads the skill, opens every image,
-and submits a typed review: `pass` or `fail`, what each image showed, one entry per visual check,
+`output_schema`, and deletes the files afterwards. The agent opens every image and submits a typed
+review: `pass` or `fail`, what each image showed, one entry per visual check,
 and issues with severity, scene, frame, owner (`director`, `art-director` or `motion`) and a fix.
 Timecodes are worked out in code from the frame.
+
+The task carries only what the review needs: each visual check with the skill's own thresholds
+(78 px cap height at 1080, 65% line width, the `t5` blank frames), the scenes and their copy, the
+cited claims, the assets the scenes use, and one line per code result. The agent no longer reads
+the 23,000-character skill before looking: read first, it was carried through every later model
+request of the session. It may still read the skill if a check leaves it unable to judge. Each
+report records every session's input tokens and task size (`review.sessions`).
 
 ### The verdict is code's
 
