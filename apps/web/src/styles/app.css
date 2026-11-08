@@ -1,0 +1,1351 @@
+/* Layout for the app's own screens. Built from the three samples in boiler-room-design
+   design-system/samples/ (landing, dashboard, script review) with the tokens and components in
+   tokens.css and components.css. Components stay in components.css; this file only places them. */
+
+/* ---------- Surfaces: the pixel is 3px where we sell, 2px where customers work ---------- */
+
+.surface-marketing {
+  --br-px: 3px;
+}
+.surface-app {
+  --br-px: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: absolute;
+  left: var(--br-space-4);
+  top: -48px;
+  z-index: 10;
+  padding: 8px 12px;
+  background: var(--br-deep);
+  color: var(--br-white);
+  box-shadow: none;
+}
+.skip-link:focus {
+  top: var(--br-space-2);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: none;
+}
+.brand:hover {
+  box-shadow: none;
+}
+
+/* The steam trail rises from Boyle's valve, at the mark's own scale. */
+.boyle .puff {
+  left: 71%;
+  top: -4%;
+  width: 37.5%;
+}
+.boyle .puff-b {
+  animation-delay: calc(var(--br-frame) * 9);
+}
+
+.stack {
+  display: grid;
+  gap: var(--br-space-4);
+}
+
+/* ---------- Marketing: nav, sections, footer ---------- */
+
+.site-nav {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-6);
+  height: 76px;
+}
+.site-nav .links {
+  display: flex;
+  gap: var(--br-space-5);
+  margin-left: auto;
+  font-weight: 700;
+}
+.site-nav .links a {
+  box-shadow: none;
+  color: var(--br-ink);
+}
+.site-nav .links a:hover,
+.site-nav .nav-in:hover {
+  color: var(--br-deep);
+  box-shadow: 0 2px 0 var(--br-sky);
+}
+/* Log in, beside the call to action: a returning founder's way in, at every width */
+.site-nav .nav-in {
+  color: var(--br-ink);
+  font-weight: 700;
+  box-shadow: none;
+  white-space: nowrap;
+}
+
+.hero {
+  padding: var(--br-space-8) 0 var(--br-space-9);
+}
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 520px;
+  gap: var(--br-space-7);
+  align-items: center;
+}
+.hero-copy {
+  display: grid;
+  gap: var(--br-space-5);
+}
+.lede {
+  font-size: 19px;
+  max-width: 30em;
+}
+.hero .url-field {
+  max-width: 560px;
+}
+.hero .hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hero .hint .icon {
+  color: var(--br-success-ink);
+}
+.channels {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.channels > .label {
+  color: var(--br-muted);
+  margin-right: 4px;
+}
+
+/* The hero illustration: a URL goes in the side pipe, videos come out on the belt. The figure's
+   caption says the frames are the sample customer's, not ours. */
+.hero-figure {
+  display: grid;
+  justify-items: center;
+  gap: var(--br-space-4);
+  margin: 0;
+}
+.hero-figure figcaption {
+  color: var(--br-muted);
+  text-align: center;
+}
+.art {
+  position: relative;
+  width: 520px;
+  height: 400px;
+}
+.art > * {
+  position: absolute;
+}
+.art .ticket {
+  left: 0;
+  top: 98px;
+  width: 180px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  font-weight: 800;
+  font-size: 14px;
+}
+.art .ticket .icon {
+  color: var(--br-steel);
+  width: 18px;
+  height: 18px;
+}
+.art .ticket .label {
+  position: absolute;
+  top: -28px;
+  left: -3px;
+}
+.art .feed-pipe {
+  left: 186px;
+  top: 116px;
+  width: 22px;
+  height: 24px;
+  background: linear-gradient(
+    var(--br-deep) 0 8px,
+    var(--br-sky) 8px 16px,
+    var(--br-deep) 16px 24px
+  );
+}
+.art .boyle {
+  left: 200px;
+  top: 20px;
+}
+.art .floor {
+  left: 236px;
+  top: 214px;
+  width: 120px;
+  height: 8px;
+  background: var(--br-cream-deep);
+}
+.art .belt {
+  left: 0;
+  right: 0;
+  top: 368px;
+  height: 20px;
+  background:
+    repeating-linear-gradient(90deg, var(--br-cream) 0 8px, transparent 8px 24px) 8px 6px / 100% 8px
+    no-repeat,
+    var(--br-steel);
+  box-shadow:
+    0 -4px 0 0 var(--br-deep),
+    0 4px 0 0 var(--br-deep);
+  animation: br-flow calc(var(--br-frame) * 12) steps(3) infinite;
+}
+/* The sample films wear the sample customer's brand (Nova), never ours. */
+.art .film {
+  --frame: var(--br-ink);
+  bottom: 38px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 10px;
+  background: #0b1020;
+  color: #f4f6fb;
+  font: 700 13px / 1.15 var(--br-font-body);
+}
+.art .film b {
+  color: #7c9cff;
+  font: 800 24px / 1 var(--br-font-display);
+  letter-spacing: -0.02em;
+}
+.art .film .format {
+  position: absolute;
+  bottom: -32px;
+  left: -3px;
+  color: var(--br-muted);
+}
+/* A player's bar along the bottom of each frame: a play mark and a scrubber, part played. */
+.art .film .chrome {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 5px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #f4f6fb;
+}
+.art .film .chrome .icon {
+  width: 8px;
+  height: 8px;
+}
+.art .film .chrome i:last-child {
+  flex: 1;
+  height: 3px;
+  background: linear-gradient(90deg, #7c9cff 0 35%, rgba(244, 246, 251, 0.35) 35% 100%);
+}
+.art .film-wide {
+  left: 26px;
+  width: 168px;
+  height: 95px;
+}
+.art .film-tall {
+  left: 228px;
+  width: 72px;
+  height: 128px;
+  text-align: center;
+}
+.art .film-tall b {
+  font-size: 20px;
+}
+.art .film-square {
+  left: 340px;
+  width: 104px;
+  height: 104px;
+}
+.art .film-square b {
+  font-size: 18px;
+  color: #ffb86b;
+}
+.art .sparkle {
+  color: var(--br-pink);
+  width: 18px;
+  height: 18px;
+}
+.art .s1 {
+  left: 470px;
+  top: 210px;
+}
+.art .s2 {
+  left: 160px;
+  top: 200px;
+  color: var(--br-sky);
+}
+.art .s3 {
+  left: 150px;
+  top: 40px;
+  color: var(--br-steel);
+  width: 12px;
+  height: 12px;
+}
+
+.section {
+  padding: var(--br-space-9) 0;
+}
+.section-head {
+  display: grid;
+  gap: var(--br-space-3);
+  max-width: 660px;
+  margin-bottom: var(--br-space-7);
+}
+.section-head p {
+  font-size: 18px;
+}
+
+/* How it works: four stations on one pipe */
+.steps {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--br-space-5);
+}
+.steps::before {
+  content: "";
+  position: absolute;
+  left: 38px;
+  right: calc((100% - 72px) / 4 - 38px);
+  top: 32px;
+  height: 12px;
+  background: linear-gradient(
+    var(--br-deep) 0 3px,
+    var(--br-sky) 3px 6px,
+    var(--br-steel) 6px 9px,
+    var(--br-deep) 9px 12px
+  );
+}
+.step {
+  position: relative;
+  display: grid;
+  gap: var(--br-space-3);
+  align-content: start;
+}
+.step .crew {
+  width: 64px;
+  height: 64px;
+}
+.step .crew .icon {
+  width: 30px;
+  height: 30px;
+}
+.step .card {
+  padding: var(--br-space-4) var(--br-space-5);
+  display: grid;
+  gap: var(--br-space-2);
+}
+.step .card .who {
+  color: var(--br-muted);
+  margin-top: var(--br-space-1, 4px);
+}
+.step-you .crew {
+  background: var(--br-attention-soft);
+  color: var(--br-attention-ink);
+  --frame: var(--br-attention-ink);
+}
+
+/* Claims, checked */
+.claims-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: var(--br-space-7);
+  align-items: center;
+}
+.script-sample {
+  display: grid;
+  gap: var(--br-space-4);
+}
+.script-line {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.script-line .say {
+  font: 700 24px / 1.25 var(--br-font-display);
+  color: var(--br-ink);
+  letter-spacing: -0.01em;
+}
+.stamp {
+  display: flex;
+  gap: var(--br-space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+/* Showcase: the launch wall */
+.wall-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: end;
+  gap: var(--br-space-5);
+  flex-wrap: wrap;
+  margin-bottom: var(--br-space-7);
+}
+.wall-head .section-head {
+  margin: 0;
+}
+.wall {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--br-space-6) var(--br-space-5);
+}
+.launch {
+  display: grid;
+  gap: var(--br-space-3);
+  padding: var(--br-space-3);
+  align-content: start;
+}
+.launch .thumb {
+  position: relative;
+  display: grid;
+  align-content: end;
+  aspect-ratio: 16 / 9;
+  padding: 14px 16px;
+  overflow: hidden;
+  font: 800 22px / 1.05 var(--br-font-display);
+  letter-spacing: -0.02em;
+}
+.launch .body {
+  display: grid;
+  gap: 4px;
+  padding: 0 var(--br-space-2) var(--br-space-2);
+}
+.launch .body p {
+  font-size: var(--br-text-sm);
+  color: var(--br-muted);
+}
+.wall-empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--br-space-4);
+  padding: var(--br-space-8) var(--br-space-5);
+  text-align: center;
+}
+.wall-empty p {
+  max-width: 34em;
+}
+
+/* CTA band and footer */
+.cta-band {
+  background: var(--br-deep);
+  color: var(--br-white);
+  padding: var(--br-space-8) 0;
+}
+.cta-band .wrap {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--br-space-7);
+  align-items: center;
+}
+.cta-band h2 {
+  color: var(--br-white);
+  font-size: 44px;
+}
+.cta-band p {
+  color: var(--br-sky-soft);
+  font-size: 18px;
+  margin-top: 8px;
+}
+.cta-band .url-field {
+  --frame: var(--br-ink);
+  --drop: var(--br-ink);
+  margin-top: var(--br-space-5);
+  max-width: 560px;
+}
+.site-footer {
+  padding: var(--br-space-6) 0;
+}
+.site-footer .wrap {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-5);
+  flex-wrap: wrap;
+}
+.site-footer .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--br-space-3) var(--br-space-5);
+  margin-left: auto;
+  font-size: var(--br-text-sm);
+  font-weight: 700;
+}
+.site-footer .links a {
+  box-shadow: none;
+}
+
+/* Sign in and sign up: one card, centred, with room around it */
+.auth-page {
+  display: grid;
+  justify-items: center;
+  gap: var(--br-space-6);
+  padding: var(--br-space-8) var(--br-space-4) var(--br-space-9);
+}
+.auth-page .section-head {
+  justify-items: center;
+  text-align: center;
+  margin: 0;
+}
+/* The page's h1 is the heading. Clerk's own heading on the first step would be a second one. */
+.auth-page .cl-signUp-start .cl-header,
+.auth-page .cl-signIn-start .cl-header {
+  display: none;
+}
+.auth-page .carried {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--br-white);
+  color: var(--br-ink);
+  font-weight: 700;
+  box-shadow:
+    0 -2px 0 0 var(--br-steel),
+    0 2px 0 0 var(--br-steel),
+    -2px 0 0 0 var(--br-steel),
+    2px 0 0 0 var(--br-steel);
+}
+.auth-page .carried .icon {
+  color: var(--br-steel);
+}
+@media (max-width: 1080px) {
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .hero-figure {
+    justify-self: center;
+  }
+  .claims-grid {
+    grid-template-columns: 1fr;
+  }
+  .wall {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .site-nav {
+    gap: var(--br-space-4);
+  }
+  .site-nav .links {
+    display: none;
+  }
+  .site-nav .nav-in,
+  .site-nav .nav-videos {
+    margin-left: auto;
+  }
+  /* The hero's URL field is on the first screen: one call to action is enough there. */
+  .site-nav .nav-cta {
+    display: none;
+  }
+  .steps {
+    grid-template-columns: 1fr;
+  }
+  .steps::before {
+    left: 34px;
+    right: auto;
+    top: 40px;
+    bottom: 40px;
+    width: 12px;
+    height: auto;
+    background: linear-gradient(
+      90deg,
+      var(--br-deep) 0 3px,
+      var(--br-sky) 3px 6px,
+      var(--br-steel) 6px 9px,
+      var(--br-deep) 9px 12px
+    );
+  }
+  .step {
+    grid-template-columns: auto 1fr;
+    align-items: start;
+  }
+  .wall {
+    grid-template-columns: 1fr;
+  }
+  .cta-band .wrap {
+    grid-template-columns: 1fr;
+  }
+  .cta-band h2 {
+    font-size: 32px;
+  }
+}
+@media (max-width: 560px) {
+  /* A phone can't read the sample's numbers at this size, so the illustration steps aside. */
+  .hero .hero-figure {
+    display: none;
+  }
+  .url-field {
+    flex-wrap: wrap;
+  }
+  .url-field input {
+    flex-basis: calc(100% - 40px);
+  }
+  .url-field .btn {
+    width: calc(100% - 9px);
+  }
+  .section {
+    padding: var(--br-space-8) 0;
+  }
+}
+
+/* ---------- App shell: a 248px sidebar and a content column ---------- */
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  min-height: 100vh;
+}
+.side {
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--br-space-5);
+  height: 100vh;
+  padding: var(--br-space-5) var(--br-space-4);
+  background: var(--br-white);
+  box-shadow: var(--br-px) 0 0 0 var(--br-deep);
+}
+.side .brand {
+  padding: 0 6px;
+}
+.side nav {
+  display: grid;
+  gap: 4px;
+}
+.side nav a {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 10px;
+  color: var(--br-ink);
+  font-weight: 700;
+  box-shadow: none;
+}
+.side nav a .icon {
+  width: 18px;
+  height: 18px;
+  color: var(--br-steel);
+}
+.side nav a:hover {
+  background: var(--br-sky-soft);
+}
+.side nav a[aria-current="page"] {
+  background: var(--br-sky);
+  color: var(--br-ink);
+  box-shadow:
+    0 -2px 0 0 var(--br-deep),
+    0 2px 0 0 var(--br-deep),
+    -2px 0 0 0 var(--br-deep),
+    2px 0 0 0 var(--br-deep);
+  margin: 2px;
+}
+.side nav a[aria-current="page"] .icon {
+  color: var(--br-deep);
+}
+/* Who is signed in: a crew-person tile and a name, as in the dashboard sample */
+.side .me {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 8px;
+  color: var(--br-ink);
+  font-size: var(--br-text-sm);
+  box-shadow: none;
+}
+.side .me:hover {
+  background: var(--br-sky-soft);
+}
+.side .me .who {
+  display: grid;
+  min-width: 0;
+  line-height: 1.3;
+}
+.side .me strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.side .me .muted {
+  font-size: 12px;
+}
+.side .crew-person-sm {
+  --frame: var(--br-steel);
+  width: 36px;
+  height: 36px;
+  background: var(--br-cream);
+}
+.side .crew-person-sm .icon {
+  width: 18px;
+  height: 18px;
+}
+
+/* ---------- The app's 2px pixel ----------
+   components.css is a verbatim port of boiler-room-design, where .crew, .check and .toggle draw
+   their frames with a literal 3px. Until that source uses var(--br-px), these rules redraw them
+   from the app's pixel, so a screen never mixes 3px and 2px frames. */
+.surface-app .crew {
+  --br-px: 2px;
+  box-shadow:
+    0 calc(var(--br-px) * -1) 0 0 var(--frame),
+    0 var(--br-px) 0 0 var(--frame),
+    calc(var(--br-px) * -1) 0 0 0 var(--frame),
+    var(--br-px) 0 0 0 var(--frame);
+}
+.surface-app .check input,
+.surface-app .toggle input {
+  /* Set here, not inherited: a card's own --frame would otherwise recolour the field. */
+  --frame: var(--br-steel);
+  flex: none;
+  margin: var(--br-px);
+  box-shadow:
+    0 calc(var(--br-px) * -1) 0 0 var(--frame),
+    0 var(--br-px) 0 0 var(--frame),
+    calc(var(--br-px) * -1) 0 0 0 var(--frame),
+    var(--br-px) 0 0 0 var(--frame);
+}
+.surface-app .check input:checked {
+  --frame: var(--br-ink);
+}
+.surface-app .toggle input:checked {
+  --frame: var(--br-deep);
+}
+.surface-app .toggle input {
+  width: 44px;
+  height: 22px;
+}
+.surface-app .toggle input::after {
+  top: var(--br-px);
+  left: var(--br-px);
+  width: 18px;
+  height: 18px;
+}
+.surface-app .toggle input:checked::after {
+  left: calc(44px - 18px - var(--br-px));
+}
+/* On and Off look nothing alike: off is an empty paper track with the knob left, on is a Pipe
+   blue track with a white knob right, and the word beside it says which. */
+.toggle input:checked {
+  background: var(--br-deep);
+}
+.toggle input:checked::after {
+  background: var(--br-white);
+}
+.toggle input:focus-visible {
+  outline: 2px dashed var(--br-deep);
+  outline-offset: 4px;
+}
+.switch-state {
+  min-width: 3ch;
+  color: var(--br-muted);
+  font: 600 var(--br-text-label) / 1.4 var(--br-font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.switch-state.is-on {
+  color: var(--br-deep);
+}
+.saved {
+  color: var(--br-success-ink);
+  font-size: var(--br-text-sm);
+  font-weight: 700;
+}
+
+.app-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--br-space-6);
+  align-content: start;
+  width: 100%;
+  max-width: var(--br-max-width);
+  padding: var(--br-space-6) var(--br-space-6) var(--br-space-8);
+}
+.app-main > * {
+  min-width: 0;
+}
+
+.env-note {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-2);
+  padding: 8px var(--br-space-4);
+  background: var(--br-cream);
+  color: var(--br-warning-ink);
+  font: 600 var(--br-text-label) / 1.4 var(--br-font-label);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  box-shadow: 0 2px 0 0 var(--br-cream-deep);
+}
+
+.page-head {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.page-head .row {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  flex-wrap: wrap;
+}
+.page-head .row .btn {
+  margin-left: auto;
+}
+.page-head .lede {
+  color: var(--br-muted);
+}
+.crumbs {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.crumbs a {
+  box-shadow: none;
+}
+.meta {
+  display: flex;
+  gap: var(--br-space-5);
+  flex-wrap: wrap;
+  font-size: var(--br-text-sm);
+  color: var(--br-muted);
+}
+.meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.meta .icon {
+  width: 14px;
+  height: 14px;
+}
+
+.callout {
+  align-items: center;
+  padding: var(--br-space-4) var(--br-space-5);
+}
+.callout .text {
+  display: grid;
+  gap: 2px;
+  /* A basis, so on a phone the button wraps under the words instead of squeezing them. */
+  flex: 1 1 14em;
+}
+.callout h3 {
+  font-size: 21px;
+}
+.alert-needs.callout h3 {
+  color: var(--br-attention-ink);
+}
+/* On blue, the button's arrow stays white. The needs-you arrow is pink, as in the sample. */
+.alert-done .btn .icon,
+.alert-failed .btn .icon {
+  color: inherit;
+}
+.callout .icon {
+  width: 28px;
+  height: 28px;
+  margin: 0;
+}
+
+.empty {
+  display: grid;
+  justify-items: center;
+  gap: var(--br-space-4);
+  padding: var(--br-space-8) var(--br-space-5);
+  text-align: center;
+}
+.empty p {
+  max-width: 30em;
+  color: var(--br-muted);
+}
+
+/* The one field that starts a film */
+.new-film {
+  display: grid;
+  gap: var(--br-space-5);
+  max-width: 640px;
+  padding: var(--br-space-7) 0;
+}
+/* What happens after the URL goes in: four quiet steps, the founder's one in pink */
+.next-steps {
+  display: grid;
+  gap: var(--br-space-3);
+  margin-top: var(--br-space-5);
+}
+.next-steps h2 {
+  color: var(--br-muted);
+}
+.next-steps ol {
+  display: grid;
+  gap: var(--br-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.next-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+}
+.next-steps .crew {
+  width: 36px;
+  height: 36px;
+}
+.next-steps .crew .icon {
+  width: 18px;
+  height: 18px;
+}
+.next-steps .crew-you {
+  background: var(--br-attention-soft);
+  color: var(--br-attention-ink);
+  --frame: var(--br-attention-ink);
+}
+
+/* Where the film is: one line, then the same four stops as the landing page */
+.progress-card {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.progress-now {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  margin-bottom: var(--br-space-2);
+}
+.progress-now .mascot {
+  flex: none;
+}
+.progress-now .text {
+  display: grid;
+  gap: 2px;
+}
+.progress-now h2 {
+  font-size: 21px;
+}
+/* At 48px the trail rises a short way, so it stays inside the card. */
+.progress-now .mascot .puff {
+  animation-name: br-rise-short;
+}
+.progress-line {
+  color: var(--br-muted);
+}
+.stops {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--br-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.stop {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+/* A thin bar per stop: filled when done, Steam while the crew is on it, pink when it waits for
+   the founder, dashed while still to come. Hard edges, no gradient. */
+.stop .bar {
+  display: block;
+  height: 8px;
+  background: repeating-linear-gradient(90deg, var(--br-cream-deep) 0 6px, transparent 6px 12px);
+}
+.stop-done .bar {
+  background: var(--br-deep);
+}
+.stop-now .bar {
+  background: var(--br-sky);
+  box-shadow: inset 0 0 0 2px var(--br-deep);
+}
+.stop-needs .bar {
+  background: var(--br-attention-soft);
+  box-shadow: inset 0 0 0 2px var(--br-attention-ink);
+}
+.stop-failed .bar {
+  background: var(--br-error-soft);
+  box-shadow: inset 0 0 0 2px var(--br-error-ink);
+}
+.stop .name {
+  font: 700 13px / 1.25 var(--br-font-body);
+  color: var(--br-muted);
+}
+.stop-now .name,
+.stop-done .name {
+  color: var(--br-ink);
+}
+.stop-needs .name {
+  color: var(--br-attention-ink);
+}
+.substeps {
+  font-size: var(--br-text-sm);
+  color: var(--br-muted);
+}
+.substeps strong {
+  color: var(--br-ink);
+}
+
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: var(--br-space-6);
+  align-items: start;
+}
+
+/* The crew's decisions */
+.log {
+  display: grid;
+  margin: var(--br-space-4) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.entry {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: var(--br-space-3);
+  padding: var(--br-space-3) 0;
+  border-bottom: 2px dashed var(--br-cream-deep);
+  align-items: start;
+}
+.entry:last-child {
+  border-bottom: 0;
+}
+.entry .when {
+  margin-left: auto;
+  color: var(--br-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.log-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.entry .crew {
+  width: 34px;
+  height: 34px;
+}
+.entry .crew .icon {
+  width: 18px;
+  height: 18px;
+}
+.entry .who {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.entry .who strong {
+  font-family: var(--br-font-display);
+  font-weight: 700;
+  color: var(--br-deep);
+}
+.entry p {
+  font-size: var(--br-text-sm);
+}
+
+.entry-body {
+  display: grid;
+  gap: 2px;
+}
+.entry .claim-card {
+  margin-top: var(--br-space-2);
+}
+/* A sourced figure in a crew message: the claim highlight, and the quote is one click away. */
+.claim-button {
+  border: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  line-height: inherit;
+  cursor: pointer;
+}
+.claim-button:hover,
+.claim-button[aria-expanded="true"] {
+  background: var(--br-cream-deep);
+}
+.claim-button:focus-visible {
+  outline: 2px solid var(--br-deep);
+  outline-offset: 2px;
+}
+.log-empty {
+  margin-top: var(--br-space-4);
+}
+
+/* ---------- Film page: the top bar, the title, the cards ---------- */
+
+.title {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  flex-wrap: wrap;
+}
+.title-row .badge-simulated {
+  margin-left: calc(var(--br-space-2) * -1);
+}
+h2.card-title {
+  font-size: var(--br-text-h3);
+}
+.card-sub {
+  font-size: var(--br-text-sm);
+}
+@keyframes br-rise-short {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  12% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(6px, -16px);
+  }
+}
+
+/* ---------- The app home: all videos ---------- */
+
+.videos h2 {
+  margin-bottom: var(--br-space-3);
+}
+.table-scroll {
+  overflow-x: auto;
+}
+.films-table .name {
+  font-weight: 800;
+}
+.films-table .film-link {
+  color: var(--br-ink);
+  box-shadow: none;
+}
+.films-table .film-link:hover {
+  color: var(--br-deep);
+  box-shadow: 0 2px 0 var(--br-sky);
+}
+.films-table .name .badge-simulated {
+  margin-left: var(--br-space-2);
+}
+.films-table .src {
+  font-family: var(--br-font-mono);
+  font-size: 12px;
+  color: var(--br-muted);
+}
+
+/* ---------- A single choice: a pixel circle with a dot, so it never reads as a checkbox ----------
+   Drawn on an 8 by 8 grid at 16px, two screen pixels per grid pixel: the app's own pixel. */
+.radio {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--br-space-2);
+  cursor: pointer;
+}
+.radio input {
+  appearance: none;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 3px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cg fill='%23FFFFFF'%3E%3Crect x='2' y='1' width='4' height='1'/%3E%3Crect x='1' y='2' width='6' height='4'/%3E%3Crect x='2' y='6' width='4' height='1'/%3E%3C/g%3E%3Cg fill='%234D8DBA'%3E%3Crect x='2' y='0' width='4' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='6' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='4'/%3E%3Crect x='7' y='2' width='1' height='4'/%3E%3Crect x='1' y='6' width='1' height='1'/%3E%3Crect x='6' y='6' width='1' height='1'/%3E%3Crect x='2' y='7' width='4' height='1'/%3E%3C/g%3E%3C/svg%3E")
+    center / 16px 16px no-repeat;
+  image-rendering: pixelated;
+  cursor: pointer;
+}
+.radio input:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8' shape-rendering='crispEdges'%3E%3Cg fill='%23FFFFFF'%3E%3Crect x='2' y='1' width='4' height='1'/%3E%3Crect x='1' y='2' width='6' height='4'/%3E%3Crect x='2' y='6' width='4' height='1'/%3E%3C/g%3E%3Cg fill='%230B2E40'%3E%3Crect x='2' y='0' width='4' height='1'/%3E%3Crect x='1' y='1' width='1' height='1'/%3E%3Crect x='6' y='1' width='1' height='1'/%3E%3Crect x='0' y='2' width='1' height='4'/%3E%3Crect x='7' y='2' width='1' height='4'/%3E%3Crect x='1' y='6' width='1' height='1'/%3E%3Crect x='6' y='6' width='1' height='1'/%3E%3Crect x='2' y='7' width='4' height='1'/%3E%3C/g%3E%3Cg fill='%23086288'%3E%3Crect x='3' y='2' width='2' height='1'/%3E%3Crect x='2' y='3' width='4' height='2'/%3E%3Crect x='3' y='5' width='2' height='1'/%3E%3C/g%3E%3C/svg%3E");
+}
+.radio input:focus-visible {
+  outline: 2px dashed var(--br-deep);
+  outline-offset: 3px;
+}
+
+/* ---------- Dialogs: approve, and ask for changes ---------- */
+
+dialog.approve-dialog,
+dialog.changes-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: var(--br-space-6);
+  overflow: auto;
+  border: 0;
+  color: var(--br-ink);
+}
+dialog.approve-dialog::backdrop,
+dialog.changes-dialog::backdrop {
+  background: rgba(11, 46, 64, 0.55);
+}
+.approve-dialog h2,
+.changes-dialog h2 {
+  font-size: var(--br-text-h3);
+}
+.approve-dialog .dialog-actions,
+.changes-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+  margin-top: var(--br-space-2);
+}
+@media (max-width: 640px) {
+  dialog.approve-dialog,
+  dialog.changes-dialog {
+    padding: var(--br-space-5);
+  }
+  .approve-dialog .dialog-actions,
+  .changes-dialog .dialog-actions {
+    justify-content: stretch;
+  }
+  .approve-dialog .dialog-actions .btn,
+  .changes-dialog .dialog-actions .btn {
+    flex: 1;
+  }
+}
+
+/* Text areas. The script review screen has its own styles in script-review.css. */
+textarea.input {
+  resize: vertical;
+  min-height: 96px;
+}
+
+/* Files */
+.files {
+  display: grid;
+  gap: var(--br-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.file {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  flex-wrap: wrap;
+  padding: var(--br-space-4) var(--br-space-5);
+}
+.file .what {
+  display: grid;
+  gap: 2px;
+  flex: 1;
+  min-width: 12em;
+}
+.file .score {
+  font-size: 28px;
+}
+
+.settings-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--br-space-3) var(--br-space-6);
+  margin: 0;
+}
+.settings-list dt {
+  color: var(--br-muted);
+}
+.settings-list dd {
+  margin: 0;
+}
+
+@media (max-width: 1100px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 860px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .side {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    box-shadow: 0 var(--br-px) 0 0 var(--br-deep);
+  }
+  .side nav {
+    display: flex;
+    order: 2;
+    overflow-x: auto;
+    width: 100%;
+  }
+  .side nav a {
+    white-space: nowrap;
+  }
+  .side .me {
+    order: 1;
+    margin: 0 0 0 auto;
+    padding: 0;
+  }
+  /* On the top bar the tile alone says who is signed in; the name would take a row of its own. */
+  .side .me .who {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .app-main {
+    padding: var(--br-space-5) var(--br-space-4) var(--br-space-7);
+  }
+  .films-table th:nth-child(2),
+  .films-table td:nth-child(2),
+  .films-table th:nth-child(4),
+  .films-table td:nth-child(4) {
+    display: none;
+  }
+  .callout {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 560px) {
+  /* On a phone each video is two lines: its name, then its state and the next step. */
+  .films-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .films-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--br-space-2) var(--br-space-3);
+    padding: var(--br-space-3) 0;
+    border-bottom: 2px dashed var(--br-cream-deep);
+  }
+  .films-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .films-table td.name {
+    grid-column: 1 / -1;
+  }
+  .films-table .film-link {
+    overflow-wrap: anywhere;
+  }
+}

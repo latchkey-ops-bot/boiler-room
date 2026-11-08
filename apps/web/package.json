@@ -1,0 +1,52 @@
+{
+  "name": "@boiler-room/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "preview": "node scripts/preview.mjs",
+    "build": "next build",
+    "build:worker": "node scripts/build.mjs",
+    "cf-typegen": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts",
+    "typecheck": "wrangler types --env-interface CloudflareEnv cloudflare-env.d.ts && next typegen && tsc -p .",
+    "test": "vitest run",
+    "test:smoke": "playwright test",
+    "smoke": "node scripts/smoke.mjs",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "db:migrate:staging": "node scripts/migrate.mjs staging",
+    "db:migrate:production": "node scripts/migrate.mjs production",
+    "provision:staging": "node scripts/provision.mjs staging",
+    "provision:production": "node scripts/provision.mjs production",
+    "secrets:sync:staging": "node scripts/secrets-sync.mjs staging",
+    "secrets:sync:production": "node scripts/secrets-sync.mjs production",
+    "deploy:staging": "node scripts/deploy.mjs staging",
+    "deploy:production": "node scripts/deploy.mjs production",
+    "rollback:staging": "node scripts/rollback.mjs staging",
+    "rollback:production": "node scripts/rollback.mjs production",
+    "logs:staging": "node scripts/logs.mjs staging",
+    "logs:production": "node scripts/logs.mjs production"
+  },
+  "dependencies": {
+    "@boiler-room/schema": "workspace:*",
+    "@clerk/nextjs": "7.9.25",
+    "@opennextjs/cloudflare": "1.20.16",
+    "drizzle-orm": "0.45.4",
+    "next": "16.4.5",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.65.0",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "drizzle-kit": "0.31.11",
+    "typescript": "7.0.2",
+    "vite": "8.3.6",
+    "vitest": "5.1.0",
+    "wrangler": "4.158.0"
+  }
+}
