@@ -263,10 +263,12 @@ export function duplicateOf<T extends PageIdentity>(
 /** A page that loaded as HTML but gave no text, or failed: the capture may load it once more. */
 export function needsRecapture(page: {
   error: string | null;
+  refused?: boolean;
   status: number | null;
   content_type: string | null;
   text_chars?: number;
 }): boolean {
+  if (page.refused) return false;
   if (page.error) return true;
   const html = page.status !== null && page.status < 400 && /html/.test(page.content_type ?? '');
   return html && (page.text_chars ?? 1) === 0;

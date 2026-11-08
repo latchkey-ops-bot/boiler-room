@@ -40,6 +40,8 @@ export interface CapturedPage {
   ui: RawUiCandidate[];
   hidden_overlays: number;
   error: string | null;
+  /** True when the load was refused: it left the site or reached a private address. */
+  refused?: boolean;
   /** Characters of visible text read, so an empty capture is told from a page with no text. */
   text_chars?: number;
 }

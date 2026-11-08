@@ -45,6 +45,11 @@ export interface ResearchOptions {
   /** Extra numbered steps run after fetch_file and before setup (the injection test). */
   preSteps?: readonly string[];
   /**
+   * Hosts the capture tool may load although they resolve privately. Only the injection test sets
+   * one, for its fixture on the agent's loopback; it builds and uploads a separate tool file.
+   */
+  allowPrivateHosts?: readonly string[];
+  /**
    * Runs once after the session has stopped and before the agent (and its computer) is torn down,
    * so a caller can read artefacts off the agent's computer. Best-effort; errors are swallowed.
    */
@@ -558,7 +563,7 @@ export async function research(options: ResearchOptions): Promise<number> {
   process.once('SIGTERM', onSignal);
 
   try {
-    const tool = await bundleTool();
+    const tool = await bundleTool({ allowPrivateHosts: options.allowPrivateHosts });
     const toolFileId = await ensureToolFile(client, tool);
     say(`capture tool ${tool.name} ${tool.sha256.slice(0, 12)} -> ${toolFileId}`);
     const { refs, manifestId } = await uploadMaterial(client, options.material, host);

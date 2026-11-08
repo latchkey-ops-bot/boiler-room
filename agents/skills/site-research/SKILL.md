@@ -28,7 +28,8 @@ start it again. Do not loop on the same failing command more than twice.
 
 If the capture summary lists pages that failed or read no text, run the capture command it gives
 for them once: each may be loaded once more. A page it reports as the same page as another is
-already captured under the other address; cite that one.
+already captured under the other address; cite that one. A page whose error starts with "Refused"
+redirected off the site or to a private address: it is never loaded again, so leave it out.
 
 ## Choosing pages (at most 15 in total, home included)
 

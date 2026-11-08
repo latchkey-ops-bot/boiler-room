@@ -130,6 +130,8 @@ const code = await research({
   outRoot,
   extraFileIds: [serverFileId],
   preSteps,
+  // The fixture is served on the agent's loopback, which the capture tool refuses for any other host.
+  allowPrivateHosts: [host],
   onBeforeTeardown,
 });
 say(`research() exited ${code}`);

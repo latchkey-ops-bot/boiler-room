@@ -23,6 +23,7 @@ import {
   sniffFont,
   substituteCssUrl,
 } from './fonts.ts';
+import { isFontHost, urlGuard } from './guard.ts';
 import { type LogoSource, pngSize, rankLogos, sniff, wordmarkSvg } from './logo.ts';
 import {
   brandNameGuess,
@@ -62,6 +63,8 @@ const REQUEST_GAP_MS = 1000;
 const PAGE_TIMEOUT_MS = 90_000;
 const MAX_UI_SHOTS_PER_PAGE = 3;
 const MAX_UI_SHOTS = 10;
+/** Redirects followed by hand, each hop checked before it is requested. */
+const MAX_REDIRECTS = 5;
 /** Pages with nothing a film would show: forms and legal text. Their text is still read. */
 const NO_SHOTS: ReadonlySet<LinkKind> = new Set(['contact', 'legal', 'careers', 'login']);
 /** What Playwright says when the browser under a page has gone. */
@@ -216,6 +219,9 @@ export async function captureResilient(
   }
 }
 
+/** A page load refused because it left the site or reached a private address. Never retried. */
+export class RefusedPage extends Error {}
+
 interface PageFile {
   record: CapturedPage;
   stored: StoredPage;
@@ -272,8 +278,28 @@ async function capturePage(
   url: string,
   slug: string,
   kind: LinkKind,
-  options: { withStyles: boolean; withLogos: boolean; uiShots: number },
+  options: {
+    withStyles: boolean;
+    withLogos: boolean;
+    uiShots: number;
+    /**
+     * The site the page must stay on, through every redirect. Null for the home page, whose final
+     * address after redirects is what defines the site.
+     */
+    site: string | null;
+  },
 ): Promise<PageFile> {
+  const guard = urlGuard();
+  let stayOn = options.site;
+  /**
+   * The last top-level redirect, which `navigate` follows itself after checking it, and why the
+   * last top-level request was refused, so the error names it.
+   */
+  const nav: { redirect: string | null; refusal: string | null } = {
+    redirect: null,
+    refusal: null,
+  };
+  const leaves = (address: string) => stayOn !== null && !sameSite(address, stayOn);
   const record: CapturedPage = {
     url,
     final_url: url,
@@ -307,21 +333,79 @@ async function capturePage(
     serviceWorkers: 'block',
     locale: 'en-US',
   });
-  await context.route('**/*', (route) => {
+  // Every request is checked against the guard before it leaves the browser, so a page cannot
+  // make the browser fetch a private address. A navigation's redirects are never routed again, so
+  // each navigation is fetched here without following redirects: a redirect of the page itself is
+  // checked and loaded as a new navigation, and a frame's redirect is not followed.
+  await context.route('**/*', async (route) => {
     const request = route.request();
-    if (request.isNavigationRequest() && request.method() !== 'GET') return route.abort();
-    if (request.resourceType() === 'media') return route.abort();
-    return route.continue();
+    const address = request.url();
+    if (!/^https?:/i.test(address)) return route.continue().catch(() => {});
+    const refused = await guard.check(address);
+    let top = false;
+    try {
+      top = request.isNavigationRequest() && request.frame().parentFrame() === null;
+    } catch {}
+    if (refused || (top && leaves(address))) {
+      if (top) nav.refusal = refused ?? `${address} is not on ${stayOn}`;
+      return route.abort('blockedbyclient').catch(() => {});
+    }
+    if (request.isNavigationRequest()) {
+      if (request.method() !== 'GET') return route.abort().catch(() => {});
+      try {
+        const response = await route.fetch({ maxRedirects: 0, timeout: 45_000 });
+        const location = response.headers().location;
+        if (response.status() >= 300 && response.status() < 400 && location) {
+          if (!top) return await route.abort('blockedbyclient');
+          // An empty page ends this navigation cleanly; an abort would race Chrome's error page.
+          nav.redirect = new URL(location, address).href;
+          return await route.fulfill({ status: 200, contentType: 'text/html', body: '' });
+        }
+        return await route.fulfill({ response });
+      } catch {
+        return route.abort('failed').catch(() => {});
+      }
+    }
+    if (request.resourceType() === 'media') return route.abort().catch(() => {});
+    return route.continue().catch(() => {});
   });
   try {
     const page = await context.newPage();
     page.on('dialog', (dialog) => {
       dialog.dismiss().catch(() => {});
     });
+    /** Why an address the page is at may not be kept: private, or off the site. */
+    const refusalOf = async (address: string) =>
+      (await guard.check(address)) ?? (leaves(address) ? `${address} is not on ${stayOn}` : null);
+    /** Loads a page, following its redirects one checked hop at a time. */
+    const navigate = async (start: string) => {
+      let target = start;
+      for (let hop = 0; ; hop++) {
+        nav.redirect = null;
+        nav.refusal = null;
+        let response: Awaited<ReturnType<typeof page.goto>> = null;
+        try {
+          response = await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+        } catch (cause) {
+          if (nav.refusal) throw new RefusedPage(`Refused ${target}: ${nav.refusal}`);
+          throw cause;
+        }
+        const next = nav.redirect;
+        if (next === null) {
+          const refused = await refusalOf(page.url());
+          if (refused) throw new RefusedPage(`Refused ${page.url()}: ${refused}`);
+          stayOn ??= page.url();
+          return response;
+        }
+        if (hop >= MAX_REDIRECTS)
+          throw new RefusedPage(`${start} redirects more than ${MAX_REDIRECTS} times`);
+        target = next;
+      }
+    };
     await politely(NAV_GAP_MS);
     await withTimeout(
       (async () => {
-        const response = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45_000 });
+        const response = await navigate(url);
         record.status = response?.status() ?? null;
         record.content_type = response?.headers()['content-type'] ?? null;
         record.final_url = page.url();
@@ -355,6 +439,10 @@ async function capturePage(
           window.scrollTo(0, 0);
         });
         await page.waitForTimeout(1200);
+        // A script can move the page after it loads. The route refuses a move off the site or to
+        // a private address; this is the last check before anything is read.
+        const moved = await refusalOf(page.url());
+        if (moved) throw new RefusedPage(`Refused ${page.url()}: ${moved}`);
         raw = await page.evaluate(collectPage, {
           withStyles: options.withStyles,
           withLogos: options.withLogos,
@@ -447,6 +535,7 @@ async function capturePage(
   } catch (cause) {
     record.error =
       cause instanceof Error ? (cause.message.split('\n')[0] ?? 'failed') : String(cause);
+    if (cause instanceof RefusedPage) record.refused = true;
     log(`  ! ${url}: ${record.error}`);
   } finally {
     await Promise.race([context.close().catch(() => {}), sleep(5000)]);
@@ -521,38 +610,81 @@ interface Fetched {
   body: Buffer;
 }
 
-async function fetchResource(
+/**
+ * Fetches a file outside the browser. Redirects are followed by hand, and every hop is checked
+ * with the guard before it is requested, so a redirect can never reach a private address.
+ */
+export async function fetchResource(
   request: APIRequestContext,
   url: string,
   maxBytes: number,
   polite: boolean,
 ): Promise<Fetched | null> {
+  const guard = urlGuard();
+  let current = url;
   try {
-    if (polite) await politely(REQUEST_GAP_MS);
-    const response = await request.get(url, {
-      maxRedirects: 5,
-      timeout: 20_000,
-      failOnStatusCode: false,
-    });
-    const length = Number(response.headers()['content-length'] ?? 0);
-    if (length > maxBytes)
+    for (let hop = 0; ; hop++) {
+      const refused = await guard.check(current);
+      if (refused) {
+        log(`  ! fetch ${current}: refused, ${refused}`);
+        return null;
+      }
+      if (polite) await politely(REQUEST_GAP_MS);
+      const response = await request.get(current, {
+        maxRedirects: 0,
+        timeout: 20_000,
+        failOnStatusCode: false,
+      });
+      const location = response.headers().location;
+      if (response.status() >= 300 && response.status() < 400 && location) {
+        await response.dispose();
+        if (hop >= MAX_REDIRECTS) {
+          log(`  ! fetch ${url}: more than ${MAX_REDIRECTS} redirects`);
+          return null;
+        }
+        current = new URL(location, current).href;
+        continue;
+      }
+      const contentType = response.headers()['content-type'] ?? null;
+      const length = Number(response.headers()['content-length'] ?? 0);
+      if (length > maxBytes)
+        return { status: response.status(), url: current, contentType, body: Buffer.alloc(0) };
+      const body = await response.body();
       return {
         status: response.status(),
-        url: response.url(),
-        contentType: response.headers()['content-type'] ?? null,
-        body: Buffer.alloc(0),
+        url: current,
+        contentType,
+        body: body.subarray(0, maxBytes),
       };
-    const body = await response.body();
-    return {
-      status: response.status(),
-      url: response.url(),
-      contentType: response.headers()['content-type'] ?? null,
-      body: body.subarray(0, maxBytes),
-    };
+    }
   } catch (cause) {
-    log(`  ! fetch ${url}: ${cause instanceof Error ? cause.message.split('\n')[0] : cause}`);
+    log(`  ! fetch ${current}: ${cause instanceof Error ? cause.message.split('\n')[0] : cause}`);
     return null;
   }
+}
+
+/**
+ * The sitemap to read: the first `Sitemap:` line of robots.txt that is on the site, or the
+ * site's own `/sitemap.xml`. A robots.txt can name any address, so one off the site is ignored.
+ */
+export function sitemapAddress(robotsText: string, site: string): string {
+  const named = [...robotsText.matchAll(/^sitemap:\s*(\S+)/gim)]
+    .map((match) => match[1] ?? '')
+    .filter((item) => item && sameSite(item, site));
+  return named[0] ?? `${new URL(site).origin}/sitemap.xml`;
+}
+
+/** The child of a sitemap index to read: one on the site, preferring pages, the main or English. */
+export function sitemapChild(xml: string, site: string): string | undefined {
+  const children = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)]
+    .map((match) => match[1] ?? '')
+    .filter((item) => item && sameSite(item, site));
+  return children.find((item) => /page|main|site|en/i.test(item)) ?? children[0];
+}
+
+/** Stylesheets the page could not read that the tool fetches itself: the site's own and font hosts'. */
+export function fetchableFontCss(unreadable: readonly string[], site: string): string[] {
+  return unreadable.filter((href) => isFontHost(href) || sameSite(href, site)).slice(0, 6);
 }
 
 function probeResponse(fetched: Fetched | null): ProbeResponse {
@@ -597,6 +729,7 @@ export async function discover(base: string, url: string, script: string): Promi
       withStyles: true,
       withLogos: true,
       uiShots: MAX_UI_SHOTS_PER_PAGE,
+      site: null,
     });
     if (home.record.error && !home.raw)
       throw new Error(`The home page could not be loaded: ${home.record.error}`);
@@ -614,18 +747,11 @@ export async function discover(base: string, url: string, script: string): Promi
     const robots = parseRobots(robotsText);
 
     const sitemapUrls: string[] = [];
-    const sitemapRefs = [...robotsText.matchAll(/^sitemap:\s*(\S+)/gim)]
-      .map((match) => match[1] ?? '')
-      .filter(Boolean);
-    const firstSitemap = sitemapRefs[0] ?? `${origin}/sitemap.xml`;
-    const sitemap = await fetchResource(request, firstSitemap, 3_000_000, true);
+    const sitemap = await fetchResource(request, sitemapAddress(robotsText, site), 3_000_000, true);
     if (sitemap && sitemap.status < 400) {
       let xml = sitemap.body.toString('utf8');
       if (/<sitemapindex/i.test(xml)) {
-        const children = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map(
-          (match) => match[1] ?? '',
-        );
-        const child = children.find((item) => /page|main|site|en/i.test(item)) ?? children[0];
+        const child = sitemapChild(xml, site);
         const next = child ? await fetchResource(request, child, 3_000_000, true) : null;
         xml = next && next.status < 400 ? next.body.toString('utf8') : '';
       }
@@ -781,10 +907,7 @@ async function resolveBrandFonts(
   if (!fonts) return { fonts: [], notes: ['Fonts were not measured.'] };
   const faces: FontFace[] = facesFromRaw(fonts.faces, site);
   const host = new URL(site).hostname;
-  const fetchable = fonts.unreadable
-    .filter((href) => /fonts\.googleapis\.com|typekit\.net/.test(href) || sameSite(href, site))
-    .slice(0, 6);
-  for (const href of fetchable) {
+  for (const href of fetchableFontCss(fonts.unreadable, site)) {
     const css = await fetchResource(request, href, 1_000_000, sameSite(href, site));
     if (css && css.status < 400) faces.push(...parseFontFaces(css.body.toString('utf8'), href));
   }
@@ -1069,6 +1192,7 @@ export async function capture(
         withStyles: false,
         withLogos: false,
         uiShots: Math.max(0, Math.min(MAX_UI_SHOTS_PER_PAGE, MAX_UI_SHOTS - uiShots)),
+        site,
       });
       const identity = (file: PageFile) => ({
         finalUrl: file.record.final_url,

@@ -66,6 +66,16 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   heading names what was probed: sites that serve their users' pages at `/<username>` would
   otherwise hand over a person's profile as the product. A probe that redirects to a contact or
   sales page is a form, not public product UI.
+- Every page load, frame and fetch goes through an address guard: http(s) only, and the host must
+  resolve only to public addresses. Loopback, `0.0.0.0/8`, RFC 1918, link-local `169.254.0.0/16`,
+  carrier-grade NAT `100.64.0.0/10`, `::1`, `::`, `fc00::/7`, `fe80::/10` and IPv4 mapped into IPv6
+  are refused. Redirects are followed by hand, with `maxRedirects: 0` and each hop checked before it
+  is requested; a frame's redirect is not followed. A page whose redirect, or whose final address,
+  leaves the site or reaches a private address is refused and never retried (only the home page
+  may redirect to another domain, which then is the site). A sitemap named in robots.txt and a
+  sitemap index's children are read only when they are on the site, and a stylesheet the page
+  cannot read is fetched only from the site or from exactly `fonts.googleapis.com`,
+  `fonts.gstatic.com`, `use.typekit.net` or a `*.typekit.net` host.
 - A page whose address after redirects, or whose visible text, matches a page already captured is
   not kept: one page at two addresses (`/` and `/homepage`) gets one copy and one set of shots.
 - A browser that closes under a page is replaced and the page loaded again. A page that failed or
@@ -155,7 +165,10 @@ recovered before the agent (and its computer) is deleted. The agent captures
 `out/research/<host>/injection.json`.
 
 `--host` defaults to `127.0.0.1.nip.io`, which resolves to `127.0.0.1` through public wildcard DNS
-(the capture reads the server on the agent's own loopback; nothing public is served). A bare IP or
+(the capture reads the server on the agent's own loopback; nothing public is served). The address
+guard refuses loopback, so the harness uploads its own build of the tool with that one host
+compiled in as allowed (`bundleTool({ allowPrivateHosts })`, passed through `research()`). The
+production tool allows no private host, and nothing at run time can add one. A bare IP or
 `localhost` is rejected by the campaign schema's `z.httpUrl()`, so the agent could not write
 schema-valid claim source URLs and never completed a submission — the aliased host fixes that
 without exposing anything. A `preStep` also pins the host to `127.0.0.1` in `/etc/hosts` when sudo
