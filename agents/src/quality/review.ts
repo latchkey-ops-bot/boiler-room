@@ -133,8 +133,11 @@ const worst = (results: readonly QcReview['checks'][number]['result'][]) =>
   results.includes('fail') ? 'fail' : results.includes('pass') ? 'pass' : 'n/a';
 
 /**
- * One review from the reviews of two halves of the images: a check fails when either half fails
- * it and passes when either passes it and neither fails it, on the frames of both.
+ * One review from the reviews of parts of the images (groups, or the halves of a group): a check
+ * fails when any part fails it and passes when any passes it and none fails it. It keeps the words
+ * and frames of the parts that gave that result: a part that could not see the check says so, and
+ * that must not stand in a pass another part made (`unsupportedPasses` blocks a pass that says it
+ * could not check).
  */
 export function mergeReviews(reviews: readonly QcReview[]): QcReview {
   const checks = new Map<string, QcReview['checks']>();
@@ -143,12 +146,16 @@ export function mergeReviews(reviews: readonly QcReview[]): QcReview {
   return {
     verdict: reviews.every((review) => review.verdict === 'pass') ? 'pass' : 'fail',
     inspected: reviews.flatMap((review) => review.inspected),
-    checks: [...checks.entries()].map(([id, parts]) => ({
-      id,
-      result: worst(parts.map((part) => part.result)),
-      measured: parts.map((part) => part.measured).join(' | '),
-      frames: [...new Set(parts.flatMap((part) => part.frames))].sort((a, b) => a - b),
-    })),
+    checks: [...checks.entries()].map(([id, parts]) => {
+      const result = worst(parts.map((part) => part.result));
+      const gave = parts.filter((part) => part.result === result);
+      return {
+        id,
+        result,
+        measured: gave.map((part) => part.measured).join(' | '),
+        frames: [...new Set(gave.flatMap((part) => part.frames))].sort((a, b) => a - b),
+      };
+    }),
     issues: reviews.flatMap((review) => review.issues),
     summary: reviews.map((review) => review.summary).join(' '),
   };

@@ -37,7 +37,7 @@ import {
   SESSION_IMAGES,
   ViewTracker,
 } from '../src/quality/review.ts';
-import { finalVerdict, readResearch } from '../src/quality/run.ts';
+import { finalVerdict, readResearch, unsupportedPasses } from '../src/quality/run.ts';
 import { contactFrames, transitionStills } from '../src/quality/sheets.ts';
 import { PageIndex, type PagesBundle } from '../src/researcher/verify.ts';
 import { skillContent } from '../src/sync.ts';
@@ -1054,7 +1054,7 @@ describe('the review session', () => {
     ]);
     expect(run.images.every((image) => image.viewed)).toBe(true);
     expect(run.review?.checks).toEqual([
-      { id: 'frame-0', result: 'pass', measured: 'pass here | n/a here', frames: [0, 30] },
+      { id: 'frame-0', result: 'pass', measured: 'pass here', frames: [0] },
     ]);
     expect(run.costMicroUsd).toBe(1_100_000);
     expect(client.files.delete).toHaveBeenCalledTimes(3);
@@ -1186,7 +1186,7 @@ describe('the review session', () => {
     expect(run.askedAgain).toBeNull();
     expect(run.review?.verdict).toBe('fail');
     expect(run.review?.checks).toEqual([
-      { id: 'frame-0', result: 'fail', measured: 'pass here | fail here', frames: [0, 30] },
+      { id: 'frame-0', result: 'fail', measured: 'fail here', frames: [30] },
     ]);
     expect(client.files.delete).toHaveBeenCalledTimes(11);
   });
@@ -1258,6 +1258,36 @@ describe('mergeReviews', () => {
       checks: [{ id: 'c', result: 'fail', frames: [1] }],
     });
     expect(mergeReviews([half('pass', 'n/a'), half('pass', 'n/a')]).checks[0]?.result).toBe('n/a');
+  });
+
+  // A group without the transitions sheet says it was not shown it; that must not ride along with
+  // the other group's pass, or unsupportedPasses blocks the film.
+  it('keeps only the words of the parts that gave the result, so a pass stands', () => {
+    const part = (result: 'pass' | 'n/a', measured: string, frames: number[]) => ({
+      verdict: 'pass' as const,
+      inspected: [],
+      checks: [{ id: 'no-cross-dissolve', result, measured, frames }],
+      issues: [],
+      summary: 'ok',
+    });
+    const merged = mergeReviews([
+      part('pass', 'Each seam is a hard cut.', [89, 90]),
+      part('n/a', 'The transitions sheet was not shown to me.', []),
+    ]);
+    expect(merged.checks).toEqual([
+      {
+        id: 'no-cross-dissolve',
+        result: 'pass',
+        measured: 'Each seam is a hard cut.',
+        frames: [89, 90],
+      },
+    ]);
+    const checks = merged.checks.map((check) => ({
+      ...check,
+      threshold: '',
+      source: 'model' as const,
+    }));
+    expect(unsupportedPasses(checks, new Set([89, 90]))).toEqual([]);
   });
 });
 
