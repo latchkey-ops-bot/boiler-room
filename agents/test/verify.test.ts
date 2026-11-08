@@ -447,6 +447,47 @@ describe('verifyResearch', () => {
     expect(codes(out, pages)).toEqual([]);
   });
 
+  // allbirds.com: the product pages quote prices ("$100"), but the brief set pricing to null.
+  it('refuses null pricing when claims quote prices, but not for an amount raised', () => {
+    const out = output();
+    out.brief.pricing = null;
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.briefPath])).toEqual([
+      ['PRICING_MISSING', 'brief.pricing.missing'],
+    ]);
+    expect(failures[0]?.message).toContain('"team-price"');
+    const raised = output();
+    raised.brief.pricing = null;
+    raised.claims = raised.claims.filter((claim) => claim.id !== 'team-price');
+    raised.claims.push({
+      id: 'funding',
+      text: 'Orbitly raised $3M',
+      sourceUrl: 'https://api.vetta.sh/v1/files/fil_material1',
+      quote: 'Orbitly reached 99.9% uptime in 2025.',
+      status: 'extracted',
+    });
+    expect(codes(raised).filter((code) => code === 'PRICING_MISSING')).toEqual([]);
+  });
+
+  // posthog.com: "Pay-as-you-go" came from one quote and "$0.00005/event", one product's price
+  // after its free tier, from another, so the plan read as costing that.
+  it('refuses a plan whose name and price come from different claims', () => {
+    const out = output();
+    const pricing = must(out.brief.pricing);
+    pricing.plans.push({
+      name: 'Small teams',
+      price: '$24 per month',
+      claim_ids: ['small-teams', 'team-price'],
+    });
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ['PLAN_STITCHED', 'brief.pricing.plans[2]'],
+    ]);
+    // One quote with both, the plan's card, passes.
+    must(pricing.plans[2]).name = 'Team';
+    expect(codes(out)).toEqual([]);
+  });
+
   it('requires calls to action to be verbatim on their page', () => {
     const out = output();
     out.brief.ctas.push({

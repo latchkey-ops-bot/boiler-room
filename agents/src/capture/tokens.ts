@@ -414,19 +414,37 @@ export function deriveColors(styles: RawStyles): DerivedColors {
         .filter((hex, index, list) => BROWSER_DEFAULTS.has(hex) && list.indexOf(hex) === index);
       notes.push(
         defaults.length
-          ? `The site sets no brand colour of its own: its links use the browser's default ${defaults.join(' and ')}, so the text colour is primary.`
+          ? `The site sets no brand colour of its own: its links use the browser's default ${defaults.join(' and ')}, listed with the accents, so the text colour is primary.`
           : 'The site uses no saturated colour, so the text colour is primary.',
       );
     }
   }
 
+  // A colour only one button paints, such as one tab's fill or a chip in another company's colour,
+  // is that element's, not an accent of the brand.
   const accents = candidates
+    .filter(
+      (item) =>
+        !((item.count ?? 2) < 2 && item.sources.every((source) => source.includes('button'))),
+    )
     .map((item) => item.hex)
     .filter((hex) => hex !== primary && distance(hex, primary) >= SAME)
     .filter((hex, index, list) => list.findIndex((other) => distance(other, hex) < 40) === index)
     .slice(0, 4);
   const accent =
     accents.find((hex) => hueDistance(hex, primary) >= 25 || distance(hex, primary) > 80) ?? null;
+  // A browser's default link blue is no brand colour, but on a site that sets none it is the one
+  // colour a visitor sees besides the text, so it is listed with the accents.
+  for (const link of styles.links) {
+    const hex = link.hex.toUpperCase();
+    if (
+      BROWSER_DEFAULTS.has(hex) &&
+      link.weight >= 3 &&
+      !accents.includes(hex) &&
+      accents.length < 4
+    )
+      accents.push(hex);
+  }
 
   const muted = pickMuted(styles, background, foreground);
   const mode = luminance(background) < 0.18 ? 'dark' : 'light';
@@ -434,6 +452,10 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   if (schemes.includes('light') && schemes.includes('dark'))
     notes.push(
       `The page declares both light and dark colour schemes; these colours are its ${mode} scheme, the one it showed the capture.`,
+    );
+  else if (styles.darkScheme && mode === 'light')
+    notes.push(
+      'The site also has a dark scheme for visitors whose system is set to dark; these colours are its light scheme, the one it showed the capture.',
     );
 
   return {

@@ -65,6 +65,8 @@ export const FAILURE_CODES = [
   'WORDS_UNBACKED',
   'CLAIM_TEXT_UNBACKED',
   'PRICING_BILLING',
+  'PRICING_MISSING',
+  'PLAN_STITCHED',
   'CTA_NOT_FOUND',
   'ASSET_UNKNOWN',
   'NEED_DUPLICATE',
@@ -443,6 +445,41 @@ function verifyBrief(output: ResearchOutput, pages: PageIndex): Failure[] {
     }
   }
 
+  // A plan's name and price come from one quote, as a pricing card shows them together. A name
+  // from one place and a figure from another can pair a plan with another product's price.
+  const pricing = output.brief.pricing;
+  pricing?.plans.forEach((plan, index) => {
+    const path = `brief.pricing.plans[${index}]`;
+    const ids = [...new Set([...plan.claim_ids, ...pricing.claim_ids])].filter((id) =>
+      quotes.has(id),
+    );
+    const text = `${plan.name} ${plan.price}`;
+    const alone = (id: string) =>
+      unbackedNumbers(text, [quotes.get(id) ?? ''], { brandName }).length === 0 &&
+      unbackedWords(text, [...(backing.get(id) ?? []), ...labels], {
+        names,
+        allowed: RELATION_WORDS,
+      }).length === 0;
+    const together = [...ids.flatMap((id) => backing.get(id) ?? []), ...labels];
+    const backedTogether =
+      unbackedNumbers(
+        text,
+        ids.map((id) => quotes.get(id) ?? ''),
+        { brandName },
+      ).length === 0 &&
+      unbackedWords(text, together, { names, allowed: RELATION_WORDS }).length === 0;
+    // Only a plan its claims back together, but no one claim backs, is stitched; one they do not
+    // back at all already fails above.
+    if (!backedTogether || ids.some(alone)) return;
+    failures.push({
+      code: 'PLAN_STITCHED',
+      path,
+      message: `${path} takes its name and its price "${plan.name} ${plan.price}" from different claims (${ids.join(', ')}): no one quote states both, so the price may belong to something else.`,
+      fix: `Cite in ${path} one claim whose quote states the plan's name and its price together, such as the name and price lines of its pricing card, or remove the plan.`,
+      briefPath: path,
+    });
+  });
+
   output.brief.ctas.forEach((cta, index) => {
     const path = `brief.ctas[${index}]`;
     const page = pages.find(cta.source_url);
@@ -520,6 +557,39 @@ function verifyBilling(output: ResearchOutput, pages: PageIndex): Failure[] {
       message: `The prices in brief.pricing are shown with "${shown.label}" on as the page loads, so they are the prices with yearly billing, but brief.pricing does not say so: it reads as the monthly price.`,
       fix: `Say in brief.pricing.summary that these prices are billed yearly, in the page's words, and cite a claim whose quote says it, such as the plan's price line with "${shown.label}".`,
       briefPath: 'brief.pricing.billing',
+    },
+  ];
+}
+
+/**
+ * A quote that is a price a customer pays: an amount alone, as a product page's buy box shows it
+ * ("$100"), or an amount per month, year, user or seat. "$3M raised" is no price.
+ */
+const PRICE =
+  /^[$€£¥]\s?\d[\d,]*(?:\.\d+)?$|[$€£¥]\s?\d[\d,]*(?:\.\d+)?\s*(?:\/|per)\s*(?:mo\b|month|yr\b|year|user|seat|member|editor)/i;
+
+/** The claims whose quotes state a price, on a line of their own or per period or user. */
+export function priceClaims(output: ResearchOutput): ResearchOutput['claims'] {
+  return output.claims.filter((claim) =>
+    claim.quote.split(/\n/).some((line) => PRICE.test(normaliseWhitespace(line))),
+  );
+}
+
+/**
+ * Pricing is null only for a site that publishes no price. A result whose claims quote prices
+ * must list them: a brief that drops them tells the writer the site has none.
+ */
+function verifyPricingPresent(output: ResearchOutput): Failure[] {
+  if (output.brief.pricing) return [];
+  const prices = priceClaims(output);
+  if (prices.length === 0) return [];
+  return [
+    {
+      code: 'PRICING_MISSING',
+      path: 'brief.pricing',
+      message: `brief.pricing is null, but ${prices.map((claim) => `"${claim.id}"`).join(', ')} quote${prices.length > 1 ? '' : 's'} a price. Null is only for a site that publishes no price.`,
+      fix: 'Fill in brief.pricing: one plan per price, named and priced in the words of its quote or the title of its page, citing its claim, and a summary in the same words citing them all.',
+      briefPath: 'brief.pricing.missing',
     },
   ];
 }
@@ -655,6 +725,7 @@ export function verifyResearch(output: ResearchOutput, bundle: PagesBundle): Fai
     ...verifyClaims(output, pages),
     ...verifyBrief(output, pages),
     ...verifyBilling(output, pages),
+    ...verifyPricingPresent(output),
     ...verifyNonClaims(output, pages),
     ...verifyPages(output, pages),
     ...verifyReferences(output),

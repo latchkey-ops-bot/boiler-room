@@ -1105,6 +1105,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     const faces: RawFontFace[] = [];
     const unreadable: string[] = [];
     let declared = document.querySelector('[style*="font"]') !== null;
+    let darkScheme = false;
     // A relative url() in a stylesheet is relative to that stylesheet, so each face keeps it.
     const readRules = (rules: CSSRuleList, base: string) => {
       for (const rule of Array.from(rules)) {
@@ -1128,6 +1129,11 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
             declared = true;
           if (rule.cssRules?.length) readRules(rule.cssRules, base);
         } else if ('cssRules' in rule) {
+          if (
+            rule instanceof CSSMediaRule &&
+            /prefers-color-scheme:\s*dark/i.test(rule.media.mediaText)
+          )
+            darkScheme = true;
           readRules((rule as CSSGroupingRule).cssRules, base);
         }
       }
@@ -1160,6 +1166,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       headingFonts.set(style.fontFamily, entry);
     }
     const heading = [...headingFonts.values()].sort((a, b) => b.score - a.score)[0];
+    if (styles) styles.darkScheme = darkScheme;
     fonts = {
       uses: [
         ...(heading

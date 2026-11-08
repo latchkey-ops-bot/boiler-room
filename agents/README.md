@@ -126,8 +126,11 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   button's fill is its face, the innermost box covering it with a fill of its own (a raised
   button's top, not its darker edge). A brand colour too light for 3:1 is replaced only by another
   colour the site uses widely (two elements or more, at least a quarter of the top score), never
-  by one tab's; with no saturated colour, the neutral fill of the buttons is primary (a near-black
-  `#212121` over pure black text), else the text colour. Muted text has at most 70% of the
+  by one tab's, and a colour only one button paints is no accent either; with no saturated colour,
+  the neutral fill of the buttons is primary (a near-black
+  `#212121` over pure black text), else the text colour; a browser's default link blue a visitor
+  sees is listed with the accents, never made primary. A dark scheme kept for
+  `prefers-color-scheme: dark` is noted. Muted text has at most 70% of the
   foreground's contrast. The display font is the one most heading text is set in, weighed by size,
   outside the navigation, header and footer.
 - Before any token is read, cookie banners, dialogs, their scrims and fixed overlays are hidden
@@ -175,8 +178,11 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   only what its quote says (`CLAIM_TEXT_UNBACKED`), with words naming where the quote is allowed.
   Prices a page shows with a yearly billing control on as it loads (the capture records billing
   switches, tabs and radios and their state) must be called yearly in the pricing
-  (`PRICING_BILLING`); the control's label backs that word. A plan is backed by its own claims and
-  the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
+  (`PRICING_BILLING`); the control's label backs that word. Pricing may be null only when no claim
+  quotes a price (`PRICING_MISSING`: an amount alone, or per month, year, user or seat). A plan is
+  backed by its own claims and the pricing block's, and its name and price by one quote together
+  (`PLAN_STITCHED`), as its pricing card shows them: a name from one place and a figure from
+  another can pair the plan with another product's price. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
@@ -185,7 +191,8 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   dropped and pricing, the free trial or the positioning note becomes null. A one-liner or
   what-it-is left uncited fails the schema, so the result is not accepted. Wording no quote backs
   is cut back to the quotes: a claim's text becomes its quote, a list item or the free trial goes,
-  the pricing summary becomes its plans' names and prices (citing their claims) with a yearly
+  pricing left out is listed from the price claims, each named by its page's title, the pricing
+  summary becomes its plans' names and prices (citing their claims) with a yearly
   billing switch's label added, the one-liner becomes its first cited quote and what-it-is its
   cited quotes. An accepted result keeps every page title exactly as stored.
 - Provenance: the gate downloads `pages.json` itself and requires its SHA-256 to match a digest the

@@ -187,8 +187,11 @@ describe('deriveColors', () => {
   it('ignores browser default link colours, and says so', () => {
     const result = deriveColors(styles({ links: [{ ...color('#0000EE'), weight: 20 }] }));
     expect(result.primary).toBe('#1F2937');
+    expect(result.accent).toBeNull();
+    // danluu.com: the link blue is the only colour a visitor sees besides the text.
+    expect(result.accents).toEqual(['#0000EE']);
     expect(result.notes).toContain(
-      "The site sets no brand colour of its own: its links use the browser's default #0000EE, so the text colour is primary.",
+      "The site sets no brand colour of its own: its links use the browser's default #0000EE, listed with the accents, so the text colour is primary.",
     );
   });
 
@@ -337,6 +340,13 @@ describe('deriveColors', () => {
     expect(chip.primary).toBe('#1F2937');
   });
 
+  // cal.com follows the visitor's system scheme with a media query, and declares no color-scheme.
+  it('notes a dark scheme a stylesheet keeps for a system set to dark', () => {
+    expect(deriveColors(styles({ darkScheme: true })).notes.join(' ')).toContain(
+      'also has a dark scheme',
+    );
+  });
+
   it('notes a page that declares both light and dark colour schemes', () => {
     expect(deriveColors(styles({ colorScheme: 'light dark' })).notes.join(' ')).toContain(
       'both light and dark',
@@ -378,6 +388,8 @@ describe('deriveColors', () => {
     );
     expect(result.primary).toBe('#111111');
     expect(result.accent).toBe('#EB9D2A');
+    // The tab's purple is one element's colour, not an accent.
+    expect(result.accents).toEqual(['#EB9D2A']);
     expect(result.notes.join(' ')).toContain('no other colour the site uses widely');
   });
 

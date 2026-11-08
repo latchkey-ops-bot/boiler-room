@@ -1,13 +1,16 @@
 import { validateResearchParts } from '@boiler-room/schema';
 import type { z } from 'zod';
 import { fileIdOf, type ResearchOutput, researchOutputSchema } from './output.ts';
+import { normaliseWhitespace } from './text.ts';
 import {
   type Failure,
   PageIndex,
   type PagesBundle,
+  priceClaims,
   verifyResearch,
   yearlyBillingLabel,
 } from './verify.ts';
+import { stem, wordsOf } from './words.ts';
 
 /** A reason the result cannot be accepted, in the form the agent is sent to repair it. */
 export interface GateFailure {
@@ -348,7 +351,10 @@ export function settleBrief(
           : null;
     }
     // Prices shown with a yearly billing switch on say so, in the switch's own words.
-    if (pricing && billing && paths.has('brief.pricing.billing'))
+    const yearly = (text: string) =>
+      wordsOf(text).some((word) => ['year', 'annual', 'annum'].includes(stem(word)));
+    const settled = paths.has('brief.pricing.billing') || paths.has('brief.pricing.missing');
+    if (pricing && billing && settled && !yearly(pricing.summary))
       pricing = { ...pricing, summary: `${pricing.summary.replace(/[.\s]+$/, '')}. ${billing}.` };
     brief.pricing = pricing;
   }
@@ -387,6 +393,26 @@ export function withoutFailures(
       texts.has(claim.id) ? { ...claim, text: claim.quote } : claim,
     ),
   };
+  // Prices the claims quote but the brief left out are listed, each named by its page's title.
+  if (briefPaths.has('brief.pricing.missing') && !reworded.brief.pricing) {
+    const pages = new PageIndex(bundle);
+    const prices = priceClaims(reworded).filter((claim) => !claims.has(claim.id));
+    const plans = prices.map((claim) => ({
+      name: pages.find(claim.sourceUrl)?.page.title || claim.id,
+      price: normaliseWhitespace(claim.quote),
+      claim_ids: [claim.id],
+    }));
+    if (plans.length > 0)
+      reworded.brief = {
+        ...reworded.brief,
+        pricing: {
+          summary: plans.map((plan) => `${plan.name} ${plan.price}`).join('; '),
+          free_trial: null,
+          plans,
+          claim_ids: prices.map((claim) => claim.id),
+        },
+      };
+  }
   const billing = yearlyBillingLabel(reworded, bundle);
   const trimmed = withoutClaims(settleBrief(reworded, briefPaths, claims, billing), claims);
   const settled: ResearchOutput = {

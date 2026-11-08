@@ -50,6 +50,8 @@ export interface RawStyles {
   colorVariables: { name: string; hex: string; alpha: number }[];
   /** The `color-scheme` the page declares, from CSS or its meta tag, such as `light dark`. */
   colorScheme: string;
+  /** Whether a stylesheet has a dark scheme for `prefers-color-scheme: dark`. */
+  darkScheme?: boolean;
 }
 
 export interface RawFontUse {
