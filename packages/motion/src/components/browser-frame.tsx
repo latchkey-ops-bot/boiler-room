@@ -13,6 +13,11 @@ export interface BrowserFrameProps {
   chrome?: number;
   /** Copy in the address bar, which comes from `scene.text`. Without it the bar is empty. */
   address?: { text: string; opacity?: number } | undefined;
+  /**
+   * False draws no shadow. A carried frame changes size every frame, and a blur that changes
+   * every frame was drawn differently by tabs that had drawn different frames before it.
+   */
+  shadow?: boolean;
   /** Drawn over the frame and not clipped by it, such as a cursor. */
   overlay?: ReactNode;
   style?: CSSProperties;
@@ -44,6 +49,7 @@ export const BrowserFrame = ({
   pose,
   chrome: chromeIn,
   address,
+  shadow = true,
   overlay,
   style,
 }: BrowserFrameProps) => {
@@ -57,9 +63,10 @@ export const BrowserFrame = ({
     <div
       style={{
         ...style,
-        // On whole pixels too, so a frame that resizes every frame, as in a carry, draws the same
-        // shadow in every tab.
-        boxShadow: `0 ${Math.round(rect.width * 0.03)}px ${Math.round(rect.width * 0.09)}px ${colors.shadow}`,
+        // On whole pixels, like the frame itself.
+        boxShadow: shadow
+          ? `0 ${Math.round(rect.width * 0.03)}px ${Math.round(rect.width * 0.09)}px ${colors.shadow}`
+          : undefined,
         borderRadius: radius,
         height: rect.height,
         left: rect.x,

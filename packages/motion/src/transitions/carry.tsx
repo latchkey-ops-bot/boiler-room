@@ -37,6 +37,7 @@ const CarriedImage = ({ carry, src, t }: { carry: CarryPlan; src: string; t: num
       pose={lerpPose(from.pose, to.pose, t)}
       chrome={lerp(from.chrome, to.chrome, t)}
       address={address}
+      shadow={false}
     />
   );
 };
