@@ -120,6 +120,7 @@ export function readResearch(file: string, campaignFile?: string): ResearchEvide
       brand: { colors: research.brand.colors },
       claims: research.claims,
       accents: research.brand_details.accents,
+      measured: research.brand_details.measured.map(({ hex, seen_as }) => ({ hex, seen_as })),
     },
     pages: new PageIndex(pagesBundleSchema.parse(JSON.parse(bundle.toString('utf8')))),
   };

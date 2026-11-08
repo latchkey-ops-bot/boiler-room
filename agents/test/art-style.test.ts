@@ -7,6 +7,7 @@ import {
   validateCampaign,
 } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
+import { measuredPalette } from '../src/art/run.ts';
 import { decideStyle, readsAsNothing, withContrast } from '../src/art/style.ts';
 import { artCampaign } from './art-fixtures.ts';
 
@@ -52,6 +53,41 @@ describe('decideStyle', () => {
     expect(style.changes.map((change) => change.token)).toEqual(['background', 'foreground']);
     // White ink cannot read on a pale ground, so it becomes black.
     expect(style.colors.foreground).toBe('#000000');
+    expect(await contrastIssues(style.colors)).toEqual([]);
+  });
+
+  it('puts a mid-tone ground on the measured page surface nearest it in its family', async () => {
+    // posthog.com, 8 November: the hero's #D3DAC6 became a tint, #F7F7F7, the site does not have.
+    const colors = { background: '#D3DAC6', foreground: '#111111', primary: '#111111' };
+    const measured = {
+      surfaces: ['#D3DAC6', '#FDFDF8', '#EEEFE9', '#F3F4EE'],
+      others: ['#111111', '#EB9D2A', '#65675E'],
+    };
+    const style = decideStyle(colors, { mode: 'light', measured });
+    expect(style).toMatchObject({ family: 'neutral-cut', lean: 'light' });
+    expect(style.colors.background).toBe('#EEEFE9');
+    expect(style.changes[0]?.why).toMatch(/page surface the Researcher measured/);
+    expect(style.flags).toEqual([]);
+    expect(await contrastIssues(style.colors)).toEqual([]);
+  });
+
+  it('tints a mid-tone ground only when no measured surface fits its family, and flags it', () => {
+    const style = decideStyle(
+      { background: '#D3DAC6', foreground: '#111111', primary: '#111111' },
+      { mode: 'light', measured: { surfaces: ['#D3DAC6', '#111111'], others: [] } },
+    );
+    expect(style.colors.background).not.toBe('#D3DAC6');
+    expect(styleFamily(style.colors.background)).toBe('neutral-cut');
+    expect(style.flags.join(' ')).toMatch(/tint the site does not have/);
+  });
+
+  it('swaps a primary that fails contrast for the nearest measured colour that clears it', async () => {
+    const style = decideStyle(
+      { background: '#FFFFFF', foreground: '#111111', primary: '#9FD4FF' },
+      { measured: { surfaces: ['#FFFFFF'], others: ['#111111', '#1D6FD8', '#E5484D'] } },
+    );
+    expect(style.colors.primary).toBe('#1D6FD8');
+    expect(style.flags.join(' ')).toMatch(/the measured colour nearest it/);
     expect(await contrastIssues(style.colors)).toEqual([]);
   });
 
@@ -131,5 +167,20 @@ describe('readsAsNothing', () => {
     expect(readsAsNothing('#5850EC')).toBe(false);
     expect(readsAsNothing('#0000EE')).toBe(false);
     expect(readsAsNothing('#828FFF')).toBe(false);
+  });
+});
+
+describe('the measured colours the Art Director reads', () => {
+  it('reads page surfaces by their share of the page, and every other colour after', () => {
+    const palette = measuredPalette([
+      { hex: '#eeefe9', seen_as: 'surface', share: 0.25 },
+      { hex: '#D3DAC6', seen_as: 'surface', share: 0.55 },
+      { hex: '#111111', seen_as: 'text', share: null },
+      { hex: '#EB9D2A', seen_as: 'button', share: null },
+    ] as unknown as Parameters<typeof measuredPalette>[0]);
+    expect(palette).toEqual({
+      surfaces: ['#D3DAC6', '#EEEFE9'],
+      others: ['#111111', '#EB9D2A'],
+    });
   });
 });

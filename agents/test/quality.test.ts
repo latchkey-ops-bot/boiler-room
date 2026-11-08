@@ -680,6 +680,23 @@ describe('sheet frames', () => {
 });
 
 describe('brand colours against the research', () => {
+  it('passes a ground the Art Director took from a measured page surface, and no other', () => {
+    const campaign = example();
+    const facts = research(campaign);
+    facts.measured = [
+      { hex: '#FDFDF8', seen_as: 'surface' },
+      { hex: '#65675E', seen_as: 'text' },
+    ];
+    campaign.brand.colors.background = '#FDFDF8';
+    expect(checkResearchBrand(campaign, facts, 30).issues).toEqual([]);
+    campaign.brand.colors.muted = '#65675E';
+    expect(checkResearchBrand(campaign, facts, 30).issues).toEqual([]);
+    campaign.brand.colors.background = '#65675E';
+    const [issue] = checkResearchBrand(campaign, facts, 30).issues;
+    expect(issue).toMatchObject({ severity: 'major', owner: 'art-director' });
+    expect(issue?.what).toMatch(/did not measure on the site as a page surface/);
+  });
+
   it('passes measured colours, and black or white ink', () => {
     const campaign = example();
     const facts = research(campaign);

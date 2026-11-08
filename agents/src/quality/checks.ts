@@ -944,6 +944,11 @@ export interface ResearchFacts {
   claims: { id: string; quote: string; sourceUrl: string }[];
   /** `brand_details.accents`, the other colours the Researcher measured. */
   accents: string[];
+  /**
+   * `brand_details.measured`: every colour the capture read at a recorded point, and what painted
+   * it. Any of them may be a brand colour, and any page surface the background.
+   */
+  measured?: { hex: string; seen_as: string }[];
 }
 
 const words = (text: string) => text.normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -1080,8 +1085,18 @@ export function checkResearchBrand(
       issues: [],
     };
   }
+  const points = research.measured ?? [];
   const palette = new Set(
-    [...Object.values(research.brand.colors), ...research.accents]
+    [...Object.values(research.brand.colors), ...research.accents, ...points.map(({ hex }) => hex)]
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.toUpperCase()),
+  );
+  // The background must be a colour painted as a page surface, as the Researcher's gate holds it.
+  const surfaces = new Set(
+    [
+      research.brand.colors.background,
+      ...points.filter(({ seen_as }) => seen_as === 'surface').map(({ hex }) => hex),
+    ]
       .filter((value): value is string => typeof value === 'string')
       .map((value) => value.toUpperCase()),
   );
@@ -1094,10 +1109,11 @@ export function checkResearchBrand(
   ];
   const off = rules.flatMap((rule) => {
     const value = campaign.brand.colors[rule.key]?.toUpperCase();
-    if (!value || palette.has(value) || rule.extra.includes(value)) return [];
+    const known = rule.key === 'background' ? surfaces : palette;
+    if (!value || known.has(value) || rule.extra.includes(value)) return [];
     const measured =
       research.brand.colors[rule.key] ?? (rule.key === 'accent' ? research.accents[0] : undefined);
-    const nearest = [...palette]
+    const nearest = [...known]
       .map((hex) => ({ hex, distance: channelDistance(hexToRgb(hex), hexToRgb(value)) }))
       .sort((a, b) => a.distance - b.distance)[0];
     return [{ rule, value, measured, nearest }];
@@ -1108,7 +1124,7 @@ export function checkResearchBrand(
         severity: rule.severity,
         check: 'brand-research',
         owner: 'art-director',
-        what: `brand.colors.${rule.key} is ${value}, which the Researcher did not measure on the site${measured ? ` (it measured ${measured.toUpperCase()} for ${rule.key})` : ''}. Measured colours: ${[...palette].join(', ')}.`,
+        what: `brand.colors.${rule.key} is ${value}, which the Researcher did not measure on the site${rule.key === 'background' ? ' as a page surface' : ''}${measured ? ` (it measured ${measured.toUpperCase()} for ${rule.key})` : ''}. Measured colours: ${[...palette].join(', ')}.`,
         fix: `Set brand.colors.${rule.key} to ${measured?.toUpperCase() ?? nearest?.hex ?? 'a measured colour'}${rule.key === 'foreground' ? ', or to black or white for contrast' : ''}, then render again.`,
       },
       fps,

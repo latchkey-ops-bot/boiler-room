@@ -93,12 +93,46 @@ export function readsAsNothing(primary: string): boolean {
   return l <= EVENT_MIN_L || l >= EVENT_MAX_L || c < EVENT_MIN_CHROMA;
 }
 
+/** The colours the Researcher measured on the site, from `brand_details.measured`. */
+export interface MeasuredPalette {
+  /** Colours painted as a page surface, most of the page first: the only grounds a film may use. */
+  surfaces: readonly string[];
+  /** Every other measured colour: text, links and buttons. */
+  others: readonly string[];
+}
+
+/** Distance between two colours in OKLCH, as lightness and the a/b plane of hue and chroma. */
+function oklchDistance(a: string, b: string): number {
+  const one = toOklch(a);
+  const two = toOklch(b);
+  const plane = (colour: typeof one) => {
+    const hue = ((colour.h ?? 0) * Math.PI) / 180;
+    return [colour.c * Math.cos(hue), colour.c * Math.sin(hue)] as const;
+  };
+  const [a1, b1] = plane(one);
+  const [a2, b2] = plane(two);
+  return Math.hypot(one.l - two.l, a1 - a2, b1 - b2);
+}
+
+/** The candidate nearest `colour` in OKLCH. */
+const nearestOf = (colour: string, candidates: readonly string[]) =>
+  [...candidates].sort((x, y) => oklchDistance(x, colour) - oklchDistance(y, colour))[0];
+
 /**
  * Chooses the family and fixes the colours. `mode` is the Researcher's reading of the site's own
  * hero (`brand_details.mode`), which decides the lean of a mid-tone background. Without it the
  * lean goes to the side where `ink` has the higher contrast.
+ *
+ * Every colour a film shows must be one the Researcher measured. So a mid-tone ground becomes the
+ * measured page surface nearest it in the family it leans to, and a primary that fails contrast
+ * becomes the measured colour nearest it that clears it. Only when the site measured none does
+ * the code make one, the tinted ground or the primary with its lightness moved, and it flags that
+ * colour for a person: Quality Check refuses a colour the site does not have.
  */
-export function decideStyle(input: Colors, hints: { mode?: Lean | undefined } = {}): StyleDecision {
+export function decideStyle(
+  input: Colors,
+  hints: { mode?: Lean | undefined; measured?: MeasuredPalette | undefined } = {},
+): StyleDecision {
   const colors: Colors = { ...input };
   const changes: ColourChange[] = [];
   const flags: string[] = [];
@@ -117,14 +151,36 @@ export function decideStyle(input: Colors, hints: { mode?: Lean | undefined } = 
       lean = light >= dark ? 'light' : 'dark';
       leanFrom = 'contrast';
     }
-    colors.background = tintedGround(input.primary, lean);
     family = lean === 'light' ? 'neutral-cut' : 'kinetic-plate';
-    changes.push({
-      token: 'background',
-      from: input.background,
-      to: colors.background,
-      why: `Mid-tone ground (OKLCH L ${backgroundL.toFixed(3)}) fails contrast in both families. Leaning ${lean} by the ${leanFrom === 'research' ? "site's own hero" : 'higher ink contrast'}, it becomes 3% primary in ${lean === 'light' ? 'white' : '#0b0b0b'}.`,
-    });
+    const leaning = `Mid-tone ground (OKLCH L ${backgroundL.toFixed(3)}) fails contrast in both families. Leaning ${lean} by the ${leanFrom === 'research' ? "site's own hero" : 'higher ink contrast'}`;
+    const inFamily = (hints.measured?.surfaces ?? []).filter(
+      (surface) => styleFamily(surface) === family,
+    );
+    // The surface nearest the brand's own background in lightness keeps the film closest to it.
+    const surface = [...inFamily].sort(
+      (a, b) =>
+        Math.abs(oklchLightness(a) - backgroundL) - Math.abs(oklchLightness(b) - backgroundL),
+    )[0];
+    if (surface) {
+      colors.background = surface;
+      changes.push({
+        token: 'background',
+        from: input.background,
+        to: surface,
+        why: `${leaning}, it becomes ${surface}, the page surface the Researcher measured nearest it in ${FAMILY_NAMES[family]}.`,
+      });
+    } else {
+      colors.background = tintedGround(input.primary, lean);
+      changes.push({
+        token: 'background',
+        from: input.background,
+        to: colors.background,
+        why: `${leaning}, it becomes 3% primary in ${lean === 'light' ? 'white' : '#0b0b0b'}: the Researcher measured no page surface in ${FAMILY_NAMES[family]}.`,
+      });
+      flags.push(
+        `The ground ${colors.background} is a tint the site does not have: the Researcher measured no page surface light or dark enough for ${FAMILY_NAMES[family]}. Quality Check will refuse it; ask the customer for a background colour, or capture a page that shows one.`,
+      );
+    }
   }
   const ground = colors.background;
 
@@ -140,15 +196,22 @@ export function decideStyle(input: Colors, hints: { mode?: Lean | undefined } = 
   }
 
   if (contrastRatio(colors.primary, ground) < MIN_CONTRAST.primary) {
-    const next = withContrast(colors.primary, ground, MIN_CONTRAST.primary);
+    const readable = [
+      ...(hints.measured?.others ?? []),
+      ...(hints.measured?.surfaces ?? []),
+    ].filter((colour) => contrastRatio(colour, ground) >= MIN_CONTRAST.primary);
+    const measured = nearestOf(colors.primary, readable);
+    const next = measured ?? withContrast(colors.primary, ground, MIN_CONTRAST.primary);
     changes.push({
       token: 'primary',
       from: colors.primary,
       to: next,
-      why: `Accent ${colors.primary} has ${round2(contrastRatio(colors.primary, ground))}:1 on the ground, under ${MIN_CONTRAST.primary}:1. Lightness moved the least that clears it, keeping hue and chroma.`,
+      why: `Accent ${colors.primary} has ${round2(contrastRatio(colors.primary, ground))}:1 on the ground, under ${MIN_CONTRAST.primary}:1. ${measured ? 'It becomes the colour measured on the site nearest it that clears that.' : 'The site measured no colour that clears it, so lightness moved the least that does, keeping hue and chroma.'}`,
     });
     flags.push(
-      `The brand primary ${colors.primary} was changed to ${next} for contrast. The schema has one primary, so the original cannot be kept for fills only.`,
+      measured
+        ? `The brand primary ${colors.primary} was changed to ${next}, the measured colour nearest it with ${MIN_CONTRAST.primary}:1 on the ground. The schema has one primary, so the original cannot be kept for fills only.`
+        : `The brand primary ${colors.primary} was changed to ${next} for contrast, a colour the site does not have. The schema has one primary, so the original cannot be kept for fills only.`,
     );
     colors.primary = next;
   }

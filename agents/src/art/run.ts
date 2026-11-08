@@ -4,8 +4,9 @@ import { type Campaign, type Issue, sceneRegistry, validateCampaign } from '@boi
 import type { AgentDefinition } from '../define.ts';
 import { artDirector } from '../definitions/art-director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
-import { fileIdOf } from '../researcher/output.ts';
+import { fileIdOf, type MeasuredColor } from '../researcher/output.ts';
 import { siteHost } from '../researcher/text.ts';
+import { unmeasuredColors } from '../researcher/verify.ts';
 import type { AgentSync } from '../sync.ts';
 import { type ArtPlan, applyArt, gateReviews, planBatches } from './apply.ts';
 import { classifyAssets, distinctAssets, pageKey, proposeAssets } from './assets.ts';
@@ -20,7 +21,7 @@ import {
 } from './generate.ts';
 import type { ArtIssue } from './prompt.ts';
 import { type ReviewRun, reviewBatches } from './review.ts';
-import { decideStyle, type Lean } from './style.ts';
+import { decideStyle, type Lean, type MeasuredPalette } from './style.ts';
 
 export interface ArtOptions {
   campaignPath: string;
@@ -59,24 +60,51 @@ interface ResearchHints {
   mode: Lean | undefined;
   pageKinds: Map<string, string>;
   path: string | undefined;
+  /** `brand_details.measured`, absent from research made before colours carried points. */
+  measured: MeasuredColor[] | undefined;
 }
 
+const HEX = /^#[0-9A-F]{6}$/i;
+
 /** Only the parts of a research result the Art Director uses, read leniently. */
-function readResearch(path: string | undefined): ResearchHints {
-  const hints: ResearchHints = { mode: undefined, pageKinds: new Map(), path: undefined };
+export function readResearch(path: string | undefined): ResearchHints {
+  const hints: ResearchHints = {
+    mode: undefined,
+    pageKinds: new Map(),
+    path: undefined,
+    measured: undefined,
+  };
   if (!path || !existsSync(path)) return hints;
   const raw = JSON.parse(readFileSync(path, 'utf8')) as {
-    brand_details?: { mode?: unknown };
+    brand_details?: { mode?: unknown; measured?: unknown };
     brief?: { pages?: { url?: unknown; kind?: unknown }[] };
   };
   const mode = raw.brand_details?.mode;
   if (mode === 'light' || mode === 'dark') hints.mode = mode;
+  const measured = raw.brand_details?.measured;
+  if (Array.isArray(measured)) {
+    hints.measured = measured.filter(
+      (item): item is MeasuredColor =>
+        typeof item?.hex === 'string' && HEX.test(item.hex) && typeof item.seen_as === 'string',
+    );
+  }
   for (const page of raw.brief?.pages ?? []) {
     const key = typeof page.url === 'string' ? pageKey(page.url) : undefined;
     if (key && typeof page.kind === 'string') hints.pageKinds.set(key, page.kind);
   }
   hints.path = path;
   return hints;
+}
+
+/** The measured colours as `decideStyle` takes them: page surfaces by share, then the rest. */
+export function measuredPalette(measured: readonly MeasuredColor[]): MeasuredPalette {
+  const hex = (item: MeasuredColor) => item.hex.toUpperCase();
+  const surfaces = measured
+    .filter((item) => item.seen_as === 'surface')
+    .sort((a, b) => (b.share ?? 0) - (a.share ?? 0))
+    .map(hex);
+  const others = measured.filter((item) => item.seen_as !== 'surface').map(hex);
+  return { surfaces: [...new Set(surfaces)], others: [...new Set(others)] };
 }
 
 async function fileDigests(client: Naive, campaign: Campaign): Promise<Map<string, string>> {
@@ -149,7 +177,23 @@ export async function artDirect(options: ArtOptions): Promise<number> {
   const digests = await fileDigests(client, campaign);
 
   // 1-3: style family, colours, fonts and logo, all in code.
-  const style = decideStyle(campaign.brand.colors, { mode: research.mode });
+  const style = decideStyle(campaign.brand.colors, {
+    mode: research.mode,
+    measured: research.measured && measuredPalette(research.measured),
+  });
+  // Every colour of the film must be one the site has. A gap is flagged here, before the render,
+  // as Quality Check would refuse it after.
+  if (research.measured) {
+    for (const wrong of unmeasuredColors(style.colors, research.measured)) {
+      style.flags.push(
+        `${wrong.path} ${wrong.hex} is not a colour the Researcher measured on the site${wrong.token === 'background' ? ' as a page surface' : ''}. Quality Check will refuse it.`,
+      );
+    }
+  } else {
+    style.flags.push(
+      'The research measured no colours with their points (brand_details.measured), so the colours could not be checked against the site.',
+    );
+  }
   const brandCheck = checkBrand(campaign);
   say(
     `family ${style.familyName}: background L ${style.backgroundL.toFixed(3)} -> ground L ${style.groundL.toFixed(3)}, ${style.changes.length} colour change(s)`,
