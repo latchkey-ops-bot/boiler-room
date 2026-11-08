@@ -215,7 +215,7 @@ s1108140539. The merge changed neither role's prompt or skill: their prompts has
 and after it. After the second review, `lead-merge` ran again in s1108171627, on the lead's new
 `check.sh`, and `engineer-helper` in s1108171601, on the harness's container checks. The other
 lead and engineer scenarios ran on the text before those changes. The lead's change is only the
-check script and its notes, and the engineer's is the one sentence about fix cards. The CEO's
+check script and its notes, and the engineer's is the exception for fix cards. The CEO's
 stalled rule was widened after its runs too. The exception is `ceo-stalled` (s1108151730), which ran on the CEO text from before
 the merge. It needs its cards to age two hours, so it was not run again. Before this round, the
 CEO's first five scenarios had run only on the skill without the `MERGE` rules,
@@ -256,7 +256,8 @@ The second review's two reruns (s1108171601, s1108171627) spent $0.51 of session
 included.
 
 - **`lead-merge`** on the new `check.sh`. The practice lead's computer created `br-check` with
-  `sudo -n useradd`, and `br-check` could not read either key file. Git and pnpm ran as `br-check`,
+  `sudo -n useradd`, and `br-check` could not read `~/.netrc` (a clone never has
+  `~/.boiler-room.env`). Git and pnpm ran as `br-check`,
   and the lead read `CHECK_EXIT 0` before it merged PR #46 with a merge commit into the practice
   base. Then it woke `ENG 2/2`. Its reply says it ran the checks as `br-check`. The script prints
   `CHECK_EXIT 0` only past the user, exposure and tools checks.
