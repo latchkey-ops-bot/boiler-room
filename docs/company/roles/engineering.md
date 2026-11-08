@@ -134,7 +134,12 @@ On `MERGE` and `SHIP` cards, before any merge:
 2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_` or
    `BEGIN OPENSSH PRIVATE KEY`.
 3. Run lint, typecheck and tests on the PR merged onto the tip of its base, so a PR cut from an
-   older `dev` is judged on today's `dev`. A PR that conflicts, or whose checks fail, has failed
+   older `dev` is judged on today's `dev`. They run the PR's unmerged code, and the lead's computer
+   holds the Cloudflare keys and the GitHub token, so they run as `br-check`, a second user of that
+   computer that cannot read either file, in its own clone, under `env -i`, with
+   `pnpm install --ignore-scripts --ignore-pnpmfile`. If that user cannot be made, or can read a
+   key file, the lead blocks the card with `checks cannot run apart from the keys` and runs nothing
+   another way. A PR that conflicts, or whose checks fail, has failed
    review, unless its base fails the same check without it: then the PR passes when its own
    changed files do, and the lead creates `ENG: <slug> fix <n>` to fix `dev`. The engineer's note
    that the checks pass is not a check.
