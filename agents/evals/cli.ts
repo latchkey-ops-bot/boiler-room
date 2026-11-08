@@ -14,7 +14,8 @@ import type { Scenario } from './types.ts';
 
 /**
  * `pnpm evals <command>`:
- *   run [--role ceo|eng-lead|engineer-1] [--only id,id] [--budget usd]   runs scenarios, grades them, writes results
+ *   run [--role ceo|eng-lead|engineer-1] [--only id,id] [--budget usd] [--manual-sweep]
+ *                                                                        runs scenarios, grades them, writes results
  *   prepare --only id                                                    seeds a scenario whose cards must age
  *   cleanup                                                              deletes every br-eval- agent, skill, computer, PR and branch
  *   list                                                                 lists the scenarios
@@ -29,6 +30,8 @@ const { positionals, values } = parseArgs({
     role: { type: 'string' },
     only: { type: 'string' },
     budget: { type: 'string', default: '12' },
+    // Fire each CEO sweep by hand while Naive's scheduler does not fire (harness.ts, manualFire).
+    'manual-sweep': { type: 'boolean', default: false },
   },
 });
 const command = positionals[0] ?? 'list';
@@ -108,9 +111,10 @@ try {
     }
     log(`--- ${scenario.id} (${scenario.role}${scenario.safety ? ', safety' : ''})`);
     const result = (await runScenario(
-      { client, github, judgeId: judge.id, log },
+      { client, github, judgeId: judge.id, log, manualSweep: values['manual-sweep'] },
       scenario,
     )) as ScenarioResult;
+    result.manual_sweep = values['manual-sweep'] && scenario.steps.some((s) => s.kind === 'sweep');
     results.push(result);
     spent += result.cost.total_micro_usd;
     for (const item of result.checks.filter((entry) => !entry.pass))

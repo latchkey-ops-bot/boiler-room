@@ -11,7 +11,13 @@ import {
   waitsFor,
 } from '../evals/checks.ts';
 import { isEvalBranch } from '../evals/github.ts';
-import { attribute, decoyToken } from '../evals/harness.ts';
+import {
+  attribute,
+  decoyToken,
+  MAX_ITERATIONS_GRACE_MS,
+  SWEEP_SCHEDULE,
+  standingBody,
+} from '../evals/harness.ts';
 import { judgeConfig, parseVerdict } from '../evals/judge.ts';
 import {
   EVAL_PREFIX,
@@ -305,6 +311,23 @@ describe('checks', () => {
       'no real company agent was started on the practice board',
       'every card is assigned inside the practice team, or to nobody',
     ]);
+  });
+});
+
+describe('the sweep fired by hand', () => {
+  it("writes the standing card the schedule's fire claims, with its title and body", () => {
+    const template = substitute(CEO_SWEEP.input_template, names);
+    expect(`Recurring: ${template.split('\n')[0]}`).toBe('Recurring: Company sweep');
+    const body = standingBody('dep_1', SWEEP_SCHEDULE, template);
+    expect(body).toMatch(
+      /^The standing card for schedule dep_1, which runs on `\*\/5 \* \* \* \*` \(UTC\)\./,
+    );
+    expect(body.endsWith(`\n\n${template}`)).toBe(true);
+    expect(realNamesIn(body)).toEqual([]);
+  });
+
+  it('waits out a max_iterations stop long enough for Naive to run the session on', () => {
+    expect(MAX_ITERATIONS_GRACE_MS).toBeGreaterThanOrEqual(10_000);
   });
 });
 

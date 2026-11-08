@@ -73,6 +73,49 @@ async function fireOnce(client: Naive, deploymentId: string, log: (line: string)
   }
 }
 
+/** The body Naive's schedule gives its standing card, read from a practice board on 2026-11-08. */
+export function standingBody(deploymentId: string, cron: string, input: string): string {
+  return `The standing card for schedule ${deploymentId}, which runs on \`${cron}\` (UTC). Every fire claims this same card and comments what it did, so the card is the schedule's history rather than one row per run.\n\n${input}`;
+}
+
+/**
+ * A sweep fired by hand, for when Naive's scheduler does not fire: on 2026-11-08 from about 14:10
+ * UTC every practice deployment stayed `scheduled` past its `next_run_at` with no run. A scheduled
+ * fire claims the schedule's one standing card, `Recurring: <first line>` (the same card on every
+ * fire), puts it in `doing` and starts the CEO. Here the harness does what the fire does to the
+ * card: it writes that card, with the schedule's title and body, assigned to the CEO and in
+ * `doing`, or puts it back in `doing` on a later fire. Then it starts the deployment with
+ * `deployments.run`, whose session names no card, so the CEO finds the card with `board_read`, as
+ * its skill says. Without the card, a manual run stops at once (found by the first eval run).
+ */
+async function manualFire(
+  client: Naive,
+  input: {
+    boardId: string;
+    deploymentId: string;
+    ceo: string;
+    template: string;
+    key: string;
+    standing: { id: string | null };
+  },
+): Promise<string> {
+  const title = `Recurring: ${input.template.split('\n')[0]}`;
+  if (input.standing.id) {
+    await client.board.cards.update(input.boardId, input.standing.id, { status: 'doing' });
+  } else {
+    const card = await client.board.cards.create(input.boardId, {
+      title,
+      body: standingBody(input.deploymentId, SWEEP_SCHEDULE, input.template),
+      status: 'doing',
+      assignee: input.ceo,
+      key: input.key,
+    });
+    input.standing.id = card.id;
+  }
+  const fire = await client.deployments.run(input.deploymentId);
+  return fire.session_id;
+}
+
 /**
  * Ends the session that booted the computer. Left idle, it held off the card's wake on the API
  * create until the board clock's next tick (seen on 2026-11-08: 2 minutes).
@@ -115,6 +158,8 @@ export interface ScenarioResult {
   teardown: TeardownReport | null;
   github: GithubCleanup | null;
   error: string | null;
+  /** The sweeps were fired by hand (`manualFire`), not by Naive's scheduler. */
+  manual_sweep?: boolean;
 }
 
 /** What a prepared scenario keeps between `--prepare` and its run, in agents/evals/.state. */
@@ -150,6 +195,8 @@ interface Harness {
   github: GithubApi;
   judgeId: string;
   log: (line: string) => void;
+  /** Fire each sweep by hand (`manualFire`) instead of waiting for Naive's scheduler. */
+  manualSweep?: boolean;
 }
 
 /**
@@ -549,6 +596,7 @@ export async function runScenario(
     };
     const maxMinutes = definitionOf(roleAgent).session.max_minutes + 2;
     let deploymentId: string | null = null;
+    const standing = { id: null as string | null };
     for (const [index, step] of scenario.steps.entries()) {
       const label = step.kind === 'card' ? `card ${step.seed.key}` : `${step.kind} ${index + 1}`;
       const digest = { left: 0 };
@@ -557,20 +605,31 @@ export async function runScenario(
         // Only a scheduled fire claims the standing card "Recurring: <first line>"; a manual run
         // (`deployments.run`) starts the session with no card, and the sweep then stops at once
         // (found by the first eval run, 2026-11-08). So the practice sweep fires on a five-minute
-        // schedule and is paused the moment its session appears.
+        // schedule and is paused the moment its session appears, or, with `manualSweep`, the
+        // harness writes the standing card the fire would claim and runs the deployment by hand.
+        const template = substitute(CEO_SWEEP.input_template, names);
         if (!deploymentId) {
           const deployment = await client.deployments.create({
             agent_id: ceo.id,
             cron: SWEEP_SCHEDULE,
             timezone: 'UTC',
-            input_template: substitute(CEO_SWEEP.input_template, names),
+            input_template: template,
             budget_micro_usd: CEO_SWEEP.budget_micro_usd,
             window: 'immediate',
             enabled: false,
           });
           deploymentId = deployment.id;
         }
-        sessionId = await fireOnce(client, deploymentId, log);
+        sessionId = harness.manualSweep
+          ? await manualFire(client, {
+              boardId: team.board_id,
+              deploymentId,
+              ceo: ceo.name,
+              template,
+              key: `${names.run}-standing`,
+              standing,
+            })
+          : await fireOnce(client, deploymentId, log);
       } else if (step.kind === 'digest') {
         digest.left = 1;
         const begun = Date.now();
