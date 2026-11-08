@@ -4,6 +4,7 @@ import { CEO_SWEEP, company, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive, readSecret } from '../naive/client.ts';
 import { type SyncResult, syncAgents } from '../sync.ts';
 import { netrc, TOKENS, type TokenName } from './github.ts';
+import { type GithubReport, githubPreflight } from './preflight.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -31,6 +32,7 @@ export interface CompanyReport {
   board: { id: string; action: 'created' | 'existing'; cards: Record<string, number> };
   deployment: DeploymentResult;
   netrc: NetrcResult[];
+  github: GithubReport;
 }
 
 /** The CEO's sweep. Created paused, and never resumed or paused here once it exists. */
@@ -174,12 +176,19 @@ export async function placeNetrc(
 /**
  * `pnpm company:sync`: creates or versions every company agent, with br-ceo's roster and board,
  * ensures the board, creates the CEO's sweep paused, and writes each GitHub token to the computers
- * that need it. Running it again changes nothing that already matches.
+ * that need it. Running it again changes nothing that already matches. It also checks GitHub
+ * against the spec and warns about each gap, but changes nothing there.
  */
 export async function syncCompany(
   client: Naive,
   log: (line: string) => void = () => undefined,
+  { preflight = () => githubPreflight() }: { preflight?: () => Promise<GithubReport> } = {},
 ): Promise<CompanyReport> {
+  const github = await preflight();
+  for (const gap of github.gaps) log(`github    WARNING ${gap}`);
+  if (!github.gaps.length)
+    log('github    each token reaches its own repo only; main and dev have their rules');
+
   const agents = await syncAgents(client, company);
   for (const result of agents) {
     log(`${result.action.padEnd(9)} ${result.name} ${result.id} v${result.version}`);
@@ -212,5 +221,10 @@ export async function syncCompany(
       `netrc     ${result.action} ${name} ${token} on ${result.computer_id} (${result.computer_action}) ${result.stat}`,
     );
   }
-  return { agents, board: boardResult, deployment, netrc: netrcResults };
+  if (github.gaps.length) {
+    log(
+      `github    ${github.gaps.length} gap(s) above. Keep the sweep paused until they are fixed: until then only prompts keep agents off the other repo and off main and dev.`,
+    );
+  }
+  return { agents, board: boardResult, deployment, netrc: netrcResults, github };
 }

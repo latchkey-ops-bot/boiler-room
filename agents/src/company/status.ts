@@ -1,5 +1,6 @@
 import { company } from '../definitions/company/index.ts';
 import { listAll, type Naive, usd } from '../naive/client.ts';
+import { type GithubReport, githubPreflight } from './preflight.ts';
 
 export interface StatusAgent {
   name: string;
@@ -23,8 +24,14 @@ async function ledgerTotal(client: Naive, agentId: string): Promise<number> {
     .reduce((sum, entry) => sum + Math.abs(entry.amount_micro_usd), 0);
 }
 
-/** What `pnpm company:status` prints: the agents, br-ceo's roster, the board, the sweep, and spend. */
-export async function companyStatus(client: Naive) {
+/**
+ * What `pnpm company:status` prints: the agents, br-ceo's roster, the board, the sweep, spend, and
+ * how GitHub differs from the spec.
+ */
+export async function companyStatus(
+  client: Naive,
+  preflight: () => Promise<GithubReport> = () => githubPreflight(),
+) {
   const existing = await listAll((query) => client.agents.list(query));
   const byId = new Map(existing.map((agent) => [agent.id, agent]));
 
@@ -67,6 +74,7 @@ export async function companyStatus(client: Naive) {
       )
     : [];
   const balance = await client.credits.show();
+  const github = await preflight();
 
   return {
     agents,
@@ -94,5 +102,6 @@ export async function companyStatus(client: Naive) {
       budget: usd(deployment.budget_micro_usd),
     })),
     spend: { company_total: usd(total), org_balance: usd(balance.balance_micro_usd) },
+    github,
   };
 }

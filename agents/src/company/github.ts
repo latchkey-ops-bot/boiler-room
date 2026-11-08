@@ -19,6 +19,19 @@ export const TOKENS = {
 } as const;
 export type TokenName = keyof typeof TOKENS;
 
+export type Repo = (typeof REPOS)[keyof typeof REPOS];
+
+/** The one repo each token is for. Each must be refused by the other repo (spec section 6). */
+export const REPO_OF: Record<TokenName, Repo> = {
+  engineering: REPOS.code,
+  design: REPOS.design,
+};
+
+/** The company repo a token must not be able to write to. */
+export function otherRepo(token: TokenName): Repo {
+  return token === 'engineering' ? REPOS.design : REPOS.code;
+}
+
 /**
  * The `~/.netrc` that lets git (over HTTPS) and `curl --netrc` (the REST API) use a token without it
  * ever appearing in a command. GitHub ignores the login for a token, but takes the owner's.

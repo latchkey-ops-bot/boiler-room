@@ -43,7 +43,7 @@ difference listed in the note as a proposal for a new `DIR` card.
 
 ## Rules
 
-- Never write to `boiler-room`.
+- Never write to `boiler-room`. This is a rule, not a limit of your token: never try.
 - Never put a number in a design without its source.
 - Never use another company's logo or brand assets, except in a customer's own film.
 - Never post, email or publish anything outside the company.

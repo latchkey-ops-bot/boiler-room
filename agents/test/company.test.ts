@@ -10,7 +10,7 @@ import {
   SANDBOX,
   SOCIAL,
 } from '../src/company/tools.ts';
-import { verifySteps } from '../src/company/verify.ts';
+import { judgeVerify, verifySchema, verifySteps } from '../src/company/verify.ts';
 import {
   CEO_ROSTER,
   CEO_SWEEP,
@@ -315,10 +315,48 @@ describe("the CEO's direction", () => {
     for (const item of OUT_OF_SCOPE) expect(ceo.system).toContain(item);
   });
 
-  it('keeps the founder out of approvals, and GTM out of the work', () => {
-    expect(ceo.system).toContain('The founder approves nothing');
-    expect(ceo.system).toMatch(/RELEASE cards/);
+  it('hands every release to the founder, and keeps GTM out of the work', () => {
+    expect(ceo.system).toContain("Releases are the founder's");
+    expect(ceo.system).toContain('FOUNDER: release <slug>');
+    expect(ceo.system).toContain('The founder approves nothing else');
+    expect(ceo.system).not.toMatch(/RELEASE cards?/);
+    expect(CEO_SWEEP.input_template).toContain('FOUNDER: release');
+    expect(CEO_SWEEP.input_template).not.toContain('RELEASE cards');
     expect(ceo.system).toMatch(/Never assign them a card/);
+  });
+
+  it('limits open slugs, not open DIR cards, since product closes DIR at the spec PR', () => {
+    expect(ceo.system).toContain('Hold at most two open slugs');
+    expect(ceo.system).toContain('does not close the slug');
+    const skill = skillContent({ slug: 'ceo', description: '' });
+    expect(skill).toContain('A `DIR` card moving to `done` does not close its slug');
+    expect(skill).not.toMatch(/fewer than two `DIR` cards are open \(not `done`\)/);
+  });
+
+  it('never duplicates a card across sweeps', () => {
+    const skill = skillContent({ slug: 'ceo', description: '' });
+    expect(skill).toContain('Within one session, a retried write with the same title is a no-op');
+    expect(skill).toMatch(/if a card titled `FOUNDER: release <slug>` exists, in any status, skip/);
+    expect(skill).toMatch(
+      /`FOUNDER: stalled cards` card that is not `done` already exists, comment/,
+    );
+    expect(skill).toContain('`DIR: <slug> r2`');
+    expect(skill).not.toMatch(/create `RELEASE: <slug>`/);
+  });
+});
+
+describe('main and production', () => {
+  it('belong to the founder: no company agent merges into main or deploys production', () => {
+    const lead = skillContent({ slug: 'eng-lead', description: '' });
+    expect(lead).not.toMatch(/pull request from `dev` into `main`/);
+    expect(lead).not.toMatch(/Deploy production with/);
+    expect(lead).toContain('Never merge into `main`, never open a pull request into `main`');
+    expect(lead).toContain("`releases are the founder's`");
+    for (const agent of [engineeringLead, engineer]) {
+      expect(agent.system, agent.name).toContain("Releases are the founder's");
+      expect(agent.system, agent.name).not.toMatch(/only from a RELEASE card/);
+      expect(agent.description, agent.name).not.toMatch(/promotes dev to main/);
+    }
   });
 });
 
@@ -396,10 +434,68 @@ describe('GitHub credentials', () => {
   });
 
   it('verifies with commands that never print the file or carry a token', () => {
-    for (const command of verifySteps('boiler-room')) {
+    for (const command of verifySteps('boiler-room', 'boiler-room-design')) {
       expect(command).not.toMatch(/\bcat\b|GIT_TRACE|--verbose|\s-v\b|password/);
     }
-    expect(verifySteps('boiler-room')[1]).toContain('git ls-remote');
+    expect(verifySteps('boiler-room', 'boiler-room-design')[1]).toContain('git ls-remote');
+  });
+
+  it('checks that each token is refused by the other repo, not only accepted by its own', () => {
+    const steps = verifySteps('boiler-room', 'boiler-room-design');
+    const own = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room `;
+    const other = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room-design `;
+    expect(steps[3]).toContain(own);
+    expect(steps[4]).toContain(other);
+    expect(steps.join('\n')).not.toContain('"push"');
+    expect(steps[2]).toContain('https://api.github.com/user');
+    expect(verifySchema.required).toContain('other_push_dry_run');
+  });
+});
+
+describe('judging a verification', () => {
+  const pass = {
+    netrc: 'mode 600 size 214',
+    ls_remote: '5f95f29\trefs/heads/dev',
+    api_auth: 'auth 200',
+    push_dry_run: `To https://github.com/${GITHUB_OWNER}/boiler-room\n * [new branch]      HEAD -> netrc-check`,
+    other_push_dry_run: `remote: Permission to ${GITHUB_OWNER}/boiler-room-design.git denied to ${GITHUB_OWNER}.\nfatal: unable to access 'https://github.com/${GITHUB_OWNER}/boiler-room-design/': The requested URL returned error: 403`,
+    errors: [],
+  };
+
+  it('passes a token that pushes to its own repo and is refused by the other', () => {
+    expect(judgeVerify(pass)).toEqual({ ok: true, failures: [] });
+  });
+
+  it('fails a token that the other repo accepts', () => {
+    const verdict = judgeVerify({ ...pass, other_push_dry_run: pass.push_dry_run });
+    expect(verdict.ok).toBe(false);
+    expect(verdict.failures.join()).toMatch(/reaches both repos/);
+  });
+
+  it('fails when the negative step is missing or unclear', () => {
+    expect(judgeVerify({ ...pass, other_push_dry_run: '' }).ok).toBe(false);
+    expect(judgeVerify({ ...pass, other_push_dry_run: undefined }).ok).toBe(false);
+  });
+
+  it('fails a refused own push, a failed auth, a missing file and no output', () => {
+    expect(judgeVerify({ ...pass, push_dry_run: pass.other_push_dry_run }).ok).toBe(false);
+    expect(judgeVerify({ ...pass, api_auth: 'auth 401' }).ok).toBe(false);
+    expect(judgeVerify({ ...pass, netrc: 'no ~/.netrc' }).ok).toBe(false);
+    expect(judgeVerify({ ...pass, netrc: 'mode 644 size 214' }).ok).toBe(false);
+    expect(judgeVerify(null).ok).toBe(false);
+  });
+});
+
+describe('the single-repo rule', () => {
+  it('is stated as a rule, never as something the token prevents', () => {
+    for (const slug of ['product', 'design']) {
+      const skill = skillContent({ slug, description: '' });
+      expect(skill, slug).not.toMatch(/token cannot/i);
+      expect(skill, slug).toContain('This is a rule, not a limit of your token');
+    }
+    for (const agent of [engineeringLead, engineer, product, design]) {
+      expect(agent.system, agent.name).toContain('This is a rule, not a limit of your token');
+    }
   });
 });
 

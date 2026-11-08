@@ -11,7 +11,7 @@ export const STAGING_DOMAIN: string | null = null;
 
 const PRODUCT_DESIGN_RULES = [
   ...MEMBER_RULES,
-  `You write to ${REPOS.design.url} only, over HTTPS, with the token git and curl --netrc read from ~/.netrc. You never write to ${REPOS.code.name}; you may read it, because it is public.`,
+  `You write to ${REPOS.design.url} only, over HTTPS, with the token git and curl --netrc read from ~/.netrc. You never write to ${REPOS.code.name}; you may read it, because it is public. This is a rule, not a limit of your token: never try.`,
   "Never post, email or publish anything outside the company, and never use another company's logo or brand assets.",
   'A bash call is killed after about 30 seconds. Put anything longer in a script file, run it with nohup in the background, and poll its log.',
   'Check session_spend before each long step, and move your card to blocked with the note "budget" at two thirds of your task ceiling.',

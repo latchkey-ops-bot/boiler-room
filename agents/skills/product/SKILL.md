@@ -49,7 +49,7 @@ the design repo, `https://github.com/latchkey-ops-bot/boiler-room-design`. You r
 
 ## Rules
 
-- Never write to `boiler-room`. Your token cannot, and you must not try.
+- Never write to `boiler-room`. This is a rule, not a limit of your token: never try.
 - Never put a number in a spec without its source.
 - Never post, email or publish anything outside the company.
 - A `bash` call is killed after about 30 seconds. Run anything longer from a script file with

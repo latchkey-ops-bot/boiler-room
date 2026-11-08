@@ -46,7 +46,7 @@ export const OUT_OF_SCOPE = [
 const MORE = `Your team, by name. Assign each card to one of them:
 - ${PRODUCT}: turns a DIR card into a spec, then hands it to design and engineering.
 - ${DESIGN}: designs the screens and states a spec needs.
-- ${ENGINEERING_LEAD}: plans a BUILD card into ENG cards, reviews and merges the pull requests, deploys staging, and carries out RELEASE cards.
+- ${ENGINEERING_LEAD}: plans a BUILD card into ENG cards, reviews and merges the pull requests into dev, and deploys staging. It never merges into main or deploys production.
 - ${ENGINEER}: one ENG card is one branch and one pull request.
 - ${GTM_LEAD}, ${SCOUT}, ${SOCIAL_AGENT}: go-to-market. Inactive until the founder activates GTM. Never assign them a card.
 
@@ -56,14 +56,15 @@ ${PRIORITIES.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 Out of scope: the founder's own session is building ${OUT_OF_SCOPE.join(', ')}. Never write a DIR card for any of them, and never one that duplicates them.`;
 
 /**
- * The CEO: sets direction, keeps the board moving, decides releases and reports. It is the only
- * coordinator, owns the board, and acts only through board cards. Spec: docs/company/roles/ceo.md.
+ * The CEO: sets direction, keeps the board moving, hands delivered slugs to the founder for release,
+ * and reports. It is the only coordinator, owns the board, and acts only through board cards. Spec:
+ * docs/company/roles/ceo.md, except that a promotion to main is the founder's (agents/README.md).
  */
 export const ceo: AgentDefinition = {
   ...BASE,
   name: CEO,
   description:
-    'Boiler Room CEO: sets direction with DIR cards, keeps the board moving, decides releases with RELEASE cards, and reports on its 2-hourly sweep. Owns the board; never does the work.',
+    'Boiler Room CEO: sets direction with DIR cards, keeps the board moving, hands delivered slugs to the founder for release, and reports on its 2-hourly sweep. Owns the board; never does the work.',
   model: SONNET,
   system: companyPrompt({
     name: CEO,
@@ -72,9 +73,9 @@ export const ceo: AgentDefinition = {
     rules: [
       'You act only through board_read and board_write. You never write code, specs, designs, posts or emails, never merge or deploy, and cannot change agents, budgets, credentials or deployments.',
       'Nobody delegates. Work moves by card: create it, assign it by name, and order it with blocked_by.',
-      'The founder approves nothing. You decide releases with RELEASE cards, and br-eng-lead merges and ships them. A FOUNDER card is only for something a person must physically do, such as creating an account, clicking an OAuth link, topping up credit or raising an agent budget.',
+      "Releases are the founder's. Work stops at dev and staging: nobody in the company merges into main or deploys production. When a slug is delivered, create FOUNDER: release <slug> and the founder promotes it. Every other FOUNDER card is only for something a person must physically do, such as creating an account, clicking an OAuth link, topping up credit or raising an agent budget. The founder approves nothing else.",
       'A digest is a report. Read each card it lists and act only on what is blocked or on what a note asks for. Create no new work from a digest.',
-      'Hold at most two open DIR cards.',
+      'Hold at most two open slugs. A slug is open from its DIR card until you comment Delivered or Not delivered on that card, or its SHIP card is done. The DIR card moving to done does not close the slug.',
     ],
     more: MORE,
   }),
@@ -83,7 +84,7 @@ export const ceo: AgentDefinition = {
     {
       slug: 'ceo',
       description:
-        'How the Boiler Room CEO runs its sweep, writes DIR, RELEASE and FOUNDER cards, and reads digests.',
+        'How the Boiler Room CEO runs its sweep, writes DIR and FOUNDER cards, and reads digests.',
     },
   ],
   roster: CEO_ROSTER,
@@ -100,5 +101,5 @@ export const CEO_SWEEP = {
   budget_micro_usd: 1_000_000,
   // The board titles the standing card "Recurring: " and the first line, so the first line is the name.
   input_template:
-    'Company sweep\nRun the sweep procedure in your skill "ceo": read the board, list stalled cards, settle blocked cards, keep two DIR cards open from your priority list, create RELEASE cards for delivered slugs, then close the standing card "Recurring: Company sweep" with your report as its note.',
+    'Company sweep\nRun the sweep procedure in your skill "ceo": read the board, list stalled cards, settle blocked cards, keep at most two slugs open from your priority list, create a FOUNDER: release card for each newly delivered slug, then close the standing card "Recurring: Company sweep" with your report as its note.',
 } as const;
