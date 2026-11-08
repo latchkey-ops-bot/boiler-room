@@ -172,6 +172,7 @@ export const FOUNDER_NEEDS = [
   'reply',
   'removal',
   'pack',
+  'hand-removal',
 ] as const;
 export type FounderNeed = (typeof FOUNDER_NEEDS)[number];
 

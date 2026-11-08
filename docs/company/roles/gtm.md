@@ -108,13 +108,18 @@ reader are specified in gtm-operations.md sections 10.3, 10.4 and 12; none sends
 2. Before the first post, set the `@boilerroomstudi` bio to say how to ask for a removal: every
    caption ends "Removal on request: see our bio".
 3. For each post on it: open the film page, download the film, and post it on X from
-   `@boilerroomstudi` with the caption exactly as written. Where the card names an X post, quote-post
-   it; otherwise post the film on its own. Every number in a caption must be quoted from the
-   startup's own site; the code's captions hold none.
-4. Move the card to `done`. Until then, nothing counts as posted: the next day's report counts the
-   posts on a done pack card as POSTED and every other as NOT POSTED.
+   `@boilerroomstudi` with its caption from that day's review file (`out/gtm/<date>/review.md`,
+   "Pack"), exactly as written. The card holds lead ids and film pages only; the startup, the X post
+   to quote and the caption are in the review file. Where it names an X post, quote-post it;
+   otherwise post the film on its own. Every number in a caption must be quoted from the startup's
+   own site; the code's captions hold none.
+4. After each post, comment `POSTED <lead id> <your post's address>` on the pack card, then move the
+   card to `done`. Only those comments count: a post without one is NOT POSTED, whoever moved the
+   card. `founder_user_id` must hold your `usr_` id, or no comment counts.
 5. To stop a day, comment `HOLD` on the `GTM: <date>` card. To take a film down, comment
-   `REMOVE <lead id>`; a startup can also press "Remove this film" on its film page.
+   `REMOVE <lead id>`; a startup can also press "Remove this film" on its film page. When a removal
+   reaches a film from a pack, `FOUNDER: gtm hand-removal` asks you to delete your post of it, or
+   never to make it.
 
 ## Activation checklist
 

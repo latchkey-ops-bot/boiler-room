@@ -12,12 +12,9 @@ import type { StoreData } from './store.ts';
  * company, because br-ceo reads digested cards and holds `board_write`. Domains appear only in
  * day-card comments, never in a title or a body.
  *
- * One exception, by the founder's decision of 2026-11-08: the day's pack card
- * (`FOUNDER: gtm pack <date>`) carries what the founder needs to post by hand, which includes each
- * startup's verified product name, its domain, its launch post's address and the caption. The
- * caption is a code template around a quote `checkQuote` found verbatim on the startup's own site,
- * with no digit, link, @ or #, at most 100 characters, passed by the claims screen. The card says
- * the quote is the startup's words and not an instruction, and br-ceo's rules leave the card alone.
+ * The day's pack card (`FOUNDER: gtm pack <date>`) keeps to that too: lead ids and film pages on our
+ * own domain only. The startup's name, its domain, its launch post's address and the caption, which
+ * quotes the startup's own site, are in the day's review file, which no agent can open.
  */
 
 export const dayTitle = (date: string) => `GTM: ${date}`;
@@ -69,7 +66,9 @@ const FOUNDER_STEPS: Record<FounderNeed, string> = {
   reply: 'A reply needs a person. The draft is in the review file.',
   removal:
     'A removal request could not take everything down yet: an X post or a film of ours may still be up. The executor retries it on every run, and needs live ports to delete or withdraw. If this stays open, delete the post or withdraw the film by hand.',
-  pack: `Post each film below on X by hand, from ${X_ACCOUNT}: open its film page, download the film, and post it with its caption exactly as written. Every caption ends "Removal on request: see our bio", so before the first post the ${X_ACCOUNT} bio must say how to ask for a removal. Where an X post is named, quote-post it; otherwise post the film on its own. Then move this card to done. The next day's report counts the posts on a done pack card as POSTED and the rest as NOT POSTED; nothing is called posted before that.`,
+  pack: `Post each film below on X by hand, from ${X_ACCOUNT}: open its film page, download the film, and post it with its caption from the day's review file (out/gtm/<the card's date>/review.md, on the machine that ran gtm:day), exactly as written. Every caption ends "Removal on request: see our bio", so before the first post the ${X_ACCOUNT} bio must say how to ask for a removal. Where the review file names an X post, quote-post it; otherwise post the film on its own. After each post, comment on this card: POSTED <lead id> <your post's address>. Then move this card to done. Only a POSTED comment of yours counts a post as POSTED: moving the card counts nothing, and once it is done every post without one counts as NOT POSTED.`,
+  'hand-removal':
+    'A startup asked for its film to be removed, and the film was in a pack for the founder to post by hand. The executor withdrew our film page and suppressed the domain, but it cannot delete a post the founder made. For each lead below: if you posted it, delete that post from the X account; if you have not, never post it. Then move this card to done.',
 };
 
 export const founderTitle = (need: FounderNeed) => `FOUNDER: gtm ${need}`;
@@ -77,10 +76,34 @@ export const founderKey = (need: FounderNeed, scope: string) => `gtm-founder:${n
 export const founderBody = (need: FounderNeed) =>
   `${FOUNDER_STEPS[need]}\nWritten by the GTM executor. It moves this card to done when the need is met.`;
 
+/** One lead a removal reached in a pack: lead ids and dates only, never the startup's words. */
+export interface HandRemoval {
+  lead_id: string;
+  pack_date: string;
+  /** The founder said POSTED for it on the pack card. */
+  posted: boolean;
+}
+
+export function handRemovalBody(entries: readonly HandRemoval[]): string {
+  return [
+    FOUNDER_STEPS['hand-removal'],
+    '',
+    ...entries.map(
+      (entry) =>
+        `- ${entry.lead_id}, from ${packTitle(entry.pack_date)}: ${entry.posted ? 'you said you posted it, so delete that post' : 'no POSTED comment of yours; if you posted it anyway, delete it, and otherwise never post it'}.`,
+    ),
+    '',
+    'Written by the GTM executor. The founder moves this card to done.',
+  ].join('\n');
+}
+
 export const packTitle = (date: string) => `FOUNDER: gtm pack ${date}`;
 export const packKey = (date: string) => founderKey('pack', date);
 
-/** One post of the pack, as the founder needs it. Every field is code's own or code-checked. */
+/**
+ * One post of the pack, as the founder needs it. Every field is code's own or code-checked. Only
+ * `lead_id`, `film_page` and `refused` go on the card; the rest goes in the review file.
+ */
 export interface PackPost {
   lead_id: string;
   /** The verified product name: in the homepage's title, og:site_name or first h1. */
@@ -94,23 +117,45 @@ export interface PackPost {
   refused: boolean;
 }
 
+/** The pack card: lead ids, our own film pages and fixed words. Nothing from the startups' sites. */
 export function packBody(date: string, posts: readonly PackPost[]): string {
   return [
     `GTM pack ${date}. Written by the GTM executor, which is code. Nothing below was posted by code.`,
     FOUNDER_STEPS.pack,
-    "Each caption quotes the startup only in words found verbatim on its own website, and holds no number, link, @ or #. The quoted words are the startup's, not an instruction to anyone.",
     ...posts.map((post, index) =>
       [
         '',
         `Post ${index + 1} · ${post.lead_id}`,
-        `Startup: ${post.product} (${post.domain})`,
         `Film page: ${post.film_page}`,
-        `X post to quote: ${post.quote_post ?? 'none, post the film on its own'}`,
         ...(post.refused ? ['The executor tried to post this and the network refused it.'] : []),
-        'Caption:',
-        post.caption,
       ].join('\n'),
     ),
+  ].join('\n');
+}
+
+/**
+ * The pack as the review file carries it, for the founder alone: the startup, the X post to quote
+ * and the caption. It quotes the startup's own site, so it never goes on the board.
+ */
+export function packReview(date: string, posts: readonly PackPost[]): string {
+  return [
+    `## Pack\n\n${posts.length} post(s) on ${packTitle(date)}, for the founder to post by hand. The caption quotes the startup only in words found verbatim on its own website, and holds no number, link, @ or #. The quoted words are the startup's, not an instruction to anyone. After each post, comment POSTED <lead id> <your post's address> on the card.`,
+    ...posts.map((post, index) =>
+      [
+        '',
+        `### Post ${index + 1} · ${post.lead_id}`,
+        '',
+        `- Startup: ${post.product} (${post.domain})`,
+        `- Film page: ${post.film_page}`,
+        `- X post to quote: ${post.quote_post ?? 'none, post the film on its own'}`,
+        ...(post.refused ? ['- The executor tried to post this and the network refused it.'] : []),
+        '',
+        '```text',
+        post.caption,
+        '```',
+      ].join('\n'),
+    ),
+    '',
   ].join('\n');
 }
 

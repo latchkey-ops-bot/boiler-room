@@ -13,9 +13,11 @@ import {
   founderBody,
   founderKey,
   founderTitle,
+  handRemovalBody,
   type PackPost,
   packBody,
   packKey,
+  packReview,
   packTitle,
 } from './cards.ts';
 import {
@@ -60,6 +62,7 @@ import {
   type RemovalPlan,
   type RemovalRequest,
   readCommands,
+  readPackPosts,
 } from './removal.ts';
 import { dayMetrics, reportText } from './report.ts';
 import { jsonSchema, pickOutputSchema, scoutOutputSchema, socialOutputSchema } from './schemas.ts';
@@ -67,6 +70,7 @@ import type { SiteRead } from './site.ts';
 import { dataRunNote, type GuardedDataRun } from './sources.ts';
 import {
   type ActionKind,
+  handPosted,
   type LeadRow,
   phaseOf,
   recordPhase,
@@ -254,28 +258,49 @@ class Day {
   }
 
   /**
-   * Earlier days' packs, read again: a pack whose card the founder moved to done is POSTED, and its
-   * startups count as posted for good (one X post per domain, ever). Any other stays NOT POSTED
-   * until its card is done; nothing is called posted before that.
+   * Every waiting pack, read again on each run. A post counts as POSTED only once the founder's own
+   * `POSTED <lead id> <url>` comment for it is on the pack card (`readPackPosts`, through
+   * `commandAllowed` with `founder_user_id`); its startup then counts as posted for good (one X post
+   * per domain, ever). Who moved the card is not on the card, so its status is only a hint: once it
+   * is done the pack is `done`, and every post without such a comment stays NOT POSTED. The
+   * executor never writes a command on a pack card: each of its comments starts `commentHead`, which
+   * no command parses as, so one it wrote in an earlier run cannot count either.
    */
   async settlePacks() {
+    const founderId = this.store.flags.founder_user_id;
     for (const pack of this.store.packs) {
-      if (pack.status !== 'waiting' || pack.date >= this.date) continue;
+      if (pack.status !== 'waiting') continue;
+      // Listing the card first also lets the guard read the comments of a card an earlier run made.
       const status = await this.ports.board.cardStatus(pack.card_id).catch(() => null);
+      const comments = await this.ports.board.comments(pack.card_id).catch(() => null);
+      if (!comments) continue;
       pack.checked_at = this.iso();
-      if (status !== 'done') continue;
-      pack.status = 'posted';
-      pack.posted_at = this.iso();
+      const posted = readPackPosts(comments, founderId, this.ownComments);
+      const counted: string[] = [];
       for (const entry of pack.entries) {
+        const url = posted.get(entry.lead_id);
+        if (!url || handPosted(entry)) continue;
+        entry.posted_at = this.iso();
+        entry.posted_url = url;
         recordContact(this.store, {
           domain: entry.domain,
           channel: 'x_post',
           at: this.iso(),
           lead_id: entry.lead_id,
         });
+        counted.push(entry.lead_id);
       }
-      await this.comment('PACK', pack.date, 'posted', [
-        `${pack.entries.length} post(s) from FOUNDER: gtm pack ${pack.date} counted as POSTED: the founder moved the card to done.`,
+      if (counted.length) {
+        await this.comment('PACK', pack.date, 'posted', [
+          `The founder posted ${counted.join(', ')} from ${packTitle(pack.date)} by hand.`,
+        ]);
+      }
+      if (status !== 'done') continue;
+      pack.status = 'done';
+      pack.done_at = this.iso();
+      const made = pack.entries.filter(handPosted).length;
+      await this.comment('PACK', pack.date, 'done', [
+        `${packTitle(pack.date)} is done: ${made} POSTED, ${pack.entries.length - made} NOT POSTED. Only a POSTED <lead id> <url> comment of the founder's counts a post.${founderId ? '' : ' founder_user_id is not set, so no comment could count.'}`,
       ]);
     }
     await this.save();
@@ -645,6 +670,11 @@ class Day {
         this.log(`removals  film withdraw failed: ${message}`);
       }
     }
+    // A pack post is the founder's own: only the founder can delete it, or not make it.
+    if (plan.hand.length && !(await this.handRemoval(plan)))
+      result.waiting.push(
+        `hand posts of ${plan.hand.map((entry) => entry.lead_id).join(', ')}: the founder's card could not be written`,
+      );
     for (const item of plan.leads) {
       this.picked.emails = this.picked.emails.filter((pick) => pick.lead_id !== item.id);
       if (this.picked.x === item.id) this.picked.x = null;
@@ -672,6 +702,11 @@ class Day {
     }
     await this.comment('REMOVAL', plan.id, complete ? 'done' : 'pending', [
       `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${result.deleted} of ${plan.posts.length} post(s) deleted, ${result.withdrawn} of ${plan.films.length} film(s) withdrawn.`,
+      ...(plan.hand.length
+        ? [
+            `Pack posts for the founder to delete or never make: ${plan.hand.map((entry) => `${entry.lead_id} (${packTitle(entry.pack_date)}${entry.posted ? ', POSTED' : ''})`).join(', ')}. See ${founderTitle('hand-removal')}.`,
+          ]
+        : []),
       ...(complete
         ? []
         : [
@@ -679,6 +714,52 @@ class Day {
           ]),
     ]);
     return result;
+  }
+
+  /**
+   * A removal that reached a startup in a pack. The executor cannot delete a post the founder made
+   * by hand, so it writes one `FOUNDER: gtm hand-removal` card naming each lead (posted or not), and
+   * tells each waiting pack's card never to post it. Each entry is marked so a later run does not
+   * raise it again. False when the founder's card could not be written: the removal then waits.
+   */
+  async handRemoval(plan: RemovalPlan): Promise<boolean> {
+    this.needs.add('hand-removal');
+    try {
+      await this.ports.board.ensureCard({
+        title: founderTitle('hand-removal'),
+        body: handRemovalBody(plan.hand),
+        status: 'blocked',
+        key: founderKey('hand-removal', stableId('rq', plan.request.key ?? plan.id)),
+      });
+    } catch (error) {
+      this.log(
+        `removals  hand-removal card failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+    for (const item of plan.hand) {
+      const pack = this.store.packs.find((row) => row.date === item.pack_date);
+      const entry = pack?.entries.find((row) => row.lead_id === item.lead_id);
+      if (!pack || !entry) continue;
+      entry.removed_at = this.iso();
+      if (pack.status !== 'waiting') continue;
+      try {
+        const comment = await this.ports.board.comment(
+          pack.card_id,
+          [
+            commentHead('REMOVAL', entry.lead_id, 'do not post'),
+            `A removal request came in for ${entry.lead_id}: never post it, and if you already did, delete that post. Its film page is withdrawn. See ${founderTitle('hand-removal')}.`,
+          ].join('\n'),
+        );
+        this.ownComments.add(comment.id);
+      } catch (error) {
+        this.log(
+          `removals  pack card comment failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    await this.save();
+    return true;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -1432,7 +1513,7 @@ class Day {
       `## Drafts\n\n${this.drafts
         .map(
           (draft) =>
-            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n${draft.pack ? `\nQuote pack, for a person posting by hand from the X app (pack mode): quote-post ${draft.pack.launchPost} with the film from ${draft.pack.filmPage ?? 'the film page, once ready'}, and paste the caption above. It is on ${packTitle(this.date)} when the film is real; move that card to done once posted.\n` : ''}`,
+            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n${draft.pack ? `\nQuote pack, for a person posting by hand from the X app (pack mode): quote-post ${draft.pack.launchPost} with the film from ${draft.pack.filmPage ?? 'the film page, once ready'}, and paste the caption above. It is on ${packTitle(this.date)} when the film is real; once posted, comment POSTED ${draft.lead_id} <your post's address> on that card.\n` : ''}`,
         )
         .join('\n')}`,
     );
@@ -1683,7 +1764,9 @@ class Day {
 
   /**
    * The day's pack: ONE `FOUNDER: gtm pack <date>` card with every post the executor did not make,
-   * for the founder to post by hand. It is never called posted until the founder moves it to done.
+   * for the founder to post by hand. The card carries lead ids and our film pages only; the startup,
+   * the X post to quote and the caption go in the review file. A post is never called posted until
+   * the founder's own POSTED comment for it is read.
    */
   async writePack(posts: PackPost[]) {
     this.needs.add('pack');
@@ -1713,18 +1796,19 @@ class Day {
           domain: post.domain,
           film_page: post.film_page,
           refused: post.refused,
+          posted_at: null,
+          posted_url: null,
+          removed_at: null,
         })),
         status: 'waiting',
-        posted_at: null,
+        done_at: null,
         checked_at: null,
       });
     }
     await this.comment('PACK', this.date, 'waiting', [
-      `${posts.length} post(s) on ${packTitle(this.date)}: ${posts.map((post) => post.lead_id).join(', ')}. The founder posts them by hand and moves the card to done; until then none counts as posted.`,
+      `${posts.length} post(s) on ${packTitle(this.date)}: ${posts.map((post) => post.lead_id).join(', ')}. The founder posts them by hand and comments POSTED <lead id> <url> on the card for each; until then none counts as posted.`,
     ]);
-    this.review.push(
-      `## Pack\n\n${posts.length} post(s) on ${packTitle(this.date)}, written for the founder to post by hand.\n`,
-    );
+    this.review.push(packReview(this.date, posts));
     await this.save();
   }
 

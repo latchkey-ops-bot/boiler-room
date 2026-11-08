@@ -201,23 +201,36 @@ export interface PackEntry {
   film_page: string;
   /** The executor tried to post it and the provider refused. */
   refused: boolean;
+  /**
+   * When a run read the founder's own `POSTED <lead id> <url>` comment for it on the pack card, and
+   * the address it gave. Only that comment counts the post as made. Absent on an older row.
+   */
+  posted_at?: string | null;
+  posted_url?: string | null;
+  /** When a removal request reached this startup: the founder is told never to post it. */
+  removed_at?: string | null;
 }
 
 /**
  * The day's pack: one `FOUNDER: gtm pack <date>` card holding every post the executor did not make
- * itself. It is `waiting` until the founder moves the card to done, and only then `posted`. The
- * next day's report counts a done card's posts as POSTED and every other as NOT POSTED.
+ * itself. While it is `waiting`, each run reads the card's comments, and a post counts as POSTED
+ * only once the founder's own `POSTED <lead id> <url>` comment for it is read. Once the founder moves
+ * the card to done the pack is `done`, and every post without such a comment stays NOT POSTED.
  */
 export interface PackRow {
   date: string;
   card_id: string;
   key: string;
   entries: PackEntry[];
-  status: 'waiting' | 'posted';
-  posted_at: string | null;
+  status: 'waiting' | 'done';
+  /** When a run found the card done. */
+  done_at: string | null;
   /** When a later run last read the card. */
   checked_at: string | null;
 }
+
+/** Whether a pack's post counts as made: the founder said so on the card. */
+export const handPosted = (entry: PackEntry): boolean => Boolean(entry.posted_at);
 
 export interface OptOutTokenRow {
   hash: string;

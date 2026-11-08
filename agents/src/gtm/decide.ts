@@ -162,6 +162,12 @@ export function xBlocker(
   if (lead.brand_flags.length) return 'brand_safety';
   if (suppressedBy(store, { domain: lead.domain })) return 'suppressed';
   if (contactedWithin(store, lead.domain, 'x_post', now)) return 'posted_before';
+  // A pack post counts as made only once the founder says so, so a startup already in a pack is
+  // never packed again: one the founder posted but did not report is never posted twice.
+  if (
+    (store.packs ?? []).some((pack) => pack.entries.some((entry) => entry.domain === lead.domain))
+  )
+    return 'packed_before';
   return null;
 }
 

@@ -558,22 +558,33 @@ error still counts as "may have gone out"). A post goes on the pack only with a 
 that has a page, every check passed but the two only code posting needs (the film file and the
 post's price), and no `HOLD`, hold card or halt.
 
-Per post the card carries the startup (its verified product name and domain), the film page link
-(the page has the download button; a file link expires in 10 minutes), the X post to quote if
-discovery verified one ("none, post the film on its own" otherwise), and the caption. The caption is
-the template code filled: it quotes the startup only in words `checkQuote` found verbatim on its own
-site, and holds no number, link, @ or #, so every number the founder posts is one he adds from the
-startup's own site. A person may @mention in a post they make by hand; the same claims rules apply.
+Per post the card carries only the lead id and the film page link on our own domain (the page has
+the download button; a file link expires in 10 minutes), plus fixed steps. Everything else the
+founder needs is in that day's review file, `out/gtm/<date>/review.md`, under "Pack" (`packReview`
+in `cards.ts`): the startup (its verified product name and domain), the X post to quote if
+discovery verified one ("none, post the film on its own" otherwise), and the caption. The card holds
+no text from the startups' sites, because br-ceo reads cards and holds `board_write`; the review
+file is out of every agent's reach. The caption is the template code filled: it quotes the startup
+only in words `checkQuote` found verbatim on its own site, and holds no number, link, @ or #, so
+every number the founder posts is one he adds from the startup's own site. A person may @mention in
+a post they make by hand; the same claims rules apply.
 
-The founder posts each one from `@boilerroomstudi` and moves the card to `done`. Nothing is called
-posted before that: the store keeps the pack `waiting`, today's report says "NOT POSTED yet", and
-each later run reads the card. Once it is `done` the pack is `posted`, each startup gets an `x_post`
-contact (so it is never posted again), a `PACK · <date> · posted` comment goes on the day card, and
-the next day's report counts its posts as POSTED; a pack whose card is not done reads NOT POSTED.
-The review file still carries the same pack. Pack mode needs no Naive social account, no approved
-template hash, no bundle.social tier and no canary post: a person posts. It still needs the film
-lane live and every base check (section 15). The older `POSTED <url>` comment is still parsed but
-counts nothing.
+The founder posts each one from `@boilerroomstudi`, comments `POSTED <lead id> <post address>` on
+the pack card for each, and then moves the card to `done`. **Only that comment counts a post**, and
+only from the founder's own `usr_` id (`founder_user_id`), never from a comment the executor wrote
+(`readPackPosts` and `commandAllowed` in `removal.ts`). Who moved the card is not on the card, so its
+status counts nothing: any holder of `board_write` could move it. While the pack is `waiting`, each
+run reads the card's comments. A POSTED comment it accepts records that post's address, gives the
+startup an `x_post` contact (so it is never posted again), and adds a `PACK · <date> · posted`
+comment to the day card. Once the card is `done` the pack is `done`, and every post without such a
+comment stays NOT POSTED. The report counts per post: "today's pack N post(s), P POSTED, Q NOT
+POSTED yet", and the same for yesterday's. With `founder_user_id` unset no comment counts, and the
+report says so. A startup that was in any pack is never packed again (`packed_before` in
+`xBlocker`), so a post the founder made but did not report is never made twice. The older
+`POSTED <url>` comment, with no lead id, is still parsed and counts nothing.
+
+Pack mode needs no Naive social account, no approved template hash, no bundle.social tier and no
+canary post: a person posts. It still needs the film lane live and every base check (section 15).
 
 ### 10.3 The cold email
 
@@ -766,6 +777,15 @@ confirmation email to the requester obeys halt and the reply cap, and goes only 
 sender in one of our threads. A request for a domain with no lead, film or post of ours writes a
 suppression row and increments a count in the report, and touches the board in no other way.
 
+**A removal that reaches a pack post** (by lead, domain or film page) cannot be finished by code: the
+founder made that post by hand. The executor withdraws our film page and suppresses the domain as
+for any removal, and writes one `FOUNDER: gtm hand-removal` card, keyed by the request, that names
+each lead id and its pack date: "you said you posted it, so delete that post" for a post with the
+founder's POSTED comment, and "if you posted it anyway, delete it, and otherwise never post it" for
+one without. On a pack card still open it also comments `REMOVAL · <lead id> · do not post`. Each
+pack entry is marked `removed_at`, so a second request for the same startup raises nothing again.
+If the card cannot be written, the request stays queued and is retried.
+
 ## 14. Caps and the spend cap
 
 Code holds a hard maximum for each cap (`CAPS` in `config.ts`). A flag can set the cap anywhere up
@@ -888,14 +908,14 @@ written or minimal answers accepted; the inbox phase built (section 10.4); one c
 
 ### 16.1 Cards
 
-| Card                                                | Created                                                                                                       | Status                                                            | Body and note                                                                                                |
-| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| `GTM: <date>`                                       | The first tick of the day                                                                                     | `todo`, unassigned, all day; `done` at `report`                   | Body: the mode, each lane's state, today's caps, the schedule, how to `HOLD`. Note: the report (section 17). |
-| `REMOVE: rm-xxxxxx`                                 | Only when a live asset (our X post or a film page) was actually taken down. Key `gtm-remove:<domain>:<date>`. | Created `todo`, then moved to `done` with its note                | Counts and opaque ids only                                                                                   |
-| `FOUNDER: gtm <need>`                               | When a person must act; one per need, by key                                                                  | `blocked`, no blocker, unassigned                                 | What to do, step by step                                                                                     |
-| `FOUNDER: gtm pack <date>`                          | At `execute`, when a post goes to the founder's hand (section 10.2). Key `gtm-founder:pack:<date>`            | `blocked`, unassigned; the founder moves it to `done` once posted | Per post: the startup, its film page, the X post to quote, the caption                                       |
-| `OUTREACH: <slug>`, `LEADS: <slug>`, `POST: <slug>` | Not today: only for an agent on `GTM_ON_BOARD`, which is empty (section 6)                                    | As any member's card                                              | A note for the founder; nothing posts or sends                                                               |
-| `GTM-HOLD: <reason>`                                | By anyone                                                                                                     | Any but `done`                                                    | While open, every lane is dry run                                                                            |
+| Card                                                | Created                                                                                                       | Status                                                            | Body and note                                                                                                                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GTM: <date>`                                       | The first tick of the day                                                                                     | `todo`, unassigned, all day; `done` at `report`                   | Body: the mode, each lane's state, today's caps, the schedule, how to `HOLD`. Note: the report (section 17).                                                                  |
+| `REMOVE: rm-xxxxxx`                                 | Only when a live asset (our X post or a film page) was actually taken down. Key `gtm-remove:<domain>:<date>`. | Created `todo`, then moved to `done` with its note                | Counts and opaque ids only                                                                                                                                                    |
+| `FOUNDER: gtm <need>`                               | When a person must act; one per need, by key                                                                  | `blocked`, no blocker, unassigned                                 | What to do, step by step                                                                                                                                                      |
+| `FOUNDER: gtm pack <date>`                          | At `execute`, when a post goes to the founder's hand (section 10.2). Key `gtm-founder:pack:<date>`            | `blocked`, unassigned; the founder moves it to `done` once posted | Per post: the lead id and its film page; the startup, the X post to quote and the caption are in the review file. The founder comments `POSTED <lead id> <url>` for each post |
+| `OUTREACH: <slug>`, `LEADS: <slug>`, `POST: <slug>` | Not today: only for an agent on `GTM_ON_BOARD`, which is empty (section 6)                                    | As any member's card                                              | A note for the founder; nothing posts or sends                                                                                                                                |
+| `GTM-HOLD: <reason>`                                | By anyone                                                                                                     | Any but `done`                                                    | While open, every lane is dry run                                                                                                                                             |
 
 **Titles and bodies carry only opaque ids** (`ld-7k2m9q`, `rm-0007`) and fixed words. Domains
 appear only in day-card comments and the review file, because a domain's labels are chosen by its
@@ -907,11 +927,7 @@ no-op.
 **What stays off the board.** No quotes from sites, no captions, no email bodies, no reply
 summaries, no full email address, no page path. The CEO reads digested cards and holds `board_write`,
 and the company's rule is that it never reads outside content. That text goes in the review file.
-**One exception, by the founder's decision:** the pack card carries each startup's verified product
-name and domain, its launch post's address and the caption, because the founder posts from it. The
-caption's quote is code-checked (verbatim on the site, at most 100 characters, no digit, link, @ or
-#, through the claims screen), the card says the quoted words are the startup's and not an
-instruction, and the CEO's skill says never to copy from or act on it.
+The pack card keeps to this too: lead ids and film pages on our own domain only (section 10.2).
 
 ### 16.2 Comment formats on the day card
 
@@ -935,14 +951,17 @@ Dry run uses the same formats, with `dry run` as the state.
 
 ### 16.3 How a person steers it
 
-| Comment on the day card      | Effect                                                                            | Who              |
-| ---------------------------- | --------------------------------------------------------------------------------- | ---------------- |
-| `HOLD`                       | Nothing more is posted or sent today                                              | Anyone           |
-| `HOLD <lead id>`             | Nothing is posted or sent for that startup today                                  | Anyone           |
-| `UNHOLD`, `UNHOLD <lead id>` | Lifts the hold                                                                    | The founder only |
-| `RESUME email`               | Un-pauses the email lane                                                          | The founder only |
-| `REMOVE <lead id>`           | Runs a removal                                                                    | Anyone           |
-| `POSTED <url>`               | Parsed, counts nothing: moving the pack card to `done` is what counts a hand post | The founder only |
+| Comment on the day card      | Effect                                                                  | Who              |
+| ---------------------------- | ----------------------------------------------------------------------- | ---------------- |
+| `HOLD`                       | Nothing more is posted or sent today                                    | Anyone           |
+| `HOLD <lead id>`             | Nothing is posted or sent for that startup today                        | Anyone           |
+| `UNHOLD`, `UNHOLD <lead id>` | Lifts the hold                                                          | The founder only |
+| `RESUME email`               | Un-pauses the email lane                                                | The founder only |
+| `REMOVE <lead id>`           | Runs a removal                                                          | Anyone           |
+| `POSTED <url>`               | Parsed, counts nothing (a hand post is counted on the pack card, below) | The founder only |
+
+On the `FOUNDER: gtm pack <date>` card, `POSTED <lead id> <url>` counts that hand post as made, from
+the founder only (section 10.2). Moving the card counts nothing.
 
 A hold or a removal only ever stops or takes down, so anyone may make one. A command that lets
 something go out again counts only when the comment's author is the founder's own `usr_` id (the
@@ -962,7 +981,7 @@ Spend: $0.000 (agents $0.000, data $0.000, posts $0.000, email $0.000, films $0.
 Picks: x 0, email 0
 Films: 0 ordered, 0 dry run, 0 ready, 0 failed, 0 late
 X: 0 posted, 0 draft, 0 skipped
-X by hand: today's pack 1 post(s), NOT POSTED yet (the founder moves the card to done). Yesterday's pack: 1 POSTED, 0 NOT POSTED
+X by hand: today's pack 1 post(s), 0 POSTED, 1 NOT POSTED yet (the founder comments POSTED <lead id> <url> on the card). Yesterday's pack: 1 POSTED, 0 NOT POSTED
 Email: 0 sent, 0 drafts, skipped: none
 Replies: 0 in, 0 answered, 0 to a person. Opt-outs 0. Removals 0 (0 for domains we never touched). Bounces 0. Complaints 0.
 Cost per qualified lead: n/a. Last 7 days: 0 qualified, $0.000, n/a per lead
@@ -1110,10 +1129,14 @@ skipped; nothing was posted, sent or ordered, and nothing was spent.
 2. Before the first post, set the `@boilerroomstudi` bio to say how to ask for a removal: every
    caption ends "Removal on request: see our bio".
 3. For each post on it: open the film page, download the film, and post it on X from
-   `@boilerroomstudi` with the caption exactly as written. Where the card names an X post,
-   quote-post it; otherwise post the film on its own. Any number you add must be quoted from the
-   startup's own site.
-4. Move the card to `done`. Until then nothing counts as posted; the next day's report counts the
-   posts on a done pack card as POSTED and every other as NOT POSTED.
+   `@boilerroomstudi` with its caption from that day's review file (`out/gtm/<date>/review.md`,
+   "Pack"), exactly as written. The card holds lead ids and film pages only. Where the review file
+   names an X post, quote-post it; otherwise post the film on its own. Any number you add must be
+   quoted from the startup's own site.
+4. After each post, comment `POSTED <lead id> <your post's address>` on the pack card, then move the
+   card to `done`. Only those comments count: every post without one is NOT POSTED, whoever moved
+   the card. `founder_user_id` must hold your `usr_` id, or no comment counts.
 5. To stop a day, comment `HOLD` on the `GTM: <date>` card; to take a startup's film down, comment
-   `REMOVE <lead id>`. A startup can press "Remove this film" on its own film page.
+   `REMOVE <lead id>`. A startup can press "Remove this film" on its own film page. When a removal
+   reaches a film from a pack, `FOUNDER: gtm hand-removal` asks you to delete your post of it, or
+   never to make it.
