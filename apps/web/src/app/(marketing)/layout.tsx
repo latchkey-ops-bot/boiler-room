@@ -2,6 +2,7 @@ import { Show } from '@clerk/nextjs';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { Brand } from '../../components/brand.tsx';
+import '../../styles/marketing.css';
 
 /** The marketing site: the 3px pixel, the paper page, one nav and one footer. */
 export default function MarketingLayout({ children }: { children: ReactNode }) {
@@ -14,6 +15,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
         <Brand />
         <div className="links">
           <Link href="/#how">How it works</Link>
+          <Link href="/#channels">Channels</Link>
           <Link href="/showcase">Showcase</Link>
           <Show when="signed-out">
             <Link href="/sign-in">Log in</Link>
@@ -22,7 +24,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
             <Link href="/films">Your videos</Link>
           </Show>
         </div>
-        <Link className="btn btn-primary btn-sm" href="/films/new">
+        <Link className="btn btn-primary btn-sm" href="/#start">
           Get my launch video
         </Link>
       </nav>
@@ -41,6 +43,7 @@ export default function MarketingLayout({ children }: { children: ReactNode }) {
           </span>
           <div className="links">
             <Link href="/#how">How it works</Link>
+            <Link href="/#channels">Channels</Link>
             <Link href="/showcase">Showcase</Link>
           </div>
         </div>

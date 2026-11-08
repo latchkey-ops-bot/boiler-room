@@ -1,0 +1,175 @@
+/* The marketing site's own pieces, from boiler-room-design design-system/samples/landing.html:
+   the URL field's message, the channels, and the launch wall's cards. The nav, hero, steps, crew,
+   claims, CTA band and footer are placed in app.css. Loaded by the marketing layout only. */
+
+/* Grids that are lists: no bullets and no indent */
+.surface-marketing .steps,
+.surface-marketing .crew-grid,
+.surface-marketing .wall {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------- The URL field ---------- */
+
+.url-start {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.url-start .field-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* Error red is unreadable on Pipe blue; butter passes 5.9:1 there */
+.cta-band .url-start .field-error {
+  color: var(--br-cream);
+}
+
+/* ---------- Channels: each shape drawn to scale ---------- */
+
+/* The three frames share one height, so the shapes compare at a glance */
+.formats {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: var(--br-space-7);
+  align-items: start;
+  flex-wrap: wrap;
+}
+.format {
+  display: grid;
+  gap: var(--br-space-3);
+  align-content: end;
+}
+.format .frame {
+  display: grid;
+  place-items: center;
+  background: var(--br-sky-soft);
+  color: var(--br-deep);
+  --drop: var(--br-sky);
+}
+.format .frame .icon {
+  width: 36px;
+  height: 36px;
+}
+.format-wide {
+  width: min(376px, 100%);
+}
+.format-wide .frame {
+  width: calc(100% - 6px);
+  aspect-ratio: 16 / 9;
+}
+.format-tall .frame {
+  width: 120px;
+  aspect-ratio: 9 / 16;
+}
+.format-square .frame {
+  width: 212px;
+  aspect-ratio: 1;
+}
+.format h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 22px;
+}
+.format h3 .score {
+  font-size: 28px;
+}
+/* 27ch, not the sample's 26ch: next/font's Nunito sets "Reels, TikTok, Shorts and stories." a
+   hair wider, and it should stay on one line as in the sample */
+.format p {
+  max-width: 27ch;
+  font-size: var(--br-text-sm);
+  color: var(--br-muted);
+}
+.formats-note {
+  max-width: 40em;
+  margin-top: var(--br-space-8);
+  font-size: 18px;
+}
+
+/* ---------- Headings one level under their section's h2, at the sample's sizes ---------- */
+
+.surface-marketing .step .card h3 {
+  font-size: var(--br-text-h4);
+  line-height: 1.2;
+}
+
+/* ---------- The launch wall ---------- */
+
+.surface-marketing .launch .body h3 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--br-text-h4);
+  line-height: 1.2;
+}
+.launch .thumb .play {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 0;
+  background: var(--br-white);
+  color: var(--br-deep);
+  box-shadow:
+    0 -2px 0 0 var(--br-ink),
+    0 2px 0 0 var(--br-ink),
+    -2px 0 0 0 var(--br-ink),
+    2px 0 0 0 var(--br-ink);
+  cursor: pointer;
+}
+.launch .thumb .play:hover {
+  background: var(--br-sky);
+}
+.launch .thumb .play:focus-visible {
+  outline: 2px dashed var(--br-white);
+  outline-offset: 4px;
+}
+.launch .thumb .play .icon {
+  width: 14px;
+  height: 14px;
+}
+/* The customer's own film, letterboxed in black inside our frame */
+.launch .thumb-playing {
+  padding: 0;
+  background: #000;
+}
+.launch .thumb-playing video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.launch .foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 0 var(--br-space-2) var(--br-space-2);
+}
+
+.showcase-page {
+  min-height: 60vh;
+}
+
+@media (max-width: 760px) {
+  .format-wide {
+    width: 100%;
+  }
+  /* Boyle drops to 120px, five times his grid, as in the sample */
+  .cta-band .boyle {
+    /* biome-ignore lint/complexity/noImportantStyles: beats the drawn size Boyle sets inline */
+    width: 120px !important;
+  }
+}
