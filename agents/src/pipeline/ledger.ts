@@ -24,7 +24,7 @@ export interface FilmLimits {
   maxMicroUsd: number;
 }
 
-/** Two Quality Check rounds, so one route-back, and $5 a film. A first pass costs about $1.26. */
+/** Two Quality Check rounds, so one route-back, and $5 a film. A first pass costs about $1.70. */
 export const FILM_LIMITS: FilmLimits = { maxRounds: 2, maxMicroUsd: 5_000_000 };
 
 const entrySchema = z.object({

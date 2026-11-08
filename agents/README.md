@@ -378,7 +378,10 @@ review starts. A dropped event stream is resumed from the last event, after a wa
 up to three times; if it still fails, the session is interrupted and its cost is still counted
 and reported (`stream failed`), so a broken stream can never leave a session running unbilled.
 The Director and Quality Check sessions get the same handling. Measured: $0.05 per review of 4 pictures; a Long film of 27 scenes took 14 reviews
-and $0.72 in all, a Short film 2 reviews and $0.05.
+and $0.72 in all, a Short film 2 reviews and $0.05. On the Standard Linear film of 8 November
+(18 scenes), 11 reviews plus 2 retries after a budget pause took $0.5686 and 284,019 input tokens,
+at most 25,719 in one review, against a target of 40,000; the generated colour-event field cost
+$0.0150 more.
 
 Exit codes: 0 written, 1 refused (an invalid input, or a result that fails `validateCampaign`), 3
 written with a `tile-wall` sent back to the Director for want of 6 distinct captured tiles.
@@ -509,11 +512,28 @@ What the drill also showed:
   a new Researcher run replaced it mid-drill, so the rest read a saved copy with the same brand and
   the same six claims.
 
+## Cost per film, measured
+
+The Standard Linear film of 8 November, from the Researcher's latest `linear.app` research (19
+one-screen captures, so the site-scroll row was written as a site-hero on the first submission):
+
+| Agent         | Model      | Sessions                                    | Input tokens                                                            | Cost                                         |
+| ------------- | ---------- | ------------------------------------------- | ----------------------------------------------------------------------- | -------------------------------------------- |
+| Researcher    | Haiku 5.5  | 1, run by the Researcher's own job          | not re-measured here                                                    | $0.0395                                      |
+| Director      | Opus 5.5   | 1, 2 submissions (1 `TEXT_TOO_LONG` repair) | 368,284 over 9 requests, at most 60,878                                 | $0.9540                                      |
+| Art Director  | Sonnet 5.5 | 13: 11 reviews, 2 retries after a pause     | 284,019, at most 25,719 in one                                          | $0.5686, and $0.0150 for one generated image |
+| Quality Check | Sonnet 5.5 | not run: the film was not rendered          | about 73,000 on a 4-scene drill film, before the skill read was dropped | $0.16 to $0.17 a review in the drills        |
+
+Both Art Director pauses were the agent's day cap ("the agent's budget cap has no room for this
+call", $4.58 of $5 spent that day by earlier runs). Each was cancelled. Of the split retry, one
+half paused on the cap too and was cancelled, leaving its tiles to the code's ranking, and the
+other half was reviewed. No session was left waiting.
+
 ## The film ledger and route-back limits
 
 Nothing routes Quality Check failures back to their owners yet. Whatever does must be bounded,
 because every film fails Quality Check today on motion's placeholder scenes, so "retry until it
-passes" would only stop at the agents' day caps (about $1.26 a round, and image generation is
+passes" would only stop at the agents' day caps (about $1.70 a round, and image generation is
 under no agent cap). `src/pipeline/ledger.ts` holds the bounds, and the CLIs already use them:
 
 - `pnpm direct`, `pnpm art` and `pnpm qc` append what they spent to `film-ledger.json` beside the
