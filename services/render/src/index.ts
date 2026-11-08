@@ -20,6 +20,7 @@ export type { ChunkAttempt, ChunkRecord, Manifest } from './manifest.ts';
 export type { BaseRecord } from './naive/base.ts';
 export { findBase, RECIPE_HASH } from './naive/base.ts';
 export { Aborted } from './naive/exec.ts';
+export { MotionRefused } from './naive/workers.ts';
 export type { QualityIndex, QualityPlan } from './quality.ts';
 export { planQuality } from './quality.ts';
 export type {
