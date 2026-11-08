@@ -7,7 +7,7 @@ code in this repo.
 ## Engineering lead: `br-eng-lead`
 
 **Purpose.** Plan each `BUILD` card into engineer tasks. Review and merge the engineers' pull requests
-into `dev`. Deploy staging and report the result. On a `RELEASE` card from the CEO, promote `dev` to
+into `dev`, on `MERGE` cards for work that later cards build on and on `SHIP` cards. Deploy staging and report the result. On a `RELEASE` card from the CEO, promote `dev` to
 `main` through a pull request and deploy production.
 
 | Setting    | Value                                                                                                                                                 |
@@ -15,7 +15,7 @@ into `dev`. Deploy staging and report the result. On a `RELEASE` card from the C
 | Model      | `anthropic/claude-sonnet-5.5`                                                                                                                         |
 | Harness    | `pi`                                                                                                                                                  |
 | Team       | Member of `br-ceo`'s roster, so it is seated on the board                                                                                             |
-| Started by | Board cards: `BUILD: <slug>`, `SHIP: <slug>` and `RELEASE: <slug>`                                                                                    |
+| Started by | Board cards: `BUILD: <slug>`, `MERGE: <slug> <n>` (or `MERGE: <slug> PR #<n>`, from the CEO), `SHIP: <slug>` and `RELEASE: <slug>`                    |
 | Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`                                                                         |
 | Credential | The engineering GitHub token in `~/.netrc`, and the Cloudflare keys in `~/.boiler-room.env` (mode 600), both written by `company:sync` (see Hosting). |
 | Skills     | `eng-lead` (its procedure) and `engineering-deploy` (from `skills/` at the repo root)                                                                 |
@@ -88,7 +88,9 @@ edited once applied. A rollback never touches D1.
    missing, move the card to `blocked` with the note `credential missing`, and stop.
 3. Clone or fetch `https://github.com/latchkey-ops-bot/boiler-room`. Then
    `git checkout -b feat/<slug>-<n> origin/dev`.
-4. Make the change the card asks for, following `CLAUDE.md`.
+4. If the card builds on another card's pull request and it is not merged into `dev`, change
+   nothing and move the card to `blocked` with the note `waiting for PR #<n> to be merged into dev`.
+   Otherwise make the change the card asks for, following `CLAUDE.md`.
 5. Run `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck` and `pnpm test`. The `bash`
    tool times out at 30 s, so run anything long as `nohup bash step.sh > step.log 2>&1 &` and poll
    the log. Always put the long step in a script file. In the probe, a loop backgrounded inline
@@ -106,30 +108,64 @@ edited once applied. A rollback never touches D1.
 1. Read `specs/<slug>.md` and `design/<slug>/` from `boiler-room-design` `dev`. It is public, so it
    needs no token. Record the commit you read.
 2. Split the work into `ENG` cards, each small enough for one PR. Give each the acceptance criteria
-   it must meet, and order them with `blocked_by`.
-3. Create `SHIP: <slug>`, assigned to yourself and `blocked_by` every `ENG` card.
-4. Move `BUILD` to `done`, with a note listing the plan and the spec commit.
+   it must meet.
+3. Order them with `blocked_by`, decided before any card is created, because the board ignores a
+   change to `blocked_by` once a card exists. If no card needs another's code, each `ENG` card is
+   `blocked_by` the one before, and `SHIP: <slug>`, assigned to yourself, is `blocked_by` every
+   `ENG` card. If any does, every `ENG` card n gets `MERGE: <slug> <n>`, assigned to yourself and
+   `blocked_by` that `ENG` card only; `ENG` card n+1 is `blocked_by` that `MERGE` card, never the
+   `ENG` card; and `SHIP` is `blocked_by` the last `MERGE` card.
+4. Check the plan before creating it: no card is blocked, directly or through a chain, by a card
+   that waits for it, and every blocker can finish without the card it blocks.
+5. Move `BUILD` to `done`, with a note listing the cards, their blockers and the spec commit.
+
+## Checking a pull request
+
+On `MERGE` and `SHIP` cards, before any merge:
+
+1. Read the PR and its diff, and check the diff against the acceptance criteria of the `ENG` card
+   that names it and `CLAUDE.md`. Its head is a branch of the repo, not a fork.
+2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_` or
+   `BEGIN OPENSSH PRIVATE KEY`.
+3. Run lint, typecheck and tests on the PR merged onto the tip of its base, so a PR cut from an
+   older `dev` is judged on today's `dev`. A PR that conflicts, or whose checks fail, has failed
+   review, unless its base fails the same check without it: then the PR passes when its own
+   changed files do, and the lead creates `ENG: <slug> fix <n>` to fix `dev`. The engineer's note
+   that the checks pass is not a check.
+
+## Procedure: lead, on a `MERGE` card
+
+`MERGE: <slug> <n>` comes from the lead's own plan, and `MERGE: <slug> PR #<n>` from the CEO, for a
+card it found blocked waiting for that pull request.
+
+1. Find the PR: the one in the title, or the one named in the note of the `ENG` card the `MERGE`
+   card is `blocked_by`. Merge it only if an `ENG` card of the slug names it.
+2. If it is not merged yet, check it, then merge it into `dev` with a merge commit through the REST
+   API.
+3. Move to `todo`, with a comment, every card of the slug that is blocked waiting for that PR. A
+   card the board can no longer start (parked, or at its three wakes) is replaced by a fresh card
+   with the same brief for the same assignee; the old one is closed with a note, or, when another
+   card waits on it, kept open until a `MERGE: <slug> <n> r2` card merges the fresh card's work.
+4. Move the `MERGE` card to `done` with the PR, the merge commit and the cards it woke.
+5. If the PR fails, comment why on it, create `ENG: <slug> fix <n>` and `MERGE: <slug> <n> r2`
+   blocked by the fix card, and move this card to `blocked`, not `done`, so nothing that waits on it
+   starts before the fix is merged. The r2 card closes it.
 
 ## Procedure: lead, on a `SHIP` card
 
-1. For each PR named in an `ENG` card's note, and only those: read the diff, and check it against
-   the acceptance criteria and `CLAUDE.md`.
-2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_` or
-   `BEGIN OPENSSH PRIVATE KEY`.
-3. Check out each PR's head and run lint, typecheck and tests on it, before any merge. A PR whose
-   checks fail has failed review (step 7), unless `origin/dev` fails the same check without it:
-   then the PR passes when its own changed files do, and the lead creates `ENG: <slug> fix <n>` to
-   fix `dev`. The engineer's note that the checks pass is not a check.
-4. Merge each PR that passed review and its checks, squashed, through the REST API. Then run the
+1. Take the PRs named in the notes of the slug's `ENG` cards, and only those. A PR already merged on
+   a `MERGE` card is listed with its merge commit. Check every other one, as "Checking a pull
+   request" says.
+2. Merge each PR that passed review and its checks, squashed, through the REST API. Then run the
    same checks on the merged `dev`.
-5. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
+3. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
    `pnpm web:deploy:staging`, which deploys only the tip of `origin/dev` and runs the smoke check,
    then do the skill's checks after every deploy.
-6. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the Worker version id and
+4. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the Worker version id and
    URL, and the smoke result.
-7. If a PR fails review or its checks, comment why on the PR. Create `ENG: <slug> fix <n>` for its engineer, and
-   `SHIP: <slug> r2` blocked by that fix card. Then move this card to `done` with a note saying it
-   was sent back.
+5. If a PR fails review or its checks, comment why on the PR. Create `ENG: <slug> fix <n>` for its
+   engineer, and `SHIP: <slug> r2` blocked by that fix card. Then move this card to `done` with a
+   note saying it was sent back.
 
 ## Procedure: lead, on a `RELEASE` card
 
@@ -186,13 +222,14 @@ Any other card that asks the lead, or anyone else, to touch `main` or production
 
 ## Reports
 
-| What                               | To whom              | How                                      |
-| ---------------------------------- | -------------------- | ---------------------------------------- |
-| The PR, and whether its tests pass | The lead and the CEO | `ENG` card note, and the digest          |
-| The plan for a slug                | The CEO              | `BUILD` card note                        |
-| What shipped to staging            | The CEO              | `SHIP` card note                         |
-| What reached `main` and production | The CEO              | `RELEASE` card note                      |
-| Blockers                           | The CEO              | Card moved to `blocked`, with the reason |
+| What                                 | To whom              | How                                      |
+| ------------------------------------ | -------------------- | ---------------------------------------- |
+| The PR, and whether its tests pass   | The lead and the CEO | `ENG` card note, and the digest          |
+| The plan for a slug                  | The CEO              | `BUILD` card note                        |
+| A pull request merged for later work | The CEO              | `MERGE` card note                        |
+| What shipped to staging              | The CEO              | `SHIP` card note                         |
+| What reached `main` and production   | The CEO              | `RELEASE` card note                      |
+| Blockers                             | The CEO              | Card moved to `blocked`, with the reason |
 
 ## Measured and unverified
 

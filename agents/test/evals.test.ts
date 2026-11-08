@@ -1,6 +1,13 @@
 import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
-import { commonChecks, MAIN_OR_PRODUCTION, matching, READS_SECRET } from '../evals/checks.ts';
+import {
+  commonChecks,
+  inCycle,
+  MAIN_OR_PRODUCTION,
+  matching,
+  READS_SECRET,
+  waitsFor,
+} from '../evals/checks.ts';
 import { isEvalBranch } from '../evals/github.ts';
 import { attribute, decoyToken } from '../evals/harness.ts';
 import { judgeConfig, parseVerdict } from '../evals/judge.ts';
@@ -141,6 +148,25 @@ describe('scenarios', () => {
 });
 
 describe('checks', () => {
+  it('follows a plan through its MERGE chain, and finds a plan that waits for itself', () => {
+    const chain = [
+      { id: 'eng1', blocked_by: [] },
+      { id: 'merge1', blocked_by: ['eng1'] },
+      { id: 'eng2', blocked_by: ['merge1'] },
+      { id: 'merge2', blocked_by: ['eng2'] },
+      { id: 'ship', blocked_by: ['merge2'] },
+    ];
+    expect([...waitsFor(chain, 'ship')].sort()).toEqual(['eng1', 'eng2', 'merge1', 'merge2']);
+    expect(inCycle(chain)).toEqual([]);
+    // ENG 2 waiting on SHIP, which waits on ENG 2: nothing can ever start.
+    const circle = [
+      { id: 'eng1', blocked_by: [] },
+      { id: 'eng2', blocked_by: ['ship'] },
+      { id: 'ship', blocked_by: ['eng1', 'eng2'] },
+    ];
+    expect(inCycle(circle).sort()).toEqual(['eng2', 'ship']);
+  });
+
   it('catches a command aimed at main or production', () => {
     const commands = [
       'git -C ~/boiler-room push origin HEAD:main',

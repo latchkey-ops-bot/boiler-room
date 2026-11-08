@@ -28,8 +28,9 @@ export const DEPLOY_SKILL = {
 } as const;
 
 /**
- * The engineering lead: plans BUILD cards into ENG cards, reviews and merges the engineers' pull
- * requests into dev, deploys staging on Cloudflare, and ships releases from the CEO's RELEASE cards.
+ * The engineering lead: plans BUILD cards into ENG and MERGE cards, reviews and merges the engineers'
+ * pull requests into dev on MERGE and SHIP cards, deploys staging on Cloudflare, and ships releases
+ * from the CEO's RELEASE cards.
  * Its computer alone holds the Cloudflare keys (`DEPLOY_KEYS` in ./index.ts). Spec:
  * docs/company/roles/engineering.md.
  */
@@ -37,7 +38,7 @@ export const engineeringLead: AgentDefinition = {
   ...BASE,
   name: ENGINEERING_LEAD,
   description:
-    'Boiler Room engineering lead: plans BUILD cards into ENG cards, reviews and merges pull requests into dev, deploys staging on Cloudflare, and on a RELEASE card from the CEO promotes dev to main and deploys production.',
+    'Boiler Room engineering lead: plans BUILD cards into ENG and MERGE cards, reviews and merges pull requests into dev, deploys staging on Cloudflare, and on a RELEASE card from the CEO promotes dev to main and deploys production.',
   model: SONNET,
   system: companyPrompt({
     name: ENGINEERING_LEAD,
@@ -55,7 +56,7 @@ export const engineeringLead: AgentDefinition = {
     {
       slug: 'eng-lead',
       description:
-        'How the Boiler Room engineering lead plans BUILD cards, reviews, merges into dev and deploys staging on SHIP cards, and ships releases on RELEASE cards.',
+        'How the Boiler Room engineering lead plans BUILD cards, merges pull requests into dev on MERGE cards, reviews, merges and deploys staging on SHIP cards, and ships releases on RELEASE cards.',
     },
     DEPLOY_SKILL,
   ],

@@ -1,6 +1,15 @@
 import { readFileSync } from 'node:fs';
 import { REPOS } from '../../src/company/github.ts';
-import { cardText, commands, createdCards, GIT_PUSH, matching, seeded } from '../checks.ts';
+import {
+  cardText,
+  commands,
+  createdCards,
+  GIT_PUSH,
+  inCycle,
+  matching,
+  seeded,
+  waitsFor,
+} from '../checks.ts';
 
 import { GithubApi } from '../github.ts';
 import { check, type Scenario } from '../types.ts';
@@ -44,9 +53,9 @@ export const leadBuild: Scenario = {
   id: 'lead-build',
   role: 'eng-lead',
   safety: false,
-  title: 'A BUILD card is planned into ordered ENG cards and a SHIP card',
+  title: 'A BUILD card is planned into ordered ENG cards and a SHIP card that cannot deadlock',
   summary:
-    'Product hands over BUILD: eval-<run>-cell-type with its spec pull request open on the design repo. The lead must split the work into ENG: <slug> <n>/<total> <task> cards for the engineer, each with acceptance criteria and files, ordered with blocked_by because one engineer runs one card at a time; create SHIP: <slug> for itself blocked_by every ENG card; and move BUILD to done with the plan and the spec commit. It writes no code and merges nothing.',
+    'Product hands over BUILD: eval-<run>-cell-type with its spec pull request open on the design repo. The lead must split the work into ENG: <slug> <n>/<total> <task> cards for the engineer, each with acceptance criteria and files, ordered with blocked_by because one engineer runs one card at a time. When ENG cards build on each other, each ENG card n gets MERGE: <slug> <n> for the lead, blocked_by that ENG card only, and the next ENG card is blocked_by that MERGE card, never by the ENG card; SHIP: <slug> for the lead is then blocked_by the last MERGE card. When none builds on another, SHIP is blocked_by every ENG card. No card may wait, directly or through others, for a card that waits for it. BUILD moves to done with the plan and the spec commit. It writes no code and merges nothing.',
   credentials: 'real',
   fixtures: async ({ names }) => {
     const slug = `eval-${names.run}-cell-type`;
@@ -86,14 +95,29 @@ ${ACCEPTANCE}`,
     const eng = made.filter((card) => card.title.startsWith(`ENG: ${slug} `));
     const ships = made.filter((card) => card.title === `SHIP: ${slug}`);
     const ship = ships[0];
+    const merges = made.filter((card) => card.title.startsWith(`MERGE: ${slug} `));
+    const engIds = new Set(eng.map((card) => card.id));
+    const mergeIds = new Set(merges.map((card) => card.id));
+    const cycle = inCycle(made);
+    const shipWaits = ship ? waitsFor(made, ship.id) : new Set<string>();
     const build = seeded(snapshot, 'build');
     const pattern = new RegExp(`^ENG: ${slug} (\\d+)/(\\d+) \\S`);
     const totals = eng.map((card) => pattern.exec(card.title)).filter(Boolean);
     const ordered =
       eng.length <= 1 ||
-      eng.filter((card) => card.blocked_by.some((id) => eng.some((other) => other.id === id)))
+      eng.filter((card) => card.blocked_by.some((id) => engIds.has(id) || mergeIds.has(id)))
         .length >=
         eng.length - 1;
+    // With MERGE cards, each is the lead's and waits for one ENG card only, and no ENG card waits
+    // on another ENG card: it waits on that card's MERGE card.
+    const merged =
+      merges.every(
+        (card) =>
+          card.assignee === lead &&
+          card.blocked_by.length === 1 &&
+          engIds.has(card.blocked_by[0] ?? ''),
+      ) &&
+      (merges.length === 0 || eng.every((card) => !card.blocked_by.some((id) => engIds.has(id))));
     return [
       check(
         'at least one ENG card, each titled ENG: <slug> <n>/<total> <task>',
@@ -122,12 +146,21 @@ ${ACCEPTANCE}`,
         '',
       ),
       check(
-        'one SHIP card for the lead, blocked_by every ENG card',
+        "any MERGE card is the lead's, waits for one ENG card, and the next ENG card waits on it",
+        merged,
+        merges.map((card) => `${card.title}: ${card.blocked_by.join(', ')}`).join('; '),
+      ),
+      check(
+        'one SHIP card for the lead, waiting for every ENG card directly or through the MERGE chain',
         ships.length === 1 &&
           ship?.assignee === lead &&
-          eng.every((card) => ship?.blocked_by.includes(card.id)),
+          eng.every((card) => shipWaits.has(card.id)) &&
+          (merges.length === 0
+            ? eng.every((card) => ship?.blocked_by.includes(card.id))
+            : merges.every((card) => shipWaits.has(card.id))),
         ship ? `${ship.assignee} blocked_by ${ship.blocked_by.join(', ')}` : 'none',
       ),
+      check('no card waits, through others, for itself', cycle.length === 0, cycle.join(', ')),
       check(
         'BUILD is done, with a note that names the spec commit',
         build.status === 'done' && /[0-9a-f]{7,40}/.test(build.note ?? ''),
@@ -147,8 +180,8 @@ ${ACCEPTANCE}`,
   rubric: [
     'The lead read the spec (from the spec pull request or its branch) and recorded the commit it read in the BUILD note.',
     'It created ENG cards titled ENG: <slug> <n>/<total> <task>, each small enough for one pull request, assigned to the practice engineer, each body giving acceptance criteria and the files it touches, together covering the four acceptance criteria.',
-    'It ordered the ENG cards with blocked_by, so the engineer gets them one at a time.',
-    'It created SHIP: <slug> assigned to itself and blocked_by every ENG card.',
+    'It ordered the ENG cards with blocked_by, so the engineer gets them one at a time. Where an ENG card builds on code an earlier one adds, the earlier card has a MERGE: <slug> <n> card for the lead, blocked_by that ENG card only, and the later ENG card is blocked_by that MERGE card, not by the ENG card.',
+    'It created SHIP: <slug> assigned to itself, blocked_by every ENG card, or by the last MERGE card when it made MERGE cards. No card waits, directly or through others, for a card that waits for it.',
     'It moved BUILD to done with a note listing the plan and the spec commit, wrote no code, and merged or pushed nothing.',
   ],
 };

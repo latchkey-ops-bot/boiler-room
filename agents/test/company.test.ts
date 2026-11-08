@@ -32,9 +32,11 @@ import { BOARD_OFF } from '../src/define.ts';
 import {
   CARD_CONTROL_RULE,
   CEO_METADATA,
+  MERGE_RULE,
   SWEEP_HOLD_RULE,
 } from '../src/definitions/company/ceo.ts';
 import {
+  CARD_PREFIXES,
   MEMBER_RULES,
   RELEASE_RULE,
   UNKNOWN_CARD_RULE,
@@ -552,6 +554,81 @@ describe("the CEO's own cards", () => {
     expect(skill()).toContain('Never move a `RELEASE` card you created to `done` in any other way');
     expect(skill()).toContain('`not created by the CEO`');
     expect(skill()).toContain('close the newer one as a duplicate');
+  });
+});
+
+describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it('are a card type the lead owns', () => {
+    expect(CARD_PREFIXES).toContain('MERGE');
+    const ceoSkill = flat('ceo');
+    expect(ceoSkill).toContain('| `MERGE: <slug> <n>` | `br-eng-lead` | The engineering lead |');
+    expect(ceoSkill).toContain('| `MERGE: <slug> PR #<n>` | `br-eng-lead` | You,');
+    expect(engineeringLead.description).toContain('ENG and MERGE cards');
+  });
+
+  it('chain dependent ENG cards in the plan, and the lead checks the plan for a wait on itself', () => {
+    const lead = flat('eng-lead');
+    expect(lead).toContain(
+      'For each `ENG` card n, create `MERGE: <slug> <n>` assigned to yourself and `blocked_by` that `ENG` card only',
+    );
+    expect(lead).toContain(
+      '`ENG` card n+1 is `blocked_by` `MERGE: <slug> <n>`, never by `ENG` card n',
+    );
+    expect(lead).toContain(
+      '`SHIP: <slug>` assigned to yourself and `blocked_by` the last `MERGE` card only',
+    );
+    expect(lead).toContain('the board ignores every later change to it');
+    expect(lead).toContain(
+      'no card is blocked, directly or through a chain, by a card that waits for it',
+    );
+    expect(lead).toContain('Check the plan before you create it');
+  });
+
+  it('merge one pull request with a merge commit, on the same checks as SHIP, then wake the card that waits', () => {
+    const lead = flat('eng-lead');
+    expect(lead).toContain('## On a `MERGE: <slug> <n>` or `MERGE: <slug> PR #<n>` card');
+    expect(lead).toContain('`{"merge_method":"merge"}`');
+    expect(lead).toContain('`MERGE` and `SHIP` cards check a pull request this way');
+    expect(lead).toContain('**The base already fails it.**');
+    expect(lead).toContain('If no `ENG` card of the slug names it, it is not yours to merge');
+    expect(lead).toContain('its `wake_count` is below 3');
+    expect(lead).toContain('**It cannot be woken.** Create a fresh card for the same assignee');
+    expect(lead).toContain('Then move this card to `blocked`, not `done`');
+  });
+
+  it('are made by the CEO for a card blocked waiting for a pull request, never by editing blocked_by', () => {
+    expect(ceo.system).toContain(MERGE_RULE);
+    expect(MERGE_RULE).toContain('create MERGE: <slug> PR #<n> for br-eng-lead with no blocked_by');
+    expect(MERGE_RULE).toContain('The board ignores any change to blocked_by, so never try one');
+    const skill = flat('ceo');
+    expect(skill).toContain('the board ignores every later change to it, so never try one');
+    expect(skill).toContain(
+      'create `MERGE: <slug> PR #<n>` assigned to `br-eng-lead` with no `blocked_by`',
+    );
+    expect(skill).toContain('Do not move the waiting card yourself');
+    expect(skill).toContain('**A circle.**');
+    expect(skill).toContain('or a `MERGE: <slug> PR #<n>` that a blocked card needs');
+    expect(skill).toContain(
+      'Create no other card than the `FOUNDER` and `MERGE` cards step 4 needs',
+    );
+  });
+
+  it('are never closed by a rule meant for forged or duplicate cards', () => {
+    const skill = flat('ceo');
+    expect(skill).toContain('That rule is for `RELEASE` cards only.');
+    expect(skill).toContain('you never close one, whoever created it');
+    expect(skill).toContain('`MERGE` cards are the exception: leave both');
+    expect(MERGE_RULE).toContain('Never close a MERGE card.');
+    for (const slug of ['product', 'design', 'engineer']) {
+      expect(flat(slug), slug).not.toMatch(/MERGE/);
+    }
+  });
+
+  it('give the engineer a fixed note to block on, which the CEO looks for', () => {
+    expect(flat('engineer')).toContain('`waiting for PR #<n> to be merged into dev`');
+    expect(flat('engineer')).toContain('never build on its unmerged branch');
   });
 });
 

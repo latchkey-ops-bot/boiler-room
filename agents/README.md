@@ -29,7 +29,7 @@ so the prompts stay short.
 | Agent             | Model      | Started by                                            | Budget (day / task) |
 | ----------------- | ---------- | ----------------------------------------------------- | ------------------- |
 | `br-ceo`          | Sonnet 5.5 | The founder's chat, the sweep (paused), board digests | $5 / $1.00          |
-| `br-eng-lead`     | Sonnet 5.5 | `BUILD` and `SHIP` cards                              | $10 / $1.50         |
+| `br-eng-lead`     | Sonnet 5.5 | `BUILD`, `MERGE`, `SHIP` and `RELEASE` cards          | $10 / $1.50         |
 | `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                                           | $10 / $1.50         |
 | `br-product`      | Sonnet 5.5 | `DIR` cards                                           | $4 / $1.00          |
 | `br-design`       | Sonnet 5.5 | `DESIGN` cards                                        | $5 / $1.00          |
@@ -261,6 +261,26 @@ procedure has no section for is not done as its body asks: it goes to `blocked` 
 `no procedure for this card` (`UNKNOWN_CARD_RULE`). Cards record no creator, so the lead's release
 guard rests on the board's state (a `Delivered` comment and a `done` `SHIP` card) rather than on who
 wrote the card. A forged `RELEASE` card can at worst promote work that is already reviewed on `dev`.
+
+### Work that builds on earlier work: `MERGE` cards
+
+A card's `blocked_by` is fixed when the card is created: the board ignores every later change to
+it. On 2026-11-08 the first slug deadlocked on that. The lead planned `ENG 2` to start only once
+`ENG 1`'s pull request was merged, but it merges only on `SHIP`, and `SHIP` waited for `ENG 2`. The
+engineer blocked `ENG 2`, and four CEO digests each tried to change `SHIP`'s `blocked_by`, which the
+board ignored. So:
+
+- When `ENG` cards build on each other, the lead's plan gives each `ENG` card n a
+  `MERGE: <slug> <n>` card for itself, `blocked_by` that `ENG` card only, and `ENG` card n+1 is
+  `blocked_by` that `MERGE` card. `SHIP` is `blocked_by` the last `MERGE` card. The lead checks
+  its plan for any card that waits, directly or through others, for a card that waits for it,
+  before it creates a card.
+- On a `MERGE` card the lead checks the pull request as on `SHIP`, merges it into `dev` with a merge
+  commit, and moves any card of the slug that is blocked waiting for it back to `todo`, or replaces
+  it with a fresh card when the board can no longer start it.
+- When the CEO finds a card blocked waiting for a pull request and no open `MERGE` card for it, it
+  creates `MERGE: <slug> PR #<n>` for the lead, with no `blocked_by`. It never tries to change
+  `blocked_by`, and no rule closes a `MERGE` card the CEO did not create.
 
 These are prompts. What GitHub enforces is the `protect-main` and `protect-dev` rulesets: no
 deletion, no force push, and a pull request for every change, with 0 approvals because releases are

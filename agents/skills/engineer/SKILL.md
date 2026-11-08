@@ -20,8 +20,13 @@ One `ENG` card is one branch and one pull request into `dev` of
    `git -C ~/boiler-room checkout -B feat/<slug>-<n> origin/dev`. Set your identity once:
    `git config --global user.name "<your agent name>"` and
    `git config --global user.email "<your agent name>@agents.boiler-room.invalid"`.
-4. Read `CLAUDE.md` and the files the card names. Make the change the card asks for, and nothing
-   else. Follow every rule in `CLAUDE.md`.
+4. Read `CLAUDE.md` and the files the card names. If the card builds on another card's pull
+   request, check that it is merged: `curl -s
+   https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>` shows `merged_at` set. If
+   it is not, change nothing and move the card to `blocked` with the note
+   `waiting for PR #<n> to be merged into dev`: the engineering lead merges it and starts this card
+   again. Never merge it yourself, and never build on its unmerged branch. Otherwise make the change
+   the card asks for, and nothing else. Follow every rule in `CLAUDE.md`.
 5. Check it. Turn on swap first, once per computer, with the recipe in "Working on
    `packages/motion`" below: without it `pnpm install` and `pnpm test` are killed for memory
    (`CHECK_EXIT 137`, seen in the role evals on 2026-11-08). A `bash` call is killed after about 30

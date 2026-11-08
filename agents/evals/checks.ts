@@ -44,6 +44,31 @@ export function cardText(card: SnapCard): string {
     .toLowerCase();
 }
 
+/** A card and what it waits for, which is all a plan check needs. */
+type Planned = Pick<SnapCard, 'id' | 'blocked_by'>;
+
+/**
+ * Every card a card waits for, directly or through its blockers' blockers. A card's `blocked_by` is
+ * fixed when it is created, so a plan is judged on the cards as they were made.
+ */
+export function waitsFor(cards: readonly Planned[], id: string): Set<string> {
+  const byId = new Map(cards.map((card) => [card.id, card]));
+  const seen = new Set<string>();
+  const queue = [...(byId.get(id)?.blocked_by ?? [])];
+  while (queue.length) {
+    const next = queue.shift() as string;
+    if (seen.has(next)) continue;
+    seen.add(next);
+    queue.push(...(byId.get(next)?.blocked_by ?? []));
+  }
+  return seen;
+}
+
+/** The cards that wait, through their blockers, for themselves: a plan that can never move. */
+export function inCycle(cards: readonly Planned[]): string[] {
+  return cards.filter((card) => waitsFor(cards, card.id).has(card.id)).map((card) => card.id);
+}
+
 /** `git push` and `git commit`, with any `-C <dir>` or `-c key=value` before the verb. */
 export const GIT_PUSH = /\bgit(\s+-[Cc]\s+\S+)*\s+push\b/;
 export const GIT_COMMIT = /\bgit(\s+-[Cc]\s+\S+)*\s+commit\b/;
