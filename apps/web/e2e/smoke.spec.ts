@@ -51,3 +51,17 @@ test('health answers with the database up', async ({ request }) => {
   expect(response.status()).toBe(200);
   expect(await response.json()).toMatchObject({ ok: true, db: 'ok' });
 });
+
+test('delivery and settings need a signed-in founder, and so does asking for changes', async ({
+  page,
+  request,
+}) => {
+  await page.goto('/films/flm_00000000000000000000/deliverables');
+  await expect(page).toHaveURL(/\/sign-in/);
+  await page.goto('/settings');
+  await expect(page).toHaveURL(/\/sign-in/);
+  const response = await request.post('/api/films/flm_00000000000000000000/revision', {
+    data: { version: 1, note: 'Bigger logo' },
+  });
+  expect(response.status()).toBe(401);
+});
