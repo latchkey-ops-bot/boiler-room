@@ -7,6 +7,7 @@ import { normaliseUrl, normaliseWhitespace, siteHost, slugify } from '../researc
 import type { PagesBundle, StoredPage } from '../researcher/verify.ts';
 import { collectPage } from './collect.ts';
 import { contrast } from './color.ts';
+import { ensureEgressFirewall } from './firewall.ts';
 import {
   type FontFace,
   facesFromRaw,
@@ -898,6 +899,9 @@ export async function discover(base: string, url: string, script: string): Promi
   for (const dir of ['pages', 'text', 'shots'])
     mkdirSync(join(paths.out, dir), { recursive: true });
   log(`swap: ${ensureSwap().replace(/\n/g, ' | ') || 'none'}`);
+  // No page is loaded until the network itself refuses private addresses: this throws otherwise.
+  const firewall = await ensureEgressFirewall();
+  log(firewall);
   const ledger = new Ledger(paths.out);
   const browsers = new Browsers();
   try {
@@ -1037,6 +1041,7 @@ export async function discover(base: string, url: string, script: string): Promi
       `DISCOVER DONE for ${site}`,
       `Home: "${home.record.title}" (HTTP ${home.record.status}). Page loads used: ${ledger.pages.length} of ${MAX_PAGES}.`,
       `robots.txt: ${robots.disallow.length} disallow rules for all crawlers (User-agent: *), which the capture honours. Sitemap URLs: ${sitemapUrls.length}. llms.txt: ${llmsTxt ? 'yes' : 'no'}.`,
+      firewall,
       '',
       'Probes for public product UI:',
       ...probes.map(
@@ -1313,6 +1318,9 @@ export async function capture(
   for (const dir of ['pages', 'text', 'shots'])
     mkdirSync(join(paths.out, dir), { recursive: true });
   log(`swap: ${ensureSwap().replace(/\n/g, ' | ') || 'none'}`);
+  // Applied again, since the computer may have been paused and resumed since discover.
+  const firewall = await ensureEgressFirewall();
+  log(firewall);
   const ledger = new Ledger(paths.out);
   const existing = loadPages(paths);
   const taken = new Set(existing.map((page) => page.record.slug));
@@ -1559,7 +1567,7 @@ export async function capture(
     const done = captureDoneLine(digest, bundle.pages.length, site, found.requested);
     writeFileSync(
       join(base, 'jobs', 'capture-summary.txt'),
-      `${captureSummary(manifest, paths, script)}\n${done}\n`,
+      `${captureSummary(manifest, paths, script)}\n${firewall}\n${done}\n`,
     );
     log(done);
   } finally {

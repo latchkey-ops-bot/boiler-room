@@ -92,6 +92,21 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   sitemap index's children are read only when they are on the site, and a stylesheet the page
   cannot read is fetched only from the site or from exactly `fonts.googleapis.com`,
   `fonts.gstatic.com`, `use.typekit.net` or a `*.typekit.net` host.
+- The guard is the second layer. Chromium and Playwright's fetcher resolve a name again after the
+  guard has, so a hostile site could answer the guard with a public address and the browser with a
+  private one (DNS rebinding). Before `discover` and `capture` load any page, the tool writes an
+  egress firewall on the agent's computer (`src/capture/firewall.ts`), installing the `iptables`
+  package if it is missing: a `BR_EGRESS` chain, jumped to first from `OUTPUT`, for IPv4 and IPv6,
+  that refuses every new connection to `169.254.0.0/16`, `10.0.0.0/8`, `172.16.0.0/12`,
+  `192.168.0.0/16`, `100.64.0.0/10`, `0.0.0.0/8`, `224.0.0.0/4`, `fc00::/7` and `fe80::/10` (TCP
+  with a reset, anything else with port unreachable). Loopback stays open, and so do replies on
+  connections already made, port 53 to the nameservers in `/etc/resolv.conf` and systemd-resolved's
+  upstream list (some clouds answer DNS on a link-local address), and IPv6 neighbour discovery. The
+  computer's harness talks to it over vsock, which the rules never see. The rules are rewritten in
+  one `iptables-restore` commit each time, so applying them again changes nothing, then read back
+  and proved: a connection to `169.254.169.254:80` and to `192.168.1.1:80` must be refused at once,
+  by these rules (their packet counts rise), while `registry.npmjs.org` still resolves and answers
+  over HTTPS. If any step fails the job fails, and no page is loaded. The summary prints the result.
 - A page whose address after redirects, or whose visible text, matches a page already captured is
   not kept: one page at two addresses (`/` and `/homepage`) gets one copy and one set of shots.
 - A browser that closes under a page is replaced and the page loaded again. A page that failed or
@@ -215,8 +230,8 @@ Asset `src` values name Naive files as `naive://files/<fil_ id>`; `fileIdOf` rea
 
 ## Testing the capture tool locally
 
-`BR_LOCAL=1` makes the tool skip swap, system packages and killing stray browsers, which are only
-safe on the agent's own computer. Bundle it with `bundleTool()`, put it next to a `node_modules`
+`BR_LOCAL=1` makes the tool skip swap, system packages, the egress firewall and killing stray
+browsers, which are only safe on the agent's own computer. Bundle it with `bundleTool()`, put it next to a `node_modules`
 holding `playwright`, and run `node br-research.mjs discover <url>` then `wait`.
 
 Biome does not format `skills/`: its Markdown formatter breaks YAML front matter.
