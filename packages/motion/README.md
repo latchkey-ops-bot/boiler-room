@@ -77,33 +77,39 @@ the change that fixes it.
 
 ## Layout
 
-| Path               | Contents                                                           |
-| ------------------ | ------------------------------------------------------------------ |
-| `src/tokens.ts`    | The spec's measured scene values; provisional transition timings   |
-| `src/core/`        | The spec curves, presence, scene timing, stagger, camera poses     |
-| `src/brand/`       | Theme from `campaign.brand`, skin, logo checks, font loading       |
-| `src/layout/`      | Stage size and safe areas, text fitting                            |
-| `src/components/`  | Type, the brand mark, browser frame, `MorphBox`, `RisingWords`     |
-| `src/scenes/`      | The five templates, registered under the schema's scene type names |
-| `src/transitions/` | The catalog, the seam resolver, the seam wrapper, the timeline     |
-| `src/film/`        | `<CampaignFilm>`, the `Stage`, the render gate, planning           |
-| `src/root.tsx`     | Remotion entry point                                               |
-| `scripts/`         | Stills, full renders, the determinism check                        |
+| Path               | Contents                                                             |
+| ------------------ | -------------------------------------------------------------------- |
+| `src/tokens.ts`    | The spec's measured scene values; provisional transition timings     |
+| `src/core/`        | The spec curves, presence, scene timing, stagger, camera poses       |
+| `src/brand/`       | Theme from `campaign.brand`, skin, logo checks, font loading         |
+| `src/layout/`      | Stage size and safe areas, text fitting                              |
+| `src/components/`  | Type, the brand mark, browser frame, `MorphBox`, `RisingWords`       |
+| `src/scenes/`      | The eleven templates, registered under the schema's scene type names |
+| `src/transitions/` | The catalog, the seam resolver, the seam wrapper, the timeline       |
+| `src/film/`        | `<CampaignFilm>`, the `Stage`, the render gate, planning             |
+| `src/root.tsx`     | Remotion entry point                                                 |
+| `scripts/`         | Stills, full renders, the determinism check                          |
 
 ## Scenes
 
 The schema's `sceneRegistry` is the one list of scene types and their text limits. This package
-registers a template against five of its names in `src/scenes/registry.ts`, exports them as
+registers a template against eleven of its names in `src/scenes/registry.ts`, exports them as
 `IMPLEMENTED_SCENE_TYPES`, and renders only those. Each template sets the roles its scene file
 lists, and `validateFilm` checks the counts.
 
-| Type           | Copy                                                  | Props                       | Image                           |
-| -------------- | ----------------------------------------------------- | --------------------------- | ------------------------------- |
-| `word-slam`    | `headline`, the hook sentence; its first word slams   | `accent`                    | none                            |
-| `site-hero`    | optional `label`, the URL in the address bar          | `frame: 'browser'`, `focus` | 1 captured page, device scale 2 |
-| `feature-card` | `headline`, up to 2 `label`s, the cause and effect    | `demo`, `accent`            | 0 to 2 crops, else chips        |
-| `stat-counter` | `headline`, the cited number; `label`, what it counts | `countUp: false`, `accent`  | none                            |
-| `end-card`     | `cta`, optional `label`, the URL                      | `urlReveal`                 | none, shows the logo            |
+| Type           | Copy                                                                          | Props                            | Image                           |
+| -------------- | ----------------------------------------------------------------------------- | -------------------------------- | ------------------------------- |
+| `word-slam`    | `headline`, the hook sentence; its first word slams                           | `accent`                         | none                            |
+| `logo-reveal`  | optional `subhead`, the tagline                                               | `mode`: mask, blur, tiles, iris  | none, shows the logo            |
+| `site-hero`    | optional `label`, the URL in the address bar                                  | `frame: 'browser'`, `focus`      | 1 captured page, device scale 2 |
+| `type-card`    | `headline` on up to 2 lines, optional `subhead`                               | `variant`: name, pivot; `accent` | none                            |
+| `site-scroll`  | up to 2 `label`s, each page's URL in the address bar                          | `pages`, one per page            | 2 full-page captures            |
+| `proof-bars`   | `headline`; 1 to 3 `label`s, one number each; optional `subhead`, the verdict | `accent`                         | none                            |
+| `stat-counter` | `headline`, the cited number; `label`, what it counts                         | `countUp: false`, `accent`       | none                            |
+| `feature-card` | `headline`, up to 2 `label`s, the cause and effect                            | `demo`, `accent`                 | 0 to 2 crops, else chips        |
+| `tile-wall`    | none                                                                          | `motionBlur`                     | 6 to 18 captured tiles, 16:10   |
+| `colour-event` | `headline`, 1 to 3 words on one line                                          | `card`: simple, frosted          | none, the ground is the primary |
+| `end-card`     | `cta`, optional `label`, the URL                                              | `urlReveal`                      | none, shows the logo            |
 
 `stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
 no quote states. The count-up is built to its scene file and tested, so approving it means removing
@@ -114,8 +120,25 @@ the scene renders, because nothing before the first frame measures copy yet.
 
 `site-hero` refuses `frame: 'plane'`, `layers` and `activeLayer` as not built: plane mode tilts the
 page in 3D, which the determinism check has shown makes a frame depend on render order. Its focus
-blur and light sweep are not built either. Every other type in the library is refused by the
-render gate until it has a template.
+blur and light sweep are not built either.
+
+`site-scroll` is the one template that needs props: `pages` gives each page's start and page 2's
+landing, as its CTA's `ctaBox` from the capture or a `targetY`. A page too short for its part of
+the fling is refused in `calculateMetadata`. The gate checks one image, not two, so a
+`site-scroll` with one page stops at render time. It checks that a `tile-wall` has one captured
+tile, not six: the Director writes the row as a `feature-card` when the site gives fewer.
+
+`tile-wall` draws its T9 ramp into the cut only once a pin plays T9, which none does yet, so its
+rows cruise to the last frame. `motionBlur` draws `CameraMotionBlur`'s five samples from the
+scene's own clock, since a `Freeze` cannot reach a clock the `Stage` reads above the scene.
+`colour-event` draws the card and headline on the `event` ground, the brand's primary, which the
+`Stage` draws; its generated field and the frosted card's backdrop blur wait for the `Stage` to
+draw a field ground.
+
+`logo-reveal`, `type-card`, `proof-bars` and `colour-event`, like `stat-counter`, check that their
+copy fits when the scene renders, and stop the render naming the scene and text id rather than
+set it smaller. Every other type in the library is refused by the render gate until it has a
+template.
 
 ## Transitions
 
@@ -134,7 +157,7 @@ first (into a pivot `type-card` is the T5 chapter blink), then the written id if
 the boundary and built, else T1 where both anchors move on one axis and sign within 1.5x, else
 T3. `validateFilm` reports every boundary where the id played is not the one written, with both
 scene ids, as a `TRANSITION_RESOLVED` or `TRANSITION_UNBUILT` warning. T6 and T7, the optional
-showpieces into `colour-event`, wait for that scene and are resolved to T3 until then.
+showpieces into `colour-event`, are not built, so those boundaries are resolved to T3.
 
 ## Building a scene
 
