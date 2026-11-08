@@ -14,6 +14,7 @@ import {
   checkProbe,
   checkResearchBrand,
   checkResearchClaims,
+  GROUND_UNSAMPLED,
   type ResearchFacts,
   timecode,
 } from '../src/quality/checks.ts';
@@ -368,6 +369,25 @@ describe('ground check', () => {
     );
     expect(checks[0]?.result).toBe('fail');
     expect(issues).toEqual([expect.objectContaining({ frame: 220, sceneId: 'speed' })]);
+  });
+
+  it('says which rests it left unsampled, and why, without failing them', () => {
+    // posthog.com, 8 November: both of these failed a film that drew them as specified.
+    const { checks, issues } = checkGround(
+      '#F7F7F7',
+      [{ frame: 60, sceneId: 'hook', colour: [247, 247, 247], distance: 0 }],
+      30,
+      [
+        { frame: 1076, sceneId: 'wall', type: 'tile-wall' },
+        { frame: 1126, sceneId: 'payoff', type: 'colour-event' },
+      ],
+    );
+    expect(checks[0]?.result).toBe('pass');
+    expect(issues).toEqual([]);
+    expect(checks[0]?.measured).toMatch(
+      /not sampled: F1076 wall \(tile-wall: .*F1126 payoff \(colour-event: .*primary/,
+    );
+    expect(Object.keys(GROUND_UNSAMPLED).sort()).toEqual(['colour-event', 'tile-wall']);
   });
 });
 

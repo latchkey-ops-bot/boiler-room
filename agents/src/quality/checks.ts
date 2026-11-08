@@ -650,10 +650,29 @@ export interface GroundSample {
   distance: number;
 }
 
+/**
+ * Scene types whose rest frame shows no `brand.colors.background` where the ground patches sit,
+ * by their own spec, and why. Sampling them reports the scene working as specified as a motion
+ * failure, which no agent can fix and which stops every route-back: the first posthog.com film
+ * failed on both of these.
+ */
+export const GROUND_UNSAMPLED: Readonly<Record<string, string>> = {
+  'tile-wall':
+    'its rows of tiles cover the frame but for gutters narrower than a patch is inset, so every patch lands on a tile',
+  'colour-event': 'its ground is brand.colors.primary, or a generated field, by its spec',
+};
+
+export interface UnsampledRest {
+  frame: number;
+  sceneId: string;
+  type: string;
+}
+
 export function checkGround(
   background: string,
   samples: readonly GroundSample[],
   fps: number,
+  unsampled: readonly UnsampledRest[] = [],
 ): Findings {
   const off = samples.filter((sample) => sample.distance > GROUND_TOLERANCE);
   const issues = off.map((sample) =>
@@ -670,19 +689,24 @@ export function checkGround(
       fps,
     ),
   );
+  const skipped = unsampled.length
+    ? `; not sampled: ${unsampled.map((rest) => `F${rest.frame} ${rest.sceneId} (${rest.type}: ${GROUND_UNSAMPLED[rest.type] ?? 'no ground by its spec'})`).join(', ')}`
+    : '';
   return {
     checks: [
       check(
         'ground',
         samples.length === 0 ? 'n/a' : off.length ? 'fail' : 'pass',
-        samples.length
-          ? samples
-              .map(
-                (sample) =>
-                  `F${sample.frame} ${rgbToHex(sample.colour)} (${Math.round(sample.distance)})`,
-              )
-              .join(', ')
-          : 'no rest frames sampled',
+        `${
+          samples.length
+            ? samples
+                .map(
+                  (sample) =>
+                    `F${sample.frame} ${rgbToHex(sample.colour)} (${Math.round(sample.distance)})`,
+                )
+                .join(', ')
+            : 'no rest frames sampled'
+        }${skipped}`,
         `a 20 x 20 ground patch within ${GROUND_TOLERANCE} levels of ${background} on every rest frame`,
         samples.map((sample) => sample.frame),
       ),

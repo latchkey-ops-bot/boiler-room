@@ -31,12 +31,14 @@ import {
   checkResearchClaims,
   type Findings,
   frameOutliers,
+  GROUND_UNSAMPLED,
   type GroundSample,
   INTEGRITY_CHECKS,
   merge,
   type ResearchFacts,
   sceneAt,
   timecode,
+  type UnsampledRest,
 } from './checks.ts';
 import { hexToRgb, meanAbsoluteDifference, nearestPatch } from './measure.ts';
 import { extractFrames, probeFilm, readRgb, scanFrames, sha256File } from './media.ts';
@@ -320,16 +322,23 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
     );
     const background = hexToRgb(cut.brand.colors.background);
     const ground: GroundSample[] = [];
+    const unsampled: UnsampledRest[] = [];
+    const typeOf = new Map(cut.scenes.map((scene) => [scene.id, scene.type]));
     for (const rest of rests) {
       const file = extracted.get(rest.frame);
       if (!file) continue;
-      const nearest = nearestPatch(await readRgb(file), background);
-      ground.push({
-        frame: rest.frame,
-        sceneId: rest.sceneId,
-        colour: nearest.colour,
-        distance: nearest.distance,
-      });
+      const type = typeOf.get(rest.sceneId) ?? '';
+      if (Object.hasOwn(GROUND_UNSAMPLED, type)) {
+        unsampled.push({ frame: rest.frame, sceneId: rest.sceneId, type });
+      } else {
+        const nearest = nearestPatch(await readRgb(file), background);
+        ground.push({
+          frame: rest.frame,
+          sceneId: rest.sceneId,
+          colour: nearest.colour,
+          distance: nearest.distance,
+        });
+      }
       images.push({
         file,
         name: `${manifest.campaign.id}-rest-${rest.sceneId}-${rest.frame}.png`,
@@ -337,7 +346,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
         frames: [rest.frame],
       });
     }
-    parts.push(checkGround(cut.brand.colors.background, ground, fps));
+    parts.push(checkGround(cut.brand.colors.background, ground, fps, unsampled));
   }
 
   const code = merge(...parts);
