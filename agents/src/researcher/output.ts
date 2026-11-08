@@ -68,6 +68,16 @@ export const FONT_METHODS = [
 ] as const;
 
 const httpUrl = z.httpUrl();
+
+/**
+ * Why a site address cannot be researched, or null when it can. Every claim cites its page by
+ * address and the campaign schema takes only http(s) addresses with a domain name, so a bare IP or
+ * `localhost` could never be cited: the run is refused before it spends anything.
+ */
+export function siteUrlProblem(url: string): string | null {
+  if (httpUrl.safeParse(url).success) return null;
+  return `${url} cannot be researched: the campaign schema accepts only http(s) addresses with a domain name, so claims could not cite its pages. A bare IP address or localhost is refused; serve the site under a domain name.`;
+}
 const slug = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be a lowercase slug such as "pricing-page"');

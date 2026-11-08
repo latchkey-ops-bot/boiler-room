@@ -8,8 +8,9 @@ const usage = `Usage: pnpm research <url> [--material <file or url>]... [--descr
   --describe      How the customer describes the product. The Researcher checks it against the live site.
   --budget-usd    Spend cap for the session. Default from the agent definition.
   --max-repairs   Rounds of gate failures sent back to the agent. Default 2.
-  --keep-agent    Keep the agent and its computer afterwards. By default the agent is deleted, which is
-                  the only way to remove its computer; the next run recreates it from the repo.
+  --keep-agent    Keep this run's agent and its computer afterwards, to inspect them. Every run creates
+                  its own agent from the repo, so parallel runs never share a computer; by default it
+                  is deleted at the end, which is the only way to remove its computer.
   --drill-repair  Refuse the first submission on purpose, to prove the repair loop live.`;
 
 const { values, positionals } = parseArgs({

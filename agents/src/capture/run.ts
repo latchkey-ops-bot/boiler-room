@@ -989,14 +989,26 @@ export async function capture(
     };
     writeJson(join(paths.out, 'capture.json'), manifest);
     writeJson(join(paths.out, 'result.template.json'), buildTemplate(manifest));
+    // The digest names the site, so the run can tell its own capture from any other site's.
+    const done = captureDoneLine(digest, bundle.pages.length, site, found.requested);
     writeFileSync(
       join(base, 'jobs', 'capture-summary.txt'),
-      `${captureSummary(manifest, paths, script)}\nBR_CAPTURE_DONE sha256=${digest} pages=${bundle.pages.length}\n`,
+      `${captureSummary(manifest, paths, script)}\n${done}\n`,
     );
-    log(`BR_CAPTURE_DONE sha256=${digest} pages=${bundle.pages.length}`);
+    log(done);
   } finally {
     await closeBrowser(browser);
   }
+}
+
+/** The capture's last line. The gate binds the published bundle to the digest of this site only. */
+export function captureDoneLine(
+  digest: string,
+  pages: number,
+  site: string,
+  requested: string,
+): string {
+  return `BR_CAPTURE_DONE sha256=${digest} pages=${pages} site=${siteHost(site)} requested=${siteHost(requested)}`;
 }
 
 function captureSummary(manifest: CaptureManifest, paths: Paths, script: string): string {

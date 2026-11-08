@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
@@ -16,9 +16,9 @@ import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '..
 import { syncAgents } from '../sync.ts';
 import { bundleTool, type ToolBundle } from './bundle.ts';
 import { checkProvenance, checkResearch, type GateFailure, withoutClaims } from './gate.ts';
-import { fileIdOf, type ResearchOutput } from './output.ts';
+import { fileIdOf, type ResearchOutput, siteUrlProblem } from './output.ts';
 import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
-import { siteHost } from './text.ts';
+import { siteHost, slugify } from './text.ts';
 import { type PagesBundle, pagesBundleSchema } from './verify.ts';
 
 export interface ResearchOptions {
@@ -28,6 +28,7 @@ export interface ResearchOptions {
   description?: string;
   budgetUsd?: number;
   maxRepairs: number;
+  /** Keep this run's agent and its computer afterwards, to inspect them. The next run makes its own. */
   keepAgent: boolean;
   /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
   drillRepair: boolean;
@@ -65,13 +66,25 @@ const oneLine = (text: unknown, max: number) => {
   return flat.length > max ? `${flat.slice(0, max)}...` : flat;
 };
 
-/** Files published in the session and capture digests printed in it, read from the event stream. */
+/**
+ * Files published in the session and capture digests printed in it, read from the event stream.
+ * A digest counts only when the capture line names the site this run researches: a line for any
+ * other site is kept apart in `foreign`, so a bundle from another site's capture can never bind.
+ */
 export class EventTracker {
   readonly published = new Map<string, string>();
   readonly digests = new Set<string>();
+  /** Digests printed for another site, with the site they name. Never trusted. */
+  readonly foreign = new Map<string, string>();
   /** Accepted submit_output calls, so a new submission can be told from the session's last one. */
   submissions = 0;
   private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
+  private readonly host: string;
+
+  /** `site` is the address this run researches. */
+  constructor(site: string) {
+    this.host = siteHost(site);
+  }
 
   handle(event: { type: string; data: Record<string, unknown> }): void {
     const data = event.data ?? {};
@@ -85,14 +98,45 @@ export class EventTracker {
     if (data.name === 'submit_output') this.submissions += 1;
     const output =
       typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
-    for (const match of output.matchAll(/BR_CAPTURE_DONE sha256=([0-9a-f]{64})/g))
-      if (match[1]) this.digests.add(match[1]);
+    for (const match of output.matchAll(CAPTURE_LINE)) {
+      const [, digest, site, requested] = match;
+      if (!digest) continue;
+      const hosts = [site, requested].filter((item): item is string => Boolean(item));
+      if (hosts.includes(this.host)) this.digests.add(digest);
+      else this.foreign.set(digest, site ?? '(no site named)');
+    }
     if (data.name === 'publish_file') {
       const id = /published as (fil_[a-z0-9]+)/.exec(output)?.[1];
       const path = this.started.get(String(data.tool_call_id))?.args.path;
       if (id && typeof path === 'string') this.published.set(id, path);
     }
   }
+}
+
+/** The capture tool's last line: `BR_CAPTURE_DONE sha256=<hex> pages=<n> site=<host> requested=<host>`. */
+const CAPTURE_LINE =
+  /BR_CAPTURE_DONE sha256=([0-9a-f]{64})(?: pages=\d+)?(?: site=(\S+))?(?: requested=(\S+))?/g;
+
+/**
+ * The name of one run's agent. Each run gets its own agent, and with it its own computer, job slot
+ * and output folder: runs in parallel never share state, and deleting one never stops another.
+ */
+export function runAgentName(baseName: string, host: string, suffix: string): string {
+  return `${baseName}-${slugify(host, 'site').slice(0, 40)}-${suffix}`.slice(0, 100);
+}
+
+/** A short id that sorts by start time and is unique across parallel starts. */
+export function runSuffix(now = Date.now(), random = randomBytes(3).toString('hex')): string {
+  return `${now.toString(36)}${random}`;
+}
+
+/** Whether a Naive call failed because the thing it names does not exist (any more). */
+export function isNotFound(cause: unknown): boolean {
+  const error = cause as { code?: unknown; status?: unknown } | null;
+  if (error && (error.code === 'not_found' || error.status === 404)) return true;
+  return /\bnot[_ ]found\b|no such (agent|computer)/i.test(
+    cause instanceof Error ? cause.message : String(cause),
+  );
 }
 
 function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
@@ -307,38 +351,80 @@ async function gate(
   return { output, failures, bundle, bundleText };
 }
 
-/** Deleting the agent is the only way to remove its computer, which can stay listed for minutes. */
-async function teardown(
+export interface TeardownResult {
+  spend: unknown;
+  /** True once the agent is deleted, or was already gone. */
+  agentDeleted: boolean;
+  computerId: string | null;
+  /** True once this run's computer reads destroyed or failed, or no longer exists. */
+  computerGone: boolean;
+  /** Computers other runs or people still have live in the organisation. Never touched. */
+  others: string[];
+}
+
+export interface TeardownOptions {
+  sleep?: (ms: number) => Promise<unknown>;
+  /** How long to wait for the computer to go after the agent is deleted. */
+  maxWaitMs?: number;
+  pollMs?: number;
+}
+
+const LIVE = (status: string) => status !== 'destroyed' && status !== 'failed';
+
+/**
+ * Deletes this run's agent, the only way to remove its computer, then waits for that computer to
+ * go. An agent that is already gone counts as deleted: retrying a delete that answers "not found"
+ * only wastes the wait. The computer is polled by id until it reads destroyed or is gone; the
+ * platform removes it a few minutes after the agent, and asking again does not make it faster.
+ */
+export async function teardown(
   client: Naive,
   agentId: string,
-): Promise<{ spend: unknown; leftover: string[] }> {
+  options: TeardownOptions = {},
+): Promise<TeardownResult> {
+  const wait = options.sleep ?? sleep;
+  const pollMs = options.pollMs ?? 10_000;
+  const maxWaitMs = options.maxWaitMs ?? 6 * 60_000;
   const spend = await client.agents
     .spend(agentId, { by: 'component' })
     .catch((cause) => ({ error: String(cause) }));
   const computer = await client.agents.computer(agentId).catch(() => null);
-  for (let attempt = 0; attempt < 6; attempt++) {
+  let agentDeleted = false;
+  for (let attempt = 0; attempt < 4 && !agentDeleted; attempt++) {
     try {
       await client.agents.delete(agentId);
+      agentDeleted = true;
       say(`deleted agent ${agentId} to release its computer${computer ? ` ${computer.id}` : ''}`);
-      break;
     } catch (cause) {
+      if (isNotFound(cause)) {
+        agentDeleted = true;
+        say(`agent ${agentId} is already gone`);
+        break;
+      }
       say(`agent delete retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
-      await sleep(5000);
+      await wait(5000);
     }
   }
-  let leftover: string[] = [];
-  for (let check = 0; check < 30; check++) {
-    const computers = await listAll((query) => client.computers.list(query));
-    leftover = computers
-      .filter((item) => item.status !== 'destroyed' && item.status !== 'failed')
-      .map((item) => `${item.id} ${item.name} ${item.status}`);
-    const mine = computer ? leftover.filter((line) => line.startsWith(computer.id)) : [];
-    if (mine.length === 0) break;
-    if (check % 3 === 0)
-      say(`waiting for computer ${computer?.id} to go (${leftover.length} live in the org)`);
-    await sleep(10_000);
+  let computerGone = computer === null || !LIVE(computer.status);
+  if (computer && agentDeleted) {
+    for (let waited = 0; !computerGone && waited <= maxWaitMs; waited += pollMs) {
+      const status = await client.computers.get(computer.id).then(
+        (item) => item.status as string,
+        (cause) => (isNotFound(cause) ? 'destroyed' : 'unknown'),
+      );
+      if (!LIVE(status)) {
+        computerGone = true;
+        break;
+      }
+      if ((waited / pollMs) % 3 === 0) say(`waiting for computer ${computer.id} to go (${status})`);
+      await wait(pollMs);
+    }
   }
-  return { spend, leftover };
+  const computers = await listAll((query) => client.computers.list(query)).catch(() => []);
+  const others = computers
+    .filter((item) => LIVE(item.status) && item.id !== computer?.id)
+    .map((item) => `${item.id} ${item.name} ${item.status}`);
+  return { spend, agentDeleted, computerId: computer?.id ?? null, computerGone, others };
 }
 
 async function downloadAssets(
@@ -363,15 +449,26 @@ async function downloadAssets(
 }
 
 /**
- * One research run: uploads the capture tool and any customer material, syncs the agent, starts a
- * session, streams it, gates the result and sends failures back for repair, then saves the result
- * under `out/research/<host>/` and prints the cost. The agent is deleted at the end, which is the
- * only way to remove its computer; the next run recreates it from its definition.
+ * One research run: uploads the capture tool and any customer material, creates this run's own
+ * agent from the definition, starts a session, streams it, gates the result and sends failures
+ * back for repair, then saves the result under `out/research/<host>/` and prints the cost. The
+ * agent is deleted at the end, which is the only way to remove its computer. Because every run has
+ * its own agent, runs in parallel never share a computer and never delete each other's agent.
  */
 export async function research(options: ResearchOptions): Promise<number> {
-  const definition = options.definition ?? researcher;
-  const client = naiveClient();
+  // A site the result could never cite is refused before any spend.
+  const problem = siteUrlProblem(options.url);
+  if (problem) {
+    say(`error: ${problem}`);
+    return 1;
+  }
+  const base = options.definition ?? researcher;
   const host = siteHost(options.url);
+  const definition: AgentDefinition = {
+    ...base,
+    name: runAgentName(base.name, host, runSuffix()),
+  };
+  const client = naiveClient();
   const outDir = join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
   // Files an earlier run of this host left behind would read as this run's results.
@@ -391,10 +488,11 @@ export async function research(options: ResearchOptions): Promise<number> {
     url: options.url,
     host,
     started_at: startedAt,
+    agent_name: definition.name,
     model: definition.model,
     budget_micro_usd: budgetMicro,
   };
-  const tracker = new EventTracker();
+  const tracker = new EventTracker(options.url);
   let agentId: string | undefined;
   let sessionId: string | undefined;
   let exitCode = 1;
@@ -417,14 +515,19 @@ export async function research(options: ResearchOptions): Promise<number> {
         );
     }
     if (agentId && !options.keepAgent) {
-      const { spend, leftover } = await teardown(client, agentId);
-      report.agent_spend = spend;
-      report.computers_live_after = leftover;
+      const result = await teardown(client, agentId);
+      report.agent_spend = result.spend;
+      report.agent_deleted = result.agentDeleted;
+      report.computer_id = result.computerId;
+      report.computer_gone = result.computerGone;
+      report.other_live_computers = result.others;
       say(
-        leftover.length
-          ? `computers still live in the org: ${leftover.join('; ')}`
-          : 'no computers left in the org',
+        result.computerGone
+          ? `this run's computer${result.computerId ? ` ${result.computerId}` : ''} is gone`
+          : `this run's computer ${result.computerId} is still live; it goes when the platform removes it`,
       );
+      if (result.others.length)
+        say(`other computers live in the org (not this run's): ${result.others.join('; ')}`);
     } else if (agentId) {
       report.agent_spend = await client.agents
         .spend(agentId, { by: 'component' })
@@ -588,6 +691,7 @@ export async function research(options: ResearchOptions): Promise<number> {
     }
     report.rounds = rounds;
     report.capture_digests = [...tracker.digests];
+    if (tracker.foreign.size) report.foreign_capture_digests = Object.fromEntries(tracker.foreign);
     report.published_files = Object.fromEntries(tracker.published);
 
     if (!accepted && verdict?.output && verdict.bundle) {
