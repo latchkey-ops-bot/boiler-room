@@ -29,7 +29,9 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with
-the change that fixes it.
+the change that fixes it, all on its first line, since that is the only line Remotion prints of an
+error thrown in the page. `FilmRejected.report` has the same list one issue a line, which is what
+the render CLI prints.
 
 ## Rules the templates keep
 
