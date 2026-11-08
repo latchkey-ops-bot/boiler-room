@@ -84,7 +84,7 @@ the change that fixes it.
 | `src/brand/`       | Theme from `campaign.brand`, skin, logo checks, font loading       |
 | `src/layout/`      | Stage size and safe areas, text fitting                            |
 | `src/components/`  | Type, the brand mark, browser frame, `MorphBox`, `RisingWords`     |
-| `src/scenes/`      | The five templates, registered under the schema's scene type names |
+| `src/scenes/`      | The four templates, registered under the schema's scene type names |
 | `src/transitions/` | The catalog, the seam resolver, the seam wrapper, the timeline     |
 | `src/film/`        | `<CampaignFilm>`, the `Stage`, the render gate, planning           |
 | `src/root.tsx`     | Remotion entry point                                               |
@@ -93,7 +93,7 @@ the change that fixes it.
 ## Scenes
 
 The schema's `sceneRegistry` is the one list of scene types and their text limits. This package
-registers a template against five of its names in `src/scenes/registry.ts`, exports them as
+registers a template against four of its names in `src/scenes/registry.ts`, exports them as
 `IMPLEMENTED_SCENE_TYPES`, and renders only those. Each template sets the roles its scene file
 lists, and `validateFilm` checks the counts.
 
@@ -103,16 +103,11 @@ lists, and `validateFilm` checks the counts.
 | `site-hero`    | optional `label`, the URL in the address bar        | `frame: 'browser'`, `focus` | 1 captured page, device scale 2 |
 | `feature-card` | `headline`, up to 2 `label`s, the cause and effect  | `demo`, `accent`            | 0 to 2 crops, else chips        |
 | `end-card`     | `cta`, optional `label`, the URL                    | `urlReveal`                 | none, shows the logo            |
-| `tile-wall`    | none                                                | `motionBlur`                | 6 to 18 captured tiles, 16:10   |
 
 `site-hero` refuses `frame: 'plane'`, `layers` and `activeLayer` as not built: plane mode tilts the
 page in 3D, which the determinism check has shown makes a frame depend on render order. Its focus
-blur and light sweep are not built either. `tile-wall` draws its T9 ramp into the cut only once a
-pin plays T9, which none does yet, so its rows cruise to the last frame. The gate checks that it
-has at least one captured tile, not six: the Director writes the row as a `feature-card` when the
-site gives fewer. `motionBlur` draws `CameraMotionBlur`'s five samples from the scene's own clock,
-since a `Freeze` cannot reach a clock the `Stage` reads above the scene. Every other type in the
-library is refused by the render gate until it has a template.
+blur and light sweep are not built either. Every other type in the library is refused by the
+render gate until it has a template.
 
 ## Transitions
 
