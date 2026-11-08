@@ -148,24 +148,32 @@ customer, text, or numbers. A generated asset must never stand in for proof.
 
 **How.** Prompt in the brand's ground and accent only, abstract, no text, no letters, no digits,
 no logos, no UI, no people. Inspect the result frame by frame for stray glyphs before you declare
-it. Generation in the Naive pipeline is not wired in yet. Until it is, use the code-built field
-for `colour-event` and leave `iso-chain` untextured.
+it.
+
+**In the Naive pipeline** (`pnpm art`, `agents/src/art/`) code does this part, so no model can
+spend on images. It generates the first two rows only: the third has no slot in the schema yet.
+"Reads as nothing" means the primary's OKLCH `L` is 0.25 or less, 0.90 or more, or its chroma is
+under 0.04 [N]. Code writes the prompt, uses Naive image generation, and stops at 2 images or
+$0.10 per film, whichever comes first. You inspect each image with `view_image` and accept or
+reject it; only an accepted image is declared. A rejected or capped image leaves the code-built
+field for `colour-event` and `iso-chain` untextured.
 
 **Label it.** Every generated asset is declared like this, and listed in your report:
 
 ```json
 "event-field": {
   "kind": "image",
-  "src": "assets/generated/event-field.png",
+  "src": "naive://files/fil_...",
   "provenance": "generated",
   "license": "Generated for this campaign. Not a capture.",
-  "width": 3840,
-  "height": 2160
+  "width": 1824,
+  "height": 1024
 }
 ```
 
-`provenance: "generated"` is the schema's label: Quality Check and the dashboard read it. Generated
-files live under `assets/generated/`. No `sourceUrl`: it was not taken from the site.
+`provenance: "generated"` is the schema's label: Quality Check and the dashboard read it. The file
+lives in Naive files, like the Researcher's captures, and `pnpm art` saves a copy under
+`assets/generated/` beside the campaign. No `sourceUrl`: it was not taken from the site.
 
 ## Report
 

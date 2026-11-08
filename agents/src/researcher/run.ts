@@ -95,7 +95,10 @@ export class EventTracker {
   }
 }
 
-function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
+export function describe(event: {
+  type: string;
+  data: Record<string, unknown>;
+}): string | undefined {
   const data = event.data ?? {};
   switch (event.type) {
     case 'tool.started': {
