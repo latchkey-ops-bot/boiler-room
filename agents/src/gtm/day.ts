@@ -15,9 +15,12 @@ import {
   founderTitle,
 } from './cards.ts';
 import {
+  AT_MOST_ONCE,
   BOT_USER_AGENT,
+  DISCOVERY,
   type FounderNeed,
   type GtmAgentName,
+  HOLD_WINDOW_MINUTES,
   KEY_ROTATION_DAY,
   MAX_EMAIL_PICKS,
   type PhaseName,
@@ -42,8 +45,8 @@ import {
   xBlocker,
 } from './decide.ts';
 import { type DiscoverResult, discover } from './discover.ts';
-import { optOutToken, registrableDomain, stableId } from './domain.ts';
-import { brandFlags } from './extract.ts';
+import { emailDomain, optOutToken, stableId } from './domain.ts';
+import { brandFlags, finderAddresses, isRoleAddressOn } from './extract.ts';
 import { type LaneState, resolveLanes } from './lanes.ts';
 import { DryRunFilmOrder, type FilmFile, type FilmOrder, LocalBoard } from './ports.ts';
 import {
@@ -56,8 +59,15 @@ import {
 import { dayMetrics, reportText } from './report.ts';
 import { jsonSchema, pickOutputSchema, scoutOutputSchema, socialOutputSchema } from './schemas.ts';
 import type { SiteRead } from './site.ts';
-import type { GuardedDataRun } from './sources.ts';
-import { type LeadRow, phaseOf, recordPhase, type StoreData } from './store.ts';
+import { dataRunNote, type GuardedDataRun } from './sources.ts';
+import {
+  type ActionKind,
+  type LeadRow,
+  phaseOf,
+  recordPhase,
+  type StoreData,
+  setFlag,
+} from './store.ts';
 import { contactedWithin, pruneLeads, recordContact, suppressedBy } from './suppression.ts';
 import { type Clock, daysSince, pacific } from './time.ts';
 import type { Ports } from './wiring.ts';
@@ -85,7 +95,11 @@ export interface DayOptions {
   filmWaitMs?: number;
   filmPollMs?: number;
   sessionWaitMs?: number;
+  /** Waits, for the films' polls and the hold window. Tests pass one that moves their clock. */
+  sleep?: (ms: number) => Promise<void>;
 }
+
+const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export interface DayResult {
   date: string;
@@ -120,15 +134,38 @@ interface Draft {
   subject?: string;
   to?: string;
   headers?: Record<string, string>;
+  /** For an X draft: what a person needs to quote-post the launch post by hand (`pack` mode). */
+  pack?: { launchPost: string; filmPage: string | null };
   problems: string[];
   usable: boolean;
+}
+
+/** What one removal attempt took down, and what is still up. */
+interface TakeDown {
+  deleted: number;
+  withdrawn: number;
+  /** Each post or film still up, with why. Empty when the request is done. */
+  waiting: string[];
+}
+
+/** A ledger outcome as a board comment's state. */
+function outcomeState(state: string, pack: boolean, done = 'live'): string {
+  if (state === 'done') return done;
+  if (state === 'pending' || state === 'unknown') return 'unknown';
+  if (state === 'failed') return 'failed';
+  return pack ? 'pack' : 'dry run';
 }
 
 class Day {
   readonly o: DayOptions;
   readonly store: StoreData;
   readonly ports: Ports;
+  /** The day the run is for: its phases, leads and action keys. */
   readonly date: string;
+  /** Today on the Pacific clock. Every cap and every spend row is counted on it, never on `date`. */
+  readonly today: string;
+  /** `date`, when it is not today: the run is a replay, and every lane is dry run. */
+  readonly replay: string | null;
   lanes: LaneState;
   dayCard: string | null = null;
   readonly ownComments = new Set<string>();
@@ -140,7 +177,7 @@ class Day {
   picked: Picked = { x: null, emails: [], caption: null };
   readonly films = new Map<string, FilmState>();
   readonly drafts: Draft[] = [];
-  holds: Holds = { day: false, leads: new Set(), resumeEmail: false, removals: [], posted: [] };
+  holds: Holds = { day: false, leads: new Set(), resumeEmailAt: null, removals: [], posted: [] };
   ceoHalted: boolean | null = null;
   lockdownOk: boolean | null = null;
   untampered: boolean | null = null;
@@ -151,7 +188,9 @@ class Day {
     this.o = options;
     this.store = options.store;
     this.ports = options.ports;
-    this.date = options.date ?? pacific(options.clock.now()).date;
+    this.today = pacific(options.clock.now()).date;
+    this.date = options.date ?? this.today;
+    this.replay = this.date === this.today ? null : this.date;
     this.lanes = this.resolve();
   }
 
@@ -166,6 +205,8 @@ class Day {
     return resolveLanes({
       store: this.store,
       forcedDryRun: this.o.forcedDryRun,
+      replay: this.replay,
+      boardLive: this.ports.board.kind === 'naive',
       gtmActive: this.o.gtmActive,
       ceoHalted: this.ceoHalted,
       held: this.holds.day || this.holdCards.length > 0,
@@ -176,8 +217,22 @@ class Day {
       socialReady: this.socialReady,
       sender: this.ports.sender,
       replyInbox: this.ports.replyInbox,
-      emailResumed: this.holds.resumeEmail,
     });
+  }
+
+  /**
+   * Re-reads the day card's commands. A founder's `RESUME email` lifts only a pause that began
+   * before it, and lifting it clears the flag, so the lane stays resumed on later days.
+   */
+  async readHolds() {
+    if (!this.dayCard) return;
+    const comments = await this.ports.board.comments(this.dayCard).catch(() => []);
+    this.holds = readCommands(comments, this.store.flags.founder_user_id, this.ownComments);
+    const paused = this.store.flags.email_paused;
+    const resumed = this.holds.resumeEmailAt;
+    if (paused && resumed && Date.parse(resumed) > Date.parse(paused.at)) {
+      setFlag(this.store, 'email_paused', null, 'founder: RESUME email', this.iso());
+    }
   }
 
   async comment(type: string, id: string, state: string, lines: string[] = []) {
@@ -307,9 +362,63 @@ class Day {
     };
   }
 
-  /** Opt-outs and removals from the app and the board. Runs in every mode, under halt and hold. */
+  /**
+   * Every post or email whose answer was lost, from any day: a `planned` at-most-once row. Each
+   * tick looks it up at the provider; after two ticks without a provider id it becomes `unknown`
+   * and `FOUNDER: gtm unknown-send` opens. Never retried. Adds no rows.
+   */
+  async reconcilePending() {
+    const planned = this.store.actions.filter(
+      (row) => row.status === 'planned' && (AT_MOST_ONCE as readonly string[]).includes(row.kind),
+    );
+    for (const row of planned) {
+      const outcome = await runAction(
+        this.store,
+        {
+          key: row.key,
+          kind: row.kind,
+          lead_id: row.lead_id,
+          detail: row.detail,
+          dryRun: false,
+          call: async () => {
+            throw new Error('a planned post or email is never called again');
+          },
+          ...(row.kind === 'x-post' ? { reconcile: () => this.ports.social.find(row.key) } : {}),
+        },
+        this.save,
+        this.iso,
+      );
+      if (outcome.state === 'unknown') {
+        await this.founder('unknown-send', row.key);
+        await this.comment(
+          row.kind === 'x-post' ? 'POST' : 'EMAIL',
+          row.lead_id ?? '-',
+          'unknown',
+          [
+            `The call for ${row.key} errored and no provider id turned up in ${outcome.row.planned_ticks} runs. It may have gone out; it is never retried.`,
+          ],
+        );
+      }
+    }
+  }
+
+  /**
+   * Opt-outs and removals from the app and the board. Runs in every mode, under halt and hold.
+   * Each request is queued in the store before the app cursor moves on or the board comment is
+   * marked received, then every queued request is applied. One that cannot take everything down
+   * (a delete fails, or the run has only dry-run ports) stays queued and is retried on every run.
+   */
   async removals() {
-    const requests: RemovalRequest[] = [];
+    const queue = (request: RemovalRequest & { key: string }) => {
+      if (this.store.pending_removals.some((item) => item.key === request.key)) return;
+      this.store.pending_removals.push({
+        key: request.key,
+        request,
+        received_at: this.iso(),
+        attempts: 0,
+        last_error: null,
+      });
+    };
     try {
       const pulled = await this.ports.app.requests(this.store.flags.cursors.requests);
       for (const item of pulled.requests) {
@@ -317,7 +426,7 @@ class Day {
           ? this.store.optout_tokens.find((row) => row.hash === item.token_hash)
           : undefined;
         const lead = token ? this.store.leads.find((row) => row.id === token.lead_id) : undefined;
-        requests.push({
+        queue({
           kind: item.kind,
           channel: item.channel,
           domain: token?.domain ?? item.domain,
@@ -325,6 +434,7 @@ class Day {
           share_id: item.share_id,
           lead_id: lead?.id ?? null,
           at: item.at,
+          key: `app:${item.id}`,
         });
       }
       this.store.flags.cursors.requests = pulled.cursor;
@@ -333,22 +443,28 @@ class Day {
         `removals  app requests unreadable: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-    if (this.dayCard) {
-      const comments = await this.ports.board.comments(this.dayCard).catch(() => []);
-      this.holds = readCommands(comments, this.store.flags.founder_user_id, this.ownComments);
-      for (const removal of this.holds.removals) {
-        if (findAction(this.store, `removal:${removal.comment_id}`)) continue;
-        requests.push({
-          kind: 'removal',
-          channel: 'board',
-          domain: null,
-          email: null,
-          share_id: null,
-          lead_id: removal.lead_id,
-          at: this.iso(),
-          comment_id: removal.comment_id,
-        });
-      }
+    await this.readHolds();
+    for (const removal of this.holds.removals) {
+      const key = `removal:${removal.comment_id}`;
+      if (findAction(this.store, key)) continue;
+      queue({
+        kind: 'removal',
+        channel: 'board',
+        domain: null,
+        email: null,
+        share_id: null,
+        lead_id: removal.lead_id,
+        at: this.iso(),
+        comment_id: removal.comment_id,
+        key,
+      });
+      skipAction(this.store, {
+        key,
+        kind: 'comment',
+        lead_id: removal.lead_id,
+        reason: 'removal received',
+        at: this.iso(),
+      });
     }
     if (this.ports.sender.capabilities.bounceEvents) {
       try {
@@ -362,28 +478,40 @@ class Day {
         );
       }
     }
-    const plans: RemovalPlan[] = [];
-    for (const request of requests) {
-      const plan = planRemoval(this.store, request);
-      plans.push(plan);
-      await this.takeDown(plan);
-      if (request.comment_id) {
-        skipAction(this.store, {
-          key: `removal:${request.comment_id}`,
-          kind: 'comment',
-          lead_id: request.lead_id,
-          reason: 'removal applied',
-          at: this.iso(),
-        });
+    await this.save();
+    let done = 0;
+    let unmatched = 0;
+    for (const pending of [...this.store.pending_removals]) {
+      const plan = planRemoval(this.store, pending.request);
+      if (plan.unmatched) unmatched += 1;
+      const result = await this.takeDown(plan);
+      pending.attempts += 1;
+      if (result.waiting.length) {
+        pending.last_error = result.waiting.join('; ').slice(0, 300);
+        await this.founder('removal', stableId('rq', pending.key));
+        continue;
       }
+      done += 1;
+      this.store.pending_removals = this.store.pending_removals.filter(
+        (item) => item.key !== pending.key,
+      );
+      const received = findAction(this.store, pending.key);
+      if (received) received.detail = 'removal applied';
     }
+    await this.save();
+    const left = this.store.pending_removals.length;
     return {
       status: 'done' as const,
-      detail: `${plans.length} request(s), ${plans.filter((plan) => plan.unmatched).length} for domains GTM never touched`,
+      detail: `${done} request(s) applied, ${unmatched} for domains GTM never touched, ${left} still taking down`,
     };
   }
 
-  async takeDown(plan: RemovalPlan) {
+  /**
+   * Takes one plan's live assets down. Counts only what really came down: a post is down when the
+   * provider deleted it, a film when the app withdrew it. A dry-run port deletes nothing, so with
+   * one the asset is still up and the request waits for a run with live ports.
+   */
+  async takeDown(plan: RemovalPlan): Promise<TakeDown> {
     // A second lock behind our own list: the provider refuses later sends to these addresses.
     if (this.ports.blockList) {
       const addresses = new Set(
@@ -400,51 +528,67 @@ class Day {
         });
       }
     }
+    const result: TakeDown = { deleted: 0, withdrawn: 0, waiting: [] };
     if (plan.unmatched) {
-      this.store.unmatched_removals[this.date] =
-        (this.store.unmatched_removals[this.date] ?? 0) + 1;
-      return;
+      this.store.unmatched_removals[this.today] =
+        (this.store.unmatched_removals[this.today] ?? 0) + 1;
+      return result;
     }
-    let liveDown = 0;
+    const lead = plan.leads[0]?.id ?? null;
     for (const post of plan.posts) {
-      if (this.ports.social.kind !== 'naive') continue;
+      if (this.ports.social.kind !== 'naive') {
+        result.waiting.push(`post ${post.provider_id}: no live X port in this run`);
+        continue;
+      }
       try {
         await this.ports.social.remove(post.provider_id);
         skipAction(this.store, {
           key: `x-delete:${post.provider_id}`,
           kind: 'x-delete',
-          lead_id: plan.leads[0]?.id ?? null,
+          lead_id: lead,
           reason: 'deleted on removal',
           at: this.iso(),
         });
-        liveDown += 1;
+        result.deleted += 1;
       } catch (error) {
-        this.log(
-          `removals  post delete failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        result.waiting.push(`post ${post.provider_id}: ${message.slice(0, 120)}`);
+        this.log(`removals  post delete failed: ${message}`);
       }
     }
     for (const film of plan.films) {
-      if (this.ports.film.kind !== 'app') continue;
+      if (this.ports.film.kind !== 'app') {
+        result.waiting.push(`film ${film.provider_id}: no live film port in this run`);
+        continue;
+      }
       try {
         await this.ports.film.withdraw(
           film.provider_id,
           plan.request.kind === 'removal' ? 'removal' : 'opt_out',
         );
-        liveDown += 1;
+        skipAction(this.store, {
+          key: `film-withdraw:${film.provider_id}`,
+          kind: 'film-withdraw',
+          lead_id: lead,
+          reason: 'withdrawn on removal',
+          at: this.iso(),
+        });
+        result.withdrawn += 1;
       } catch (error) {
-        this.log(
-          `removals  film withdraw failed: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        const message = error instanceof Error ? error.message : String(error);
+        result.waiting.push(`film ${film.provider_id}: ${message.slice(0, 120)}`);
+        this.log(`removals  film withdraw failed: ${message}`);
       }
     }
-    for (const lead of plan.leads) {
-      this.picked.emails = this.picked.emails.filter((item) => item.lead_id !== lead.id);
-      if (this.picked.x === lead.id) this.picked.x = null;
+    for (const item of plan.leads) {
+      this.picked.emails = this.picked.emails.filter((pick) => pick.lead_id !== item.id);
+      if (this.picked.x === item.id) this.picked.x = null;
     }
-    // A removal that took a live asset down is a card; any other is a comment, which starts no digest.
-    if (liveDown > 0 && plan.domain) {
-      const summary = `Removal ${plan.id} by ${plan.request.channel}: ${plan.posts.length} X post(s) deleted, ${plan.films.length} film(s) withdrawn, ${plan.suppressed} suppression row(s). Written by the GTM executor.`;
+    const complete = result.waiting.length === 0;
+    const liveDown = result.deleted + result.withdrawn;
+    // A removal that took a live asset down is a card, moved to done only once nothing is left up.
+    if (complete && liveDown > 0 && plan.domain) {
+      const summary = `Removal ${plan.id} by ${plan.request.channel}: ${result.deleted} X post(s) deleted, ${result.withdrawn} film(s) withdrawn, ${plan.suppressed} suppression row(s). Written by the GTM executor.`;
       try {
         // A card reaches done only with a note, so it is created todo and moved to done with one.
         const card = await this.ports.board.ensureCard({
@@ -461,17 +605,23 @@ class Day {
         );
       }
     }
-    await this.comment('REMOVAL', plan.id, 'done', [
-      `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${plan.posts.length} post(s), ${plan.films.length} film(s).`,
+    await this.comment('REMOVAL', plan.id, complete ? 'done' : 'pending', [
+      `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${result.deleted} of ${plan.posts.length} post(s) deleted, ${result.withdrawn} of ${plan.films.length} film(s) withdrawn.`,
+      ...(complete
+        ? []
+        : [
+            `Still up: ${result.waiting.join('; ')}. Retried on every run; FOUNDER: gtm removal is open.`,
+          ]),
     ]);
+    return result;
   }
 
   // -------------------------------------------------------------------------------------------
 
   dataRun: GuardedDataRun = async (tool, input, price) => {
-    if (!this.ports.data) return null;
-    const check = canRunData(this.store, this.date, price);
-    if (!check.ok) return null;
+    if (!this.ports.data) return { ok: false, reason: 'refused', detail: 'no data runs are wired' };
+    const check = canRunData(this.store, this.today, price);
+    if (!check.ok) return { ok: false, reason: 'cap', detail: check.reason ?? 'cap' };
     const key = `data-run:${tool}:${stableId('dr', JSON.stringify(input))}:${this.date}`;
     let data: unknown = null;
     let cost = 0;
@@ -493,9 +643,18 @@ class Day {
       this.save,
       this.iso,
     );
-    if (outcome.state !== 'done' || data === null) return null;
-    recordSpend(this.store, { date: this.date, category: 'data', micro_usd: cost, ref: key });
-    return { data, costMicroUsd: cost };
+    if (outcome.state === 'failed') {
+      // The guard refuses a tool it could not resolve; that is not the run failing.
+      return {
+        ok: false,
+        reason: /^refused:/.test(outcome.error) ? 'refused' : 'failed',
+        detail: outcome.error,
+      };
+    }
+    if (outcome.state !== 'done' || data === null)
+      return { ok: false, reason: 'failed', detail: `the run answered no data (${outcome.state})` };
+    recordSpend(this.store, { date: this.today, category: 'data', micro_usd: cost, ref: key });
+    return { ok: true, data, costMicroUsd: cost };
   };
 
   async discover() {
@@ -548,21 +707,30 @@ class Day {
     const runner = this.ports.agents;
     if (!runner) return null;
     const { budget } = sessionBudget(agent);
-    const check = canSpend(this.store, this.date, budget);
+    const check = canSpend(this.store, this.today, budget);
     if (!check.ok) {
       this.log(`${purpose.padEnd(9)} ${agent} skipped: ${check.reason}`);
       return null;
     }
-    const id = await runner.start({
-      agent,
-      message,
-      outputSchema: schema,
-      budgetMicroUsd: budget,
-      metadata: { phase: purpose, date: this.date },
-    });
+    let id: string;
+    try {
+      id = await runner.start({
+        agent,
+        message,
+        outputSchema: schema,
+        budgetMicroUsd: budget,
+        metadata: { phase: purpose, date: this.date },
+      });
+    } catch (error) {
+      // One agent that cannot start (a $0 budget, a refused session) costs only its own step.
+      this.log(
+        `${purpose.padEnd(9)} ${agent} could not start: ${error instanceof Error ? error.message.slice(0, 160) : String(error)}`,
+      );
+      return null;
+    }
     const result = await runner.wait(id, this.o.sessionWaitMs ?? 8 * 60_000);
     recordSpend(this.store, {
-      date: this.date,
+      date: this.today,
       category: 'agents',
       micro_usd: result.consumedMicroUsd,
       ref: id,
@@ -630,9 +798,11 @@ class Day {
       }
     }
     const kept = qualified.slice(0, cap(this.store, 'qualified_day'));
+    const finder = await this.findAddresses(kept);
     await this.comment('LEADS', this.date, `${kept.length} qualified of ${candidates.length}`, [
       `Qualified: ${kept.map((lead) => `${lead.id} (fit ${lead.verdict?.fit}, ${lead.verdict?.jurisdiction}, email ${emailBlocker(this.store, lead, this.now()) ? 'no' : 'yes'}, x ${xBlocker(this.store, lead, this.now()) ? 'no' : 'yes'})`).join(', ') || 'none'}`,
       `Scout: br-scout ${sessions.join(', ')}`,
+      `Address finder: ${finder.runs} run(s) for qualified leads, ${finder.found} with an address${finder.note ? `; ${finder.note}` : ''}.`,
     ]);
     this.review.push(
       `## Scout verdicts\n\n${this.todayLeads()
@@ -642,13 +812,46 @@ class Day {
         )
         .join(
           '\n',
-        )}\n\nCode corrections:\n${corrections.map((line) => `- ${line}`).join('\n') || '- none'}\n`,
+        )}\n\nCode corrections:\n${corrections.map((line) => `- ${line}`).join('\n') || '- none'}\n\nAddress finder: ${finder.runs} run(s), ${finder.found} lead(s) given an address${finder.note ? ` (${finder.note})` : ''}.\n`,
     );
     return {
       status: 'done' as const,
-      detail: `${kept.length} qualified of ${candidates.length}`,
+      detail: `${kept.length} qualified of ${candidates.length}; finder ${finder.runs} run(s), ${finder.found} found`,
       sessions,
     };
+  }
+
+  /**
+   * The paid address finder, after the scout: one `Find Domain Emails` run for each qualified lead,
+   * best fit first, whose email lane is closed only by a missing address, at most
+   * `finder_runs_day`. A candidate the scout rejects never costs a finder run.
+   */
+  async findAddresses(qualified: readonly LeadRow[]) {
+    const out = { runs: 0, found: 0, note: null as string | null };
+    if (!this.ports.data) return { ...out, note: 'no data runs' };
+    const now = this.now();
+    for (const lead of qualified) {
+      if (emailBlocker(this.store, lead, now) !== 'no_address') continue;
+      if (lead.source === 'hn' && (lead.hn_points ?? 0) < DISCOVERY.hn_min_points_email) continue;
+      if (out.runs >= cap(this.store, 'finder_runs_day')) {
+        out.note = 'finder cap reached';
+        break;
+      }
+      const run = await this.dataRun(
+        'domainEmails',
+        { body: { domain: lead.domain, limit: 10, type: 'generic' } },
+        PRICES.find_domain_emails,
+      );
+      if (!run.ok) {
+        out.note = dataRunNote(run);
+        if (run.reason === 'failed') continue;
+        break;
+      }
+      out.runs += 1;
+      lead.addresses = finderAddresses(run.data, lead.domain);
+      if (lead.addresses.length) out.found += 1;
+    }
+    return out;
   }
 
   todayLeads(): LeadRow[] {
@@ -707,7 +910,10 @@ class Day {
     const sessions: string[] = [];
     let result = await this.session(GTM_LEAD, brief, jsonSchema(pickOutputSchema), 'pick');
     if (!result)
-      return { status: 'skipped' as const, detail: 'the GTM lead could not start (spend cap)' };
+      return {
+        status: 'skipped' as const,
+        detail: 'the GTM lead could not start (spend cap or a refused session; see the log)',
+      };
     sessions.push(result.sessionId);
     const leads = new Map(qualified.map((lead) => [lead.id, lead]));
     const pickInput = {
@@ -727,7 +933,7 @@ class Day {
         this.o.sessionWaitMs ?? 8 * 60_000,
       );
       recordSpend(this.store, {
-        date: this.date,
+        date: this.today,
         category: 'agents',
         micro_usd: Math.max(0, repaired.consumedMicroUsd - result.consumedMicroUsd),
         ref: `${result.sessionId}:repair`,
@@ -780,7 +986,7 @@ class Day {
             this.o.sessionWaitMs ?? 8 * 60_000,
           );
           recordSpend(this.store, {
-            date: this.date,
+            date: this.today,
             category: 'agents',
             micro_usd: Math.max(0, repaired.consumedMicroUsd - social.consumedMicroUsd),
             ref: `${social.sessionId}:repair`,
@@ -868,7 +1074,7 @@ class Day {
       }
       const budget = cap(this.store, 'film_budget_micro');
       if (live) {
-        const check = canSpend(this.store, this.date, budget, { keepReplyReserve: true });
+        const check = canSpend(this.store, this.today, budget, { keepReplyReserve: true });
         if (!check.ok) {
           skipAction(this.store, {
             key,
@@ -916,7 +1122,7 @@ class Day {
       ordered += 1;
       if (live) {
         recordSpend(this.store, {
-          date: this.date,
+          date: this.today,
           category: 'films',
           micro_usd: budget,
           ref: key,
@@ -1028,7 +1234,7 @@ class Day {
         }
         break;
       }
-      if (poll) await new Promise((resolve) => setTimeout(resolve, poll));
+      if (poll) await (this.o.sleep ?? realSleep)(poll);
     }
     await this.save();
     return {
@@ -1037,9 +1243,17 @@ class Day {
     };
   }
 
+  /** When a live draft goes out: the hold window after compose, on the Pacific clock. */
+  goesOutAt(): string {
+    const composed = phaseOf(this.store, this.date, 'compose');
+    const from = composed ? Date.parse(composed.finished_at) : this.now().getTime();
+    return pacific(new Date(from + HOLD_WINDOW_MINUTES * 60_000)).clock;
+  }
+
   async compose() {
     const now = this.now();
     const appBase = this.ports.appBase;
+    const after = pacific(new Date(now.getTime() + HOLD_WINDOW_MINUTES * 60_000)).clock;
     if (this.picked.x && this.picked.caption) {
       const lead = this.store.leads.find((row) => row.id === this.picked.x) as LeadRow;
       const film = this.films.get(lead.id);
@@ -1055,11 +1269,21 @@ class Day {
         lead_id: lead.id,
         lane: 'x',
         text: this.picked.caption.caption,
+        // A quote-post of the launch post is made only by a person; this is what they need.
+        ...(lead.x_post?.verified
+          ? { pack: { launchPost: lead.x_post.url, filmPage: film?.pageUrl ?? null } }
+          : {}),
         problems,
         usable: problems.length === 0,
       });
+      const when =
+        this.lanes.x === 'standalone'
+          ? `Goes out after ${after} Pacific unless someone comments HOLD or HOLD ${lead.id}.`
+          : this.lanes.x === 'pack'
+            ? 'Pack mode: the executor posts nothing; a person may quote-post from the review file.'
+            : 'Dry run: it does not go out.';
       await this.comment('POST', lead.id, this.lanes.x === 'standalone' ? 'draft' : 'dry run', [
-        `Lane x: ${this.lanes.x}. Goes out at 10:30 unless someone comments HOLD or HOLD ${lead.id}. Caption by br-social, template ${this.picked.caption.template_id}, ${this.picked.caption.caption.length} characters. Checks: ${problems.length ? problems.join('; ') : 'passed'}.`,
+        `Lane x: ${this.lanes.x}. ${when} Caption by br-social, template ${this.picked.caption.template_id}, ${this.picked.caption.caption.length} characters. Checks: ${problems.length ? problems.join('; ') : 'passed'}.`,
       ]);
     }
     for (const pick of this.picked.emails) {
@@ -1075,6 +1299,7 @@ class Day {
         problems.push('no_address');
         continue;
       }
+      if (!isRoleAddressOn(address.address, lead.domain)) problems.push('bad_recipient');
       const { token, hash } = optOutToken();
       try {
         await this.ports.app.registerOptOutToken(hash, lead.id);
@@ -1109,7 +1334,7 @@ class Day {
         usable: problems.length === 0,
       });
       await this.comment('EMAIL', lead.id, this.lanes.email === 'live' ? 'draft' : 'dry run', [
-        `To the published address at ${lead.domain} (a role address, from its ${address.page_label}). Jurisdiction ${lead.verdict?.jurisdiction}.`,
+        `To the published address at ${lead.domain} (a role address, from its ${address.page_label}). Jurisdiction ${lead.verdict?.jurisdiction}. ${this.lanes.email === 'live' ? `Goes out after ${after} Pacific unless someone comments HOLD or HOLD ${lead.id}.` : 'Dry run: it does not go out.'}`,
         `Lines by br-gtm-lead. Checks: ${problems.length ? problems.join('; ') : 'suppression, 90 days, quote, numbers, links (2), footer'}.`,
       ]);
     }
@@ -1117,7 +1342,7 @@ class Day {
       `## Drafts\n\n${this.drafts
         .map(
           (draft) =>
-            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n`,
+            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n${draft.pack ? `\nQuote pack, for a person posting by hand from the X app (pack mode): quote-post ${draft.pack.launchPost} with the film from ${draft.pack.filmPage ?? 'the film page, once ready'}, and paste the caption above. Then comment POSTED <url> on the day card.\n` : ''}`,
         )
         .join('\n')}`,
     );
@@ -1127,19 +1352,43 @@ class Day {
     };
   }
 
+  /**
+   * The hold window. When a lane is live and a draft can go out, execute waits until
+   * HOLD_WINDOW_MINUTES after compose, so the people who read the board can comment HOLD; execute
+   * then re-reads every hold. Nothing waits in dry run.
+   */
+  async holdWindow() {
+    const live = this.lanes.x === 'standalone' || this.lanes.email === 'live';
+    if (!live || !this.drafts.some((draft) => draft.usable)) return;
+    const composed = phaseOf(this.store, this.date, 'compose');
+    const from = composed ? Date.parse(composed.finished_at) : this.now().getTime();
+    const wait = from + HOLD_WINDOW_MINUTES * 60_000 - this.now().getTime();
+    if (wait <= 0) return;
+    this.log(`hold      execute waits until ${this.goesOutAt()} Pacific for a HOLD`);
+    await (this.o.sleep ?? realSleep)(wait);
+  }
+
+  /** Posts and emails already out today, by the real date, in any run. */
+  outToday(kind: ActionKind): number {
+    return this.store.actions.filter(
+      (row) =>
+        row.kind === kind &&
+        ['sent', 'planned', 'unknown'].includes(row.status) &&
+        pacific(new Date(row.executed_at ?? row.created_at)).date === this.today,
+    ).length;
+  }
+
   async execute() {
     // Re-read holds and re-resolve every lane right before anything goes out.
-    if (this.dayCard) {
-      const comments = await this.ports.board.comments(this.dayCard).catch(() => []);
-      this.holds = readCommands(comments, this.store.flags.founder_user_id, this.ownComments);
-    }
+    await this.readHolds();
     this.holdCards = this.ports.naive
       ? await this.ports.board.holdCards().catch(() => ['unreadable'])
       : [];
     this.lanes = this.resolve();
     const now = this.now();
-    let posts = 0;
-    let emails = 0;
+    // Every cap counts what already went out today on the real clock, whatever the run's label.
+    let posts = this.outToday('x-post');
+    let emails = this.outToday('email');
     for (const draft of this.drafts) {
       const lead = this.store.leads.find((row) => row.id === draft.lead_id) as LeadRow;
       if (draft.lane === 'x') {
@@ -1149,7 +1398,7 @@ class Day {
         const blocker = xBlocker(this.store, lead, now);
         if (blocker) reasons.push(blocker);
         if (posts >= cap(this.store, 'x_posts_day')) reasons.push('x_cap');
-        if (!canSpend(this.store, this.date, PRICES.x_post).ok) reasons.push('spend');
+        if (!canSpend(this.store, this.today, PRICES.x_post).ok) reasons.push('spend');
         const live = this.lanes.x === 'standalone' && reasons.length === 0;
         if (this.lanes.x === 'standalone' && reasons.length) {
           skipAction(this.store, {
@@ -1172,6 +1421,14 @@ class Day {
             detail: `lead ${lead.id}`,
             dryRun: !live,
             call: async () => {
+              // Recorded before the call: a post whose answer is lost still counts as made.
+              recordContact(this.store, {
+                domain: lead.domain,
+                channel: 'x_post',
+                at: this.iso(),
+                lead_id: lead.id,
+              });
+              await this.save();
               const result = await this.ports.social.post({
                 caption: draft.text,
                 filmFileUrl: film?.file?.url ?? '',
@@ -1188,16 +1445,10 @@ class Day {
         if (outcome.state === 'done') {
           posts += 1;
           recordSpend(this.store, {
-            date: this.date,
+            date: this.today,
             category: 'posts',
             micro_usd: PRICES.x_post,
             ref: key,
-          });
-          recordContact(this.store, {
-            domain: lead.domain,
-            channel: 'x_post',
-            at: this.iso(),
-            lead_id: lead.id,
           });
         }
         if (outcome.state === 'done' || outcome.state === 'dry_run') {
@@ -1209,24 +1460,29 @@ class Day {
             lead_id: lead.id,
           });
         }
-        await this.comment('POST', lead.id, outcome.state === 'done' ? 'live' : 'dry run', [
+        await this.comment('POST', lead.id, outcomeState(outcome.state, this.lanes.x === 'pack'), [
           outcome.state === 'done'
             ? `Posted as ${outcome.row.provider_id}.`
-            : `Not posted: ${reasons.join('; ') || this.lanes.reasons.x.slice(0, 3).join('; ')}.`,
+            : outcome.state === 'pending' || outcome.state === 'unknown'
+              ? 'The call errored, so the post may have gone out. It is never retried; the domain counts as posted, and a person is asked if no provider id turns up.'
+              : this.lanes.x === 'pack'
+                ? 'Pack mode: not posted by the executor. The quote pack is in the review file; comment POSTED <url> once a person has posted.'
+                : `Not posted: ${reasons.join('; ') || this.lanes.reasons.x.slice(0, 3).join('; ')}.`,
         ]);
         continue;
       }
       const key = `email:${lead.domain}:${this.date}`;
       const reasons = [...draft.problems];
       if (this.holds.leads.has(lead.id)) reasons.push('held');
+      // The recipient is checked again: exactly one role address on the lead's own domain.
+      if (!draft.to || !isRoleAddressOn(draft.to, lead.domain)) reasons.push('bad_recipient');
       // Suppression and the 90-day rule are checked again here: an opt-out may have come in since compose.
       if (draft.to && suppressedBy(this.store, { email: draft.to, domain: lead.domain }))
         reasons.push('suppressed');
       if (contactedWithin(this.store, lead.domain, 'email', now)) reasons.push('emailed_90d');
       if (emails >= cap(this.store, 'cold_emails_day')) reasons.push('email_cap');
       if (this.lanes.email === 'live' && !reasons.length && draft.to) {
-        const domain = registrableDomain(draft.to.split('@')[1] ?? '') ?? '';
-        if (!(await this.ports.mx(domain))) reasons.push('no_mx');
+        if (!(await this.ports.mx(emailDomain(draft.to) ?? ''))) reasons.push('no_mx');
       }
       const live = this.lanes.email === 'live' && reasons.length === 0;
       if (reasons.length && this.lanes.email === 'live') {
@@ -1250,6 +1506,14 @@ class Day {
           detail: `lead ${lead.id}`,
           dryRun: !live,
           call: async () => {
+            // Recorded before the call: an email whose answer is lost still counts for 90 days.
+            recordContact(this.store, {
+              domain: lead.domain,
+              channel: 'email',
+              at: this.iso(),
+              lead_id: lead.id,
+            });
+            await this.save();
             const result = await sender.send({
               from: sender.from,
               replyTo: sender.replyTo,
@@ -1266,15 +1530,7 @@ class Day {
         this.iso,
       );
       if (outcome.state === 'unknown') await this.founder('unknown-send', key);
-      if (outcome.state === 'done') {
-        emails += 1;
-        recordContact(this.store, {
-          domain: lead.domain,
-          channel: 'email',
-          at: this.iso(),
-          lead_id: lead.id,
-        });
-      }
+      if (outcome.state === 'done') emails += 1;
       if (outcome.state === 'done' || outcome.state === 'dry_run') {
         this.store.copy_history.push({
           date: this.date,
@@ -1284,15 +1540,17 @@ class Day {
           lead_id: lead.id,
         });
       }
-      await this.comment('EMAIL', lead.id, outcome.state === 'done' ? 'sent' : 'dry run', [
+      await this.comment('EMAIL', lead.id, outcomeState(outcome.state, false, 'sent'), [
         outcome.state === 'done'
           ? `Sent as ${outcome.row.provider_id} by ${sender.kind}.`
-          : `Not sent: ${reasons.join('; ') || this.lanes.reasons.email.slice(0, 3).join('; ')}.`,
+          : outcome.state === 'pending' || outcome.state === 'unknown'
+            ? 'The call errored, so the email may have gone out. It is never retried; the domain counts as emailed for 90 days, and a person is asked if no provider id turns up.'
+            : `Not sent: ${reasons.join('; ') || this.lanes.reasons.email.slice(0, 3).join('; ')}.`,
       ]);
     }
     return {
       status: 'done' as const,
-      detail: `${posts} post(s), ${emails} email(s) live; the rest dry run`,
+      detail: `${posts} post(s), ${emails} email(s) out today; the rest dry run`,
     };
   }
 
@@ -1341,6 +1599,7 @@ class Day {
 export async function runDay(options: DayOptions): Promise<DayResult> {
   const day = new Day(options);
   await day.prepare();
+  await day.reconcilePending();
   await day.phase('open', () => day.open());
   await day.phase('removals', () => day.removals());
   await day.phase('discover', () => day.discover());
@@ -1349,6 +1608,8 @@ export async function runDay(options: DayOptions): Promise<DayResult> {
   await day.phase('order', () => day.order());
   await day.phase('films', () => day.filmsPhase());
   await day.phase('compose', () => day.compose());
+  // A live draft waits out the hold window, so people reading the board can comment HOLD.
+  await day.holdWindow();
   // Removals run again right before anything goes out, as they do on every tick of the hosted executor.
   await day.phase('removals', () => day.removals());
   await day.phase('execute', () => day.execute());

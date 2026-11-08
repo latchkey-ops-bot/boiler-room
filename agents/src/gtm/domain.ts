@@ -18,6 +18,18 @@ export function registrableDomain(input: string): string | null {
   return getDomain(host, { allowPrivateDomains: true }) ?? null;
 }
 
+const SINGLE_ADDRESS = /^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$/;
+
+/**
+ * One email address, normalised, or null. The whole string must be a single address: a second `@`,
+ * a comma, a semicolon, whitespace, `?`, `/`, `:` or a control character makes it none, so a
+ * crafted `mailto:` such as `hello@victim.com?,hello@quillbox.example` is no address at all.
+ */
+export function singleAddress(raw: string): string | null {
+  const normal = normalise(raw);
+  return SINGLE_ADDRESS.test(normal) ? normal : null;
+}
+
 /** The domain part of an email address, as a registrable domain. */
 export function emailDomain(address: string): string | null {
   const at = normalise(address).lastIndexOf('@');

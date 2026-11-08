@@ -83,6 +83,11 @@ export interface WiringInput {
   /** The fetch the app clients use. */
   fetcher: ConstructorParameters<typeof AppFilmOrder>[2];
   log: (line: string) => void;
+  /**
+   * The X posts earlier runs made (`postsWeMade(store)`). The guard deletes only posts it knows, and
+   * every `gtm:day` is a new process, so without these a removal could never delete an older post.
+   */
+  knownPosts?: readonly string[];
   /** For tests: called with each live class's name as it is constructed. */
   onLive?: (name: string) => void;
 }
@@ -97,6 +102,7 @@ export async function createPorts(input: WiringInput): Promise<Ports> {
       const identity = input.secret(SECRETS.identity);
       naive = await GtmNaive.connect(input.naiveClient(key), {
         identity: input.dryRun ? null : identity,
+        knownPosts: input.knownPosts ?? [],
       });
     } catch (error) {
       input.log(

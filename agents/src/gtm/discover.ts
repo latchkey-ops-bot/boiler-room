@@ -1,9 +1,7 @@
 import { cap } from './caps.ts';
-import { PRICES } from './config.ts';
 import { isWellKnown, registrableDomain, stableId } from './domain.ts';
 import {
   brandFlags,
-  finderAddresses,
   hnName,
   jurisdictionHint,
   noSolicitationNotice,
@@ -37,7 +35,6 @@ export interface DiscoverResult {
   reports: SourceReport[];
   /** Candidates dropped before the scout, by reason. */
   dropped: Record<string, number>;
-  finder_runs: number;
 }
 
 export interface DiscoverContext {
@@ -154,7 +151,6 @@ export async function discover(context: DiscoverContext): Promise<DiscoverResult
     readSite(raw.site_url as string, transport, userAgent, now),
   );
   const candidates: Candidate[] = [];
-  let finderRuns = 0;
   for (const [index, { raw, domain }] of chosen.entries()) {
     const read = reads[index] as SiteRead;
     if (read.failure) {
@@ -168,26 +164,11 @@ export async function discover(context: DiscoverContext): Promise<DiscoverResult
     }
     const sourceName = raw.source === 'hn' ? hnName(raw.title) : (raw.ph?.name ?? null);
     const xPost = xPosts.get(domain) ?? null;
-    let addresses = publishedAddresses(read, domain);
+    // Only published addresses here. The paid finder runs after the scout, for qualified leads only
+    // (day.ts `findAddresses`), so it is never spent on a candidate the scout then rejects.
+    const addresses = publishedAddresses(read, domain);
     const closed = noSolicitationNotice(read) ? 'no_solicitation_notice' : null;
     const hint = jurisdictionHint(domain, read);
-    if (
-      !addresses.length &&
-      !closed &&
-      hint === 'unknown' &&
-      context.dataRun &&
-      finderRuns < cap(store, 'finder_runs_day')
-    ) {
-      const run = await context.dataRun(
-        'domainEmails',
-        { body: { domain, limit: 10, type: 'generic' } },
-        PRICES.find_domain_emails,
-      );
-      if (run) {
-        finderRuns += 1;
-        addresses = finderAddresses(run.data, domain);
-      }
-    }
     const lead: LeadRow = {
       id: stableId('ld', `${domain}|${date}`),
       date,
@@ -221,5 +202,5 @@ export async function discover(context: DiscoverContext): Promise<DiscoverResult
       raw,
     });
   }
-  return { candidates, reports, dropped, finder_runs: finderRuns };
+  return { candidates, reports, dropped };
 }

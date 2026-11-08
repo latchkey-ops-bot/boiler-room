@@ -330,7 +330,8 @@ describe('the lanes', () => {
     socialReady: false,
     sender: new DryRunEmailSender(),
     replyInbox: null,
-    emailResumed: false,
+    replay: null,
+    boardLive: true,
   };
 
   it('are dry run by default, each with its reasons', () => {

@@ -8,7 +8,8 @@ import { daysSince } from './time.ts';
  * The cold sender's bounces and complaints. A permanent bounce suppresses the address and its
  * domain at once. The lane pauses on its own only at 2 permanent bounces in the trailing 7 days, or
  * on any complaint, so brand-new startups' dead addresses do not need a person every day. Opt-outs
- * and `not_interested` replies stand in as the complaint signal at 5 emails a day.
+ * and `not_interested` replies stand in as the complaint signal at 5 emails a day. A new signal
+ * pauses the lane again even if it is already paused, with a new `at`.
  */
 export function applySenderEvents(
   store: StoreData,
@@ -42,12 +43,15 @@ export function applySenderEvents(
     (row) => row.kind === 'email' && row.reason === 'bounce' && daysSince(row.created_at, now) < 7,
   ).length;
   const complaint = events.some((event) => event.kind === 'complaint');
+  const newBounce = events.some((event) => event.kind === 'bounce_permanent');
+  // Only a signal in this batch pauses, and every one does, even while a pause stands: its `at`
+  // moves to now, so a RESUME written before it no longer lifts it.
   const paused = complaint
     ? 'a complaint'
-    : recentBounces >= 2
+    : newBounce && recentBounces >= 2
       ? `${recentBounces} permanent bounces in 7 days`
       : null;
-  if (paused && !store.flags.email_paused) {
+  if (paused) {
     setFlag(
       store,
       'email_paused',

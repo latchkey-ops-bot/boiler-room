@@ -1,6 +1,7 @@
 import { normaliseWhitespace } from '../researcher/text.ts';
 import { DISCOVERY } from './config.ts';
-import { emailDomain, normalise, registrableDomain } from './domain.ts';
+import { claimProblems } from './copy.ts';
+import { emailDomain, normalise, registrableDomain, singleAddress } from './domain.ts';
 import type { SitePage, SiteRead } from './site.ts';
 import type { Jurisdiction, LeadAddress } from './store.ts';
 
@@ -31,9 +32,14 @@ const PAGE_ORDER = [
   'terms page',
 ];
 
-/** Whether an address is a role address on the lead's own registrable domain. */
+/**
+ * Whether an address is one role address on the lead's own registrable domain. It must be exactly
+ * one address (`singleAddress`): a second `@`, a comma, `?` or whitespace makes it no address at all,
+ * so the role check, suppression, dedupe and the MX lookup all read the same single domain.
+ */
 export function isRoleAddressOn(address: string, domain: string): boolean {
-  const normal = normalise(address);
+  const normal = singleAddress(address);
+  if (!normal) return false;
   const local = normal.split('@')[0] ?? '';
   return (
     (ROLE_LOCAL_PARTS as readonly string[]).includes(local) &&
@@ -53,8 +59,8 @@ export function publishedAddresses(read: Pick<SiteRead, 'pages'>, domain: string
     if (registrableDomain(page.final_url) !== registrableDomain(domain)) continue;
     const candidates = [...page.parsed.mailto, ...(page.parsed.text.match(ADDRESS) ?? [])];
     for (const raw of candidates) {
-      const address = normalise(raw).replace(/[.,;:]+$/, '');
-      if (!isRoleAddressOn(address, domain) || found.has(address)) continue;
+      const address = singleAddress(raw.trim().replace(/[.,;:]+$/, ''));
+      if (!address || !isRoleAddressOn(address, domain) || found.has(address)) continue;
       found.set(address, {
         address,
         source_url: page.final_url,
@@ -83,13 +89,14 @@ export function finderAddresses(data: unknown, domain: string): LeadAddress[] {
     sources?: { uri?: string }[];
   }[]) {
     if (!item.value || item.provenance !== 'found' || item.source_type !== 'found') continue;
-    if (!isRoleAddressOn(item.value, domain)) continue;
+    const address = singleAddress(item.value);
+    if (!address || !isRoleAddressOn(address, domain)) continue;
     const source = item.sources?.find(
       (entry) => entry.uri && registrableDomain(entry.uri) === registrableDomain(domain),
     );
     if (!source?.uri) continue;
     out.push({
-      address: normalise(item.value),
+      address,
       source_url: source.uri,
       page_label: 'website',
       provenance: 'found',
@@ -196,10 +203,19 @@ export const BRAND_UNSAFE: Readonly<Record<string, readonly string[]>> = {
   ],
 };
 
+/** Apple's AirDrop, with its capital D, is file sharing between devices, not a token giveaway. */
+const APPLE_AIRDROP = /(?<![\p{L}\p{N}])AirDrop(?![\p{L}\p{N}])/gu;
+/** Words that make any "airdrop" a crypto one, however it is spelled. */
+const CRYPTO_CONTEXT =
+  /(?<![\p{L}\p{N}])(?:crypto|cryptocurrency|token|tokens|nft|nfts|coin|coins|blockchain|web3|memecoin|on-chain)(?![\p{L}\p{N}])/iu;
+
 /** Every brand-safety term found in the texts, as `category:term`. */
 export function brandFlags(...texts: readonly string[]): string[] {
   const flags = new Set<string>();
-  const haystack = normalise(texts.join('\n'));
+  const joined = texts.join('\n');
+  const haystack = normalise(
+    CRYPTO_CONTEXT.test(joined) ? joined : joined.replace(APPLE_AIRDROP, ' '),
+  );
   for (const [category, terms] of Object.entries(BRAND_UNSAFE)) {
     for (const term of terms) {
       const pattern = new RegExp(
@@ -236,12 +252,18 @@ const titleParts = (title: string) =>
 /** A name that reads as a domain, such as "logo.deal": X would link it, and copy never names a domain. */
 const DOMAIN_LIKE = /[\p{L}\p{N}]\.[\p{L}]{2,}/u;
 
+/**
+ * A name copy may use. Besides its shape, it passes the claims screen every lane applies: a page
+ * title such as "Best Stripe Partner" makes a superlative and a claim about another company, so it is
+ * no product name, and the lead cannot qualify.
+ */
 const validName = (name: string) =>
   name.length > 0 &&
   name.length <= DISCOVERY.product_name_max &&
   NAME_CHARS.test(name) &&
   !DOMAIN_LIKE.test(name) &&
-  !GENERIC_NAMES.has(name.toLowerCase());
+  !GENERIC_NAMES.has(name.toLowerCase()) &&
+  claimProblems(name).length === 0;
 
 /**
  * The product name copy may use. It must appear in the homepage's `<title>`, `og:site_name` or
@@ -346,10 +368,14 @@ const US_STATES =
 const US_STATE_ABBR =
   'AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC';
 
-/** A quote that names a US state of incorporation, or a US postal address. "Inc." alone is not one. */
+/**
+ * A quote that names a US state of incorporation, or a US postal address. "Inc." alone is not one.
+ * "BasedAI, Inc., a Delaware company" names one: the state with "corporation", "LLC" and the like,
+ * or "a <state> company".
+ */
 export function usEvidence(quote: string): boolean {
   const incorporated = new RegExp(
-    `\\b(?:${US_STATES})\\s+(?:corporation|limited liability company|LLC|C-corp|C corporation|public benefit corporation|PBC)\\b|\\b(?:incorporated|organized|registered) (?:in|under the laws of)(?: the State of)? (?:${US_STATES})\\b`,
+    `\\b(?:${US_STATES})\\s+(?:corporation|limited liability company|LLC|C-corp|C corporation|public benefit corporation|PBC)\\b|\\ban?\\s+(?:${US_STATES})\\s+company\\b|\\b(?:incorporated|organized|registered) (?:in|under the laws of)(?: the State of)? (?:${US_STATES})\\b`,
     'i',
   );
   const postal = new RegExp(`,\\s*(?:${US_STATE_ABBR})\\s+\\d{5}(?:-\\d{4})?\\b`);

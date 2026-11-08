@@ -31,6 +31,16 @@ export interface LaneInput {
   store: StoreData;
   /** The CLI's `--dry-run`, on by default: forces every lane to dry run whatever the flags say. */
   forcedDryRun: boolean;
+  /**
+   * The date the run is for, when it is not today on the Pacific clock. Every cap is counted per
+   * real day, so a run for another date is a replay, and a replay is dry run.
+   */
+  replay: string | null;
+  /**
+   * The day card is on the company board (`--board`), where people see each draft and can comment
+   * HOLD. A local board file is seen by no one before execute, so nothing goes live with it.
+   */
+  boardLive: boolean;
   /** `GTM_ACTIVE` in the definitions: the agents have their budgets. */
   gtmActive: boolean;
   /** `company:halt` stopped br-ceo. Null when it could not be read: that also stops. */
@@ -47,8 +57,6 @@ export interface LaneInput {
   sender: EmailSender;
   /** The mailbox the inbox phase reads for reply opt-outs, if one is wired. */
   replyInbox: { account: string } | null;
-  /** RESUME email by the founder, today. */
-  emailResumed: boolean;
 }
 
 export function resolveLanes(input: LaneInput): LaneState {
@@ -56,6 +64,9 @@ export function resolveLanes(input: LaneInput): LaneState {
   const flags = store.flags;
   const base: string[] = [];
   if (input.forcedDryRun) base.push('the run is a dry run (--dry-run)');
+  if (input.replay) base.push(`the run is for ${input.replay}, not today: a replay is dry run`);
+  if (!input.boardLive)
+    base.push('the day card is a local file: nobody sees the drafts or can comment HOLD (--board)');
   if (flags.mode !== 'live') base.push(`mode is ${flags.mode}`);
   if (!input.gtmActive) base.push('GTM is not activated (GTM_ACTIVE is false; agents are at $0)');
   if (input.ceoHalted !== false)
@@ -125,8 +136,8 @@ export function resolveLanes(input: LaneInput): LaneState {
   if (!flags.rulings.email_jurisdiction_accepted)
     email.push('the founder has not accepted the jurisdiction rule');
   if (!flags.rulings.email_canary_done) email.push('the canary email has not been sent');
-  if (flags.email_paused && !input.emailResumed)
-    email.push(`the email lane is paused: ${flags.email_paused.reason}`);
+  // A RESUME email newer than the pause clears the flag (day.ts), so a set flag always stops.
+  if (flags.email_paused) email.push(`the email lane is paused: ${flags.email_paused.reason}`);
   const emailState: EmailState =
     flags.email_lane === 'off' ? 'off' : email.length === 0 ? 'live' : 'dry_run';
 

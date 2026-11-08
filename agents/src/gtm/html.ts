@@ -211,8 +211,17 @@ export function parseHtml(html: string, baseUrl: string): ParsedPage {
       if (!tag.closing && tag.name === 'a' && tag.attrs.href) {
         const href = tag.attrs.href.trim();
         if (/^mailto:/i.test(href)) {
-          const address = decodeURIComponent(href.slice(7).split('?')[0] ?? '').trim();
-          if (address) mailto.push(address);
+          // Each recipient as written; `extract.ts` keeps only values that are exactly one address.
+          let value = '';
+          try {
+            value = decodeURIComponent(href.slice(7).split('?')[0] ?? '');
+          } catch {
+            value = '';
+          }
+          for (const part of value.split(/[,;]/)) {
+            const address = part.trim();
+            if (address) mailto.push(address);
+          }
         } else {
           try {
             links.push(new URL(href, baseUrl).toString());

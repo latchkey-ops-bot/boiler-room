@@ -1,6 +1,6 @@
 import { CAPS, type CapName, type GtmAgentName, SESSION_BUDGETS } from './config.ts';
 import type { SpendCategory, StoreData } from './store.ts';
-import { monthOf } from './time.ts';
+import { monthOf, pacific } from './time.ts';
 
 /** A cap as the flags set it, never past its hard maximum and never below zero. */
 export function cap(store: StoreData, name: CapName): number {
@@ -50,10 +50,13 @@ export function canSpend(
   return { ok: true, reason: null };
 }
 
-/** Data runs have their own count and spend caps, inside the day cap. */
+/** Data runs have their own count and spend caps, inside the day cap. `date` is a Pacific date. */
 export function canRunData(store: StoreData, date: string, price: number): SpendCheck {
   const runs = store.actions.filter(
-    (row) => row.kind === 'data-run' && row.created_at.startsWith(date) && row.status !== 'skipped',
+    (row) =>
+      row.kind === 'data-run' &&
+      row.status !== 'skipped' &&
+      pacific(new Date(row.created_at)).date === date,
   ).length;
   if (runs + 1 > cap(store, 'data_runs_day')) return { ok: false, reason: 'data_runs_cap' };
   if (spentOn(store, date, 'data') + price > cap(store, 'data_spend_day_micro')) {

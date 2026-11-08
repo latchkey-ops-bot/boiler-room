@@ -74,7 +74,14 @@ export interface NaiveLike {
     };
   };
   data: {
-    searchTools(query: { query: string }): Promise<{ data: { id: string; name: string }[] }>;
+    searchTools(query: { query: string; limit?: number }): Promise<{
+      data: {
+        id: string;
+        name: string;
+        domains?: string[];
+        price?: { micro_usd?: number | null } | null;
+      }[];
+    }>;
     run(body: {
       tool_id: string;
       query?: Record<string, unknown>;
@@ -119,6 +126,40 @@ async function everyAgent(client: NaiveLike) {
   return out;
 }
 
+/**
+ * Finds one data tool's id: the exact catalogue name, in the expected domain, listed at no more than
+ * our price. Every query in `DATA_TOOLS` is tried and the results pooled, because the catalogue
+ * search ranks and one query can miss a tool another finds. Anything but exactly one match is
+ * unresolved, with the reason.
+ */
+export async function resolveDataTool(
+  client: Pick<NaiveLike, 'data'>,
+  key: DataToolKey,
+): Promise<{ id: string | null; reason: string }> {
+  const tool = DATA_TOOLS[key];
+  const named = new Map<string, { domains: string[]; price: number | null }>();
+  for (const query of tool.queries) {
+    const result = await client.data.searchTools({ query, limit: 20 }).catch(() => ({ data: [] }));
+    for (const item of result.data) {
+      if (item.name !== tool.name) continue;
+      named.set(item.id, {
+        domains: item.domains ?? [],
+        price: typeof item.price?.micro_usd === 'number' ? item.price.micro_usd : null,
+      });
+    }
+  }
+  const fits = [...named].filter(
+    ([, item]) =>
+      item.domains.includes(tool.domain) && item.price !== null && item.price <= tool.maxMicroUsd,
+  );
+  if (fits.length === 1) return { id: (fits[0] as [string, unknown])[0], reason: 'resolved' };
+  if (!named.size) return { id: null, reason: `no tool named ${tool.name} found` };
+  return {
+    id: null,
+    reason: `${named.size} tool(s) named ${tool.name}, ${fits.length} in ${tool.domain} at or under ${tool.maxMicroUsd} micro-USD`,
+  };
+}
+
 export class GtmNaive {
   readonly client: NaiveLike;
   /** The four GTM agents' ids, by id. Nothing else can be started. */
@@ -126,6 +167,8 @@ export class GtmNaive {
   /** br-ceo's id: the company board is addressed by it. */
   readonly boardRef: string;
   private readonly tools: ReadonlyMap<DataToolKey, string>;
+  /** Why each data tool that did not resolve did not, for the refusal and the report. */
+  readonly unresolved: ReadonlyMap<DataToolKey, string>;
   private readonly identity: string | null;
   private readonly sessions = new Set<string>();
   private readonly cards = new Set<string>();
@@ -136,6 +179,7 @@ export class GtmNaive {
     agents: ReadonlyMap<string, GtmAgentName>;
     boardRef: string;
     tools: ReadonlyMap<DataToolKey, string>;
+    unresolved?: ReadonlyMap<DataToolKey, string>;
     identity: string | null;
     knownPosts?: Iterable<string>;
   }) {
@@ -143,6 +187,7 @@ export class GtmNaive {
     this.agents = input.agents;
     this.boardRef = input.boardRef;
     this.tools = input.tools;
+    this.unresolved = input.unresolved ?? new Map();
     this.identity = input.identity;
     for (const post of input.knownPosts ?? []) this.posts.add(post);
   }
@@ -166,17 +211,18 @@ export class GtmNaive {
     if (ceo.length !== 1)
       throw new Error(`${ceo.length} agents are named ${CEO}; the executor needs exactly one.`);
     const tools = new Map<DataToolKey, string>();
-    for (const [key, name] of Object.entries(DATA_TOOLS) as [DataToolKey, string][]) {
-      const found = (await client.data.searchTools({ query: name })).data.filter(
-        (tool) => tool.name === name,
-      );
-      if (found.length === 1) tools.set(key, (found[0] as { id: string }).id);
+    const unresolved = new Map<DataToolKey, string>();
+    for (const key of Object.keys(DATA_TOOLS) as DataToolKey[]) {
+      const found = await resolveDataTool(client, key);
+      if (found.id) tools.set(key, found.id);
+      else unresolved.set(key, found.reason);
     }
     return new GtmNaive({
       client,
       agents,
       boardRef: (ceo[0] as { id: string }).id,
       tools,
+      unresolved,
       identity: options.identity,
       knownPosts: options.knownPosts,
     });
@@ -288,7 +334,10 @@ export class GtmNaive {
     input: { query?: Record<string, unknown>; body?: Record<string, unknown> },
   ) {
     const id = this.tools.get(tool);
-    if (!id) throw new GuardRefused(`refused: data tool ${DATA_TOOLS[tool]} is not resolved`);
+    if (!id)
+      throw new GuardRefused(
+        `refused: data tool ${DATA_TOOLS[tool].name} is not resolved (${this.unresolved.get(tool) ?? 'not looked up'})`,
+      );
     return this.client.data.run({ tool_id: id, ...input });
   }
 

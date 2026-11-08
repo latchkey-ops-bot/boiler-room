@@ -90,10 +90,11 @@ export function checkScout(
       );
     }
     let qualified = verdict.verdict === 'qualified';
-    let reason = qualified ? null : (verdict.reject_reason ?? 'other');
+    let reason: string | null = qualified ? null : (verdict.reject_reason ?? 'other');
     if (qualified && !candidate.lead.product_name) {
+      // Code's own reason: the site was read, but no name copy may use was on it.
       qualified = false;
-      reason = 'site_unreadable';
+      reason = 'no_product_name';
       corrections.push(`${candidate.candidate_id}: no verified product name, rejected`);
     }
     verdicts.set(candidate.candidate_id, {

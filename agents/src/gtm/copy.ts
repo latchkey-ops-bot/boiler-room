@@ -156,6 +156,25 @@ const escapeRegex = (term: string) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'
 const termIn = (text: string, term: string) =>
   new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegex(term)}(?![\\p{L}\\p{N}])`, 'iu').test(text);
 
+/**
+ * The claims screen for words that came from outside: superlatives and claims about a company. Every
+ * lane runs it: on model-written lines, on the product name wherever one is accepted, and on the X
+ * caption's quote. A verified quote may carry the startup's own superlative (`superlatives: false`),
+ * never a claim about funding, backers, customers or partners.
+ */
+export function claimProblems(
+  text: string,
+  { superlatives = true, companyClaims = true } = {},
+): string[] {
+  const problems: string[] = [];
+  if (superlatives)
+    for (const term of SUPERLATIVES) if (termIn(text, term)) problems.push(`superlative:${term}`);
+  if (companyClaims)
+    for (const term of COMPANY_CLAIMS)
+      if (termIn(text, term)) problems.push(`company_claim:${term}`);
+  return problems;
+}
+
 const LINK = /https?:\/\/|www\./i;
 const DOMAIN = /(?<![\p{L}\p{N}@])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,}(?![\p{L}\p{N}])/iu;
 
@@ -212,8 +231,10 @@ function lineProblems(text: string, context: LineContext): string[] {
       problems.push('unverified_quote');
     }
   }
-  for (const term of SUPERLATIVES) if (termIn(outside, term)) problems.push(`superlative:${term}`);
-  for (const term of COMPANY_CLAIMS) if (termIn(text, term)) problems.push(`company_claim:${term}`);
+  problems.push(
+    ...claimProblems(outside, { companyClaims: false }),
+    ...claimProblems(text, { superlatives: false }),
+  );
   for (const pattern of PRETENCE) if (pattern.test(text)) problems.push('pretence');
   const stray = strayCapitals(outside, context.productName);
   if (stray.length) problems.push(`capitalised:${stray.slice(0, 3).join(',')}`);
@@ -408,6 +429,9 @@ export function buildCaption(input: CaptionInput): CaptionResult {
   if (LINK.test(caption) || DOMAIN.test(outside)) problems.push('link_or_domain');
   if (/@|#/.test(caption)) problems.push('at_or_hash');
   if (/\d/.test(caption)) problems.push('digit');
+  // The same claims screen the email lines pass: the product name is outside any quote, so neither a
+  // superlative nor a company claim; the quote may keep a superlative but no company claim.
+  problems.push(...claimProblems(product), ...claimProblems(quote, { superlatives: false }));
   const variable = `${product} ${quote}`.trim();
   const since = input.history.filter(
     (row) => row.lane === 'x' && daysSince(`${row.date}T12:00:00Z`, input.now) < 30,

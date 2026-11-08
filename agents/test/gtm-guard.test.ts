@@ -14,10 +14,20 @@ function fakeNaive() {
     { id: 'agt_eng', name: 'br-engineer-1' },
   ];
   const tools = [
-    { id: 'tool_google', name: 'Search Google' },
-    { id: 'tool_pages', name: 'Search Web Pages' },
-    { id: 'tool_emails', name: 'Find Domain Emails' },
-    { id: 'tool_enrich', name: 'Enrich Person' },
+    { id: 'tool_google', name: 'Search Google', domains: ['search'], price: { micro_usd: 150 } },
+    {
+      id: 'tool_pages',
+      name: 'Search Web Pages',
+      domains: ['search'],
+      price: { micro_usd: 4_000 },
+    },
+    {
+      id: 'tool_emails',
+      name: 'Find Domain Emails',
+      domains: ['people'],
+      price: { micro_usd: 24_500 },
+    },
+    { id: 'tool_enrich', name: 'Enrich Person', domains: ['people'], price: { micro_usd: 1_000 } },
   ];
   const client = {
     agents: {

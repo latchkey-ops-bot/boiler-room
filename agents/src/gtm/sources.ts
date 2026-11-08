@@ -37,12 +37,28 @@ export interface SourceReport {
   note: string | null;
 }
 
-/** Runs one data tool if the caller's caps allow it; null when they do not. */
+/**
+ * One data run's outcome. A run that did not happen says why: `cap` (a data cap or the spend cap),
+ * `refused` (the guard has no id for the tool, or no data runs are wired), or `failed` (the run
+ * itself failed). Each reads differently in the report, so a missing tool never looks like a cap.
+ */
+export type DataRunResult =
+  | { ok: true; data: unknown; costMicroUsd: number }
+  | { ok: false; reason: 'cap' | 'refused' | 'failed'; detail: string };
+
+/** Runs one data tool if the caller's caps allow it. */
 export type GuardedDataRun = (
   tool: Parameters<DataRuns['run']>[0],
   input: Parameters<DataRuns['run']>[1],
   price: number,
-) => Promise<{ data: unknown; costMicroUsd: number } | null>;
+) => Promise<DataRunResult>;
+
+/** How a run that did not happen reads in a source's note. */
+export function dataRunNote(result: Extract<DataRunResult, { ok: false }>): string {
+  if (result.reason === 'cap') return `data-run cap reached (${result.detail})`;
+  if (result.reason === 'refused') return `data run refused: ${result.detail.slice(0, 160)}`;
+  return `data run failed: ${result.detail.slice(0, 160)}`;
+}
 
 const NOT_A_SITE = /\.(?:pdf|png|jpe?g|gif|mp4|zip)$|\/(?:blog|posts?|articles?|papers?|news)\//i;
 
@@ -159,8 +175,10 @@ export async function productHunt(
       { query: { q: `"${entry.name}" ${entry.tagline}`, num: 10 } },
       PRICES.search_google,
     );
-    if (!run) {
-      report.note = 'data-run cap reached';
+    if (!run.ok) {
+      report.note = dataRunNote(run);
+      // A cap or a missing tool stops every later entry the same way; one failed run does not.
+      if (run.reason === 'failed') continue;
       break;
     }
     report.data_runs += 1;
@@ -282,7 +300,11 @@ export async function xLaunches(
       { query: { q, tbs: 'qdr:d3', num: 10 } },
       PRICES.search_google,
     );
-    if (!run) break;
+    if (!run.ok) {
+      report.note = dataRunNote(run);
+      if (run.reason === 'failed') continue;
+      break;
+    }
     report.data_runs += 1;
     report.cost_micro_usd += run.costMicroUsd;
     for (const item of (run.data as { organic_results?: { link?: string }[] })?.organic_results ??
@@ -303,7 +325,10 @@ export async function xLaunches(
     },
     PRICES.search_web_pages,
   );
-  if (pages) {
+  if (!pages.ok) {
+    const note = dataRunNote(pages);
+    report.note = report.note ? `${report.note}; ${note}` : note;
+  } else {
     report.data_runs += 1;
     report.cost_micro_usd += pages.costMicroUsd;
     for (const item of (pages.data as { results?: { url?: string }[] })?.results ?? []) {

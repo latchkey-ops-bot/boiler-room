@@ -1,4 +1,5 @@
 import type { CapName, PhaseName } from './config.ts';
+import type { RemovalRequest } from './removal.ts';
 
 /**
  * The GTM store: suppression, contact history, leads, the action ledger, spend, phase state and
@@ -178,6 +179,20 @@ export interface CopyRow {
   lead_id: string;
 }
 
+/**
+ * A removal or opt-out that has not finished taking down everything of ours. It is queued before
+ * the app cursor moves on or the board comment is marked received, and retried on every run until
+ * every post is deleted and every film withdrawn.
+ */
+export interface PendingRemoval {
+  key: string;
+  request: RemovalRequest;
+  received_at: string;
+  attempts: number;
+  /** What is still up, or why it could not come down, at the last attempt. */
+  last_error: string | null;
+}
+
 export interface OptOutTokenRow {
   hash: string;
   lead_id: string;
@@ -248,6 +263,7 @@ export interface StoreData {
   flag_audit: FlagAuditRow[];
   /** Removal requests for domains GTM never touched: counted, never put on the board. */
   unmatched_removals: Record<string, number>;
+  pending_removals: PendingRemoval[];
 }
 
 export const DEFAULT_FLAGS: Flags = {
@@ -293,6 +309,7 @@ export function emptyStore(): StoreData {
     flags: structuredClone(DEFAULT_FLAGS),
     flag_audit: [],
     unmatched_removals: {},
+    pending_removals: [],
   };
 }
 

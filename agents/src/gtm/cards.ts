@@ -60,6 +60,8 @@ const FOUNDER_STEPS: Record<FounderNeed, string> = {
   lockdown:
     'company:verify --lockdown fails: an agent that reads untrusted sites is offered board tools. Films stay in dry run until it passes.',
   reply: 'A reply needs a person. The draft is in the review file.',
+  removal:
+    'A removal request could not take everything down yet: an X post or a film of ours may still be up. The executor retries it on every run, and needs live ports to delete or withdraw. If this stays open, delete the post or withdraw the film by hand.',
 };
 
 export const founderTitle = (need: FounderNeed) => `FOUNDER: gtm ${need}`;
@@ -69,7 +71,8 @@ export const founderBody = (need: FounderNeed) =>
 
 /**
  * What a stored GTM agent differs from its definition in: model, prompt, the tools it may use, its
- * board tools, and its budget. Any difference means someone changed it outside this repo.
+ * board tools, its budget, and its MCP servers. Any difference means someone changed it outside
+ * this repo, or a sync left something behind.
  */
 export function definitionDrift(
   stored: Record<string, unknown>,
@@ -95,5 +98,12 @@ export function definitionDrift(
   ) {
     drift.push('budget');
   }
+  // An MCP server the definition does not name is a tool the agent may reach, offered or not.
+  const servers = (list: unknown) =>
+    ((Array.isArray(list) ? list : []) as { name?: string; url?: string }[])
+      .map((server) => `${server.name ?? ''} ${server.url ?? ''}`)
+      .sort()
+      .join(',');
+  if (servers(stored.mcp_servers) !== servers(definition.mcp_servers)) drift.push('mcp_servers');
   return drift;
 }

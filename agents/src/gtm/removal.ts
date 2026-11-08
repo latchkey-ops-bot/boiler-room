@@ -1,7 +1,7 @@
 import { normaliseWhitespace } from '../researcher/text.ts';
 import { FOOTER_PHRASES } from './copy.ts';
 import { opaqueId, registrableDomain } from './domain.ts';
-import type { LeadRow, StoreData, SuppressionReason } from './store.ts';
+import type { ActionRow, LeadRow, StoreData, SuppressionReason } from './store.ts';
 import { suppress } from './suppression.ts';
 
 /**
@@ -99,6 +99,8 @@ export interface RemovalRequest {
   at: string;
   /** The board comment that gave a `REMOVE` command. */
   comment_id?: string;
+  /** Names the request in `pending_removals`: `app:<request id>` or `removal:<comment id>`. */
+  key?: string;
 }
 
 /** What one request asks code to take down. Code then deletes and withdraws through the ports. */
@@ -146,6 +148,12 @@ export function planRemoval(store: StoreData, request: RemovalRequest): RemovalP
   }
 
   const leadIds = new Set(leads.map((lead) => lead.id));
+  // Only what is still up: a post with an `x-delete` row or a film with a `film-withdraw` row is down.
+  const down = (kind: 'x-post' | 'film', row: ActionRow) =>
+    store.actions.some(
+      (item) =>
+        item.key === `${kind === 'x-post' ? 'x-delete' : 'film-withdraw'}:${row.provider_id}`,
+    );
   const live = (kind: 'x-post' | 'film') =>
     store.actions
       .filter(
@@ -153,6 +161,7 @@ export function planRemoval(store: StoreData, request: RemovalRequest): RemovalP
           row.kind === kind &&
           row.status === 'sent' &&
           row.provider_id &&
+          !down(kind, row) &&
           ((row.lead_id && leadIds.has(row.lead_id)) ||
             (request.share_id && row.detail.includes(`share=${request.share_id}`))),
       )
@@ -170,6 +179,17 @@ export function planRemoval(store: StoreData, request: RemovalRequest): RemovalP
     suppressed,
     unmatched,
   };
+}
+
+/**
+ * The X posts this executor made, by provider id: every `x-post` row that went out. A new process
+ * hands them to the guard, which deletes only posts it knows, so a removal can take down a post an
+ * earlier run made.
+ */
+export function postsWeMade(store: StoreData): string[] {
+  return store.actions
+    .filter((row) => row.kind === 'x-post' && row.status === 'sent' && row.provider_id)
+    .map((row) => row.provider_id as string);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -235,7 +255,11 @@ export function commandAllowed(
 export interface Holds {
   day: boolean;
   leads: Set<string>;
-  resumeEmail: boolean;
+  /**
+   * When the founder last commented `RESUME email`, or null. It lifts only a pause that began
+   * before it: a complaint after a RESUME pauses the lane again.
+   */
+  resumeEmailAt: string | null;
   /** `REMOVE <lead id>` commands, with the comment that gave each, so each runs once. */
   removals: { lead_id: string; comment_id: string }[];
   posted: string[];
@@ -250,7 +274,7 @@ export function readCommands(
   const holds: Holds = {
     day: false,
     leads: new Set(),
-    resumeEmail: false,
+    resumeEmailAt: null,
     removals: [],
     posted: [],
   };
@@ -265,7 +289,7 @@ export function readCommands(
     } else if (command.kind === 'unhold') {
       if (command.lead_id) holds.leads.delete(command.lead_id);
       else holds.day = false;
-    } else if (command.kind === 'resume_email') holds.resumeEmail = true;
+    } else if (command.kind === 'resume_email') holds.resumeEmailAt = comment.created_at;
     else if (command.kind === 'remove')
       holds.removals.push({ lead_id: command.lead_id, comment_id: comment.id });
     else if (command.kind === 'posted') holds.posted.push(command.url);

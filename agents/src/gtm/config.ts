@@ -55,11 +55,32 @@ export const PRICES = {
   find_domain_emails: 24_500,
 } as const;
 
-/** Data tools the executor may run, by catalogue name. Their ids are resolved at run time. */
+/**
+ * Data tools the executor may run. Their ids are resolved at run time by exact catalogue name, the
+ * catalogue domain and a listed price no higher than ours: the catalogue holds two tools named
+ * `Search Google` (`search` at $0.00015 a call, `seo` at $0.008), so a name alone resolves nothing.
+ * `queries` are the catalogue searches tried, best first; the search ranks, so a name can fall out
+ * of one search's results and still be found by another.
+ */
 export const DATA_TOOLS = {
-  google: 'Search Google',
-  webPages: 'Search Web Pages',
-  domainEmails: 'Find Domain Emails',
+  google: {
+    name: 'Search Google',
+    domain: 'search',
+    maxMicroUsd: PRICES.search_google,
+    queries: ['Search Google', 'google search results'],
+  },
+  webPages: {
+    name: 'Search Web Pages',
+    domain: 'search',
+    maxMicroUsd: PRICES.search_web_pages,
+    queries: ['Search Web Pages', 'web pages by site and publish date'],
+  },
+  domainEmails: {
+    name: 'Find Domain Emails',
+    domain: 'people',
+    maxMicroUsd: PRICES.find_domain_emails,
+    queries: ['Find Domain Emails', 'email addresses for a domain'],
+  },
 } as const;
 export type DataToolKey = keyof typeof DATA_TOOLS;
 
@@ -135,6 +156,7 @@ export const FOUNDER_NEEDS = [
   'ledger-mismatch',
   'lockdown',
   'reply',
+  'removal',
 ] as const;
 export type FounderNeed = (typeof FOUNDER_NEEDS)[number];
 
