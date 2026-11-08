@@ -59,7 +59,7 @@ export function planBatches(
           assetIds: ids.slice(start, start + VIEW_LIMIT),
         });
       }
-    } else if (ids.length > proposal.slot.min) {
+    } else if (!proposal.locked && ids.length > proposal.slot.min) {
       batches.push({
         kind: 'scene',
         id: proposal.sceneId,

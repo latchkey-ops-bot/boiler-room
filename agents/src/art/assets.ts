@@ -385,12 +385,20 @@ export interface Proposal {
   assetIds: string[];
   tier: Tier | 4 | 5 | undefined;
   note: string | undefined;
+  /**
+   * The Director's pages are kept and not offered for review: the scene's props hold capture boxes
+   * (`layers`, `focus`, `pages`) in those pages' pixels, which another page would not match.
+   */
+  locked: boolean;
 }
+
+/** Props keys that hold capture data in a page's own pixels. */
+const CAPTURE_PROPS = ['layers', 'focus', 'pages'] as const;
 
 /**
  * The code's default assignment for every scene with a captured-asset slot. `site-hero` and
- * `site-scroll` keep the Director's eligible choice, because their props hold capture boxes in that
- * page's pixels. Optional slots are filled only with a relevant candidate; otherwise the scene is
+ * `site-scroll` keep the Director's eligible choice, which is locked when their props hold capture
+ * boxes in that page's pixels. Optional slots are filled only with a relevant candidate; otherwise the scene is
  * tier 4 (greeked) and takes none.
  */
 export function proposeAssets(campaign: Campaign, infos: readonly AssetInfo[]): Proposal[] {
@@ -411,9 +419,12 @@ export function proposeAssets(campaign: Campaign, infos: readonly AssetInfo[]): 
       chosen.length === slot.min &&
       chosen.every((id) => eligible.has(id)) &&
       new Set(chosen).size === chosen.length;
+    const boxes = CAPTURE_PROPS.some((key) => Object.hasOwn(scene.props, key));
     if (keepDirector) {
       assetIds = chosen;
-      note = "Kept the Director's pages: the props hold capture boxes in their pixels.";
+      note = boxes
+        ? "Kept the Director's pages: the props hold capture boxes in their pixels."
+        : "Kept the Director's pages.";
     } else if (scene.type === 'site-scroll') {
       assetIds = pickPages(candidates, infos);
     } else {
@@ -442,6 +453,7 @@ export function proposeAssets(campaign: Campaign, infos: readonly AssetInfo[]): 
       assetIds,
       tier: tiers.length ? (Math.max(...tiers) as Tier) : slot.min === 0 ? 4 : undefined,
       note,
+      locked: keepDirector && boxes,
     });
   }
   return proposals;

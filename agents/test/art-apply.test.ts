@@ -84,6 +84,20 @@ describe('planBatches', () => {
     );
   });
 
+  it("does not review a site-hero whose props hold capture boxes for the Director's page", () => {
+    const campaign = artCampaign();
+    const hero = campaign.scenes.find((scene) => scene.id === 'hero');
+    if (!hero) throw new Error('fixture changed');
+    hero.props = { focus: { x: 0, y: 0, w: 960, h: 540 } };
+    const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
+    const proposals = proposeAssets(campaign, infos);
+    expect(proposals.find((proposal) => proposal.sceneId === 'hero')).toMatchObject({
+      assetIds: ['home-screen'],
+      locked: true,
+    });
+    expect(planBatches(proposals, []).map((batch) => batch.id)).not.toContain('hero');
+  });
+
   it('skips a scene with nothing to choose', () => {
     const { proposals } = setup();
     const hero = proposals.find((proposal) => proposal.sceneId === 'hero');
