@@ -204,6 +204,23 @@ Verified on 2026-11-07 (UTC 2026-11-08), after binding:
   tools allowed, offered both; `board_write` named off, offered `board_read` only; neither named,
   offered both.
 
+Verified on 2026-11-08 UTC, after the member release rule, the sweep hold and the kill switch:
+
+- `company:sync` moved `br-ceo` to v4, the four builders and the three GTM agents to v3, and the
+  sweep's input (still paused); the binding was `unchanged`. The next sync changed nothing. It
+  warned that `main` on both repos merges with 0 approvals, and that the company board offers
+  `board_read` and `board_write` to `br-art-director` (v6), `br-director` (v6), `br-quality-check`
+  (v1) and `br-researcher` (v1), none of which this branch syncs.
+- `company:verify --ceo`: the lockdown check failed on those four agents and found every served
+  control-plane tool (368) named off on the stored `br-ceo`; the `br-ceo` v4 session
+  `ses_hf2rh8bpvmdc5grnj2tttfzmsx` ($0.015) was offered `board_read`, `board_write`, `read_skill`,
+  `session_spend` and `submit_output`, and called only `submit_output`.
+- `company:halt --dry-run` found the sweep already paused and no live `br-ceo` session, and changed
+  nothing. The halt itself was not run on the live company. `company:status` listed no session
+  waiting for a person and no duplicate title.
+- Not run live: a member given a card with an unknown prefix, or one that asks for `main`. Both
+  rules are prompt text, checked by tests only.
+
 ### Releases are the founder's
 
 The company's work stops at `dev` and staging. When a slug is delivered, the CEO creates
