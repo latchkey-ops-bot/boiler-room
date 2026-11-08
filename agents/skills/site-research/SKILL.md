@@ -149,8 +149,14 @@ was measured where. Never add a note that the site lacks something (a name, a he
 video file) unless the capture summary says so; the summary lists every video source it saw. Fix the brand name if the guess is wrong:
 use the product's name as the site writes it, with the site's own capitalisation. When a note says
 the name came from the domain, keep it as the domain writes it unless the page text writes it
-otherwise, and say so in `brand_details.notes`. If you change a colour, it must still be a colour
-the site uses, the foreground must keep 4.5:1 contrast on the background and the primary 3:1.
+otherwise, and say so in `brand_details.notes`. `brand_details.measured` lists every colour the
+capture measured, each with the element and the point it was read at: copy it unchanged. If you
+change a colour, it must be one `brand_details.measured` lists (the background one with `seen_as`
+`surface`), the foreground must keep 4.5:1 contrast on the background and the primary 3:1. Never
+mix, tint or invent a colour: the gate refuses any colour that was not measured. Keep
+`evidence.logo` as the template has it: `found_in` says where the logo was found and `aspect` its
+shape. When it is only an icon, the Open Graph image or a generated wordmark, the template asks for
+the real logo in `needs_upload`; keep that request.
 
 ## Assets and evidence
 

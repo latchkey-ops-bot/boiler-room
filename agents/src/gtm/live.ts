@@ -6,6 +6,7 @@ import type {
   Board,
   CardStatus,
   DataRuns,
+  FilmDecisions,
   FilmFile,
   FilmOrder,
   FilmOrderStatus,
@@ -275,6 +276,16 @@ export class AppFilmOrder implements FilmOrder {
       'GET',
       `/api/gtm/v1/films/${encodeURIComponent(orderId)}/file`,
     )) as FilmFile;
+  }
+  /** Who decided what on the film, from the run's `decisions.json`, as the app keeps it. */
+  async decisions(orderId: string): Promise<FilmDecisions> {
+    return (await call(
+      this.fetcher,
+      this.base,
+      this.token,
+      'GET',
+      `/api/gtm/v1/films/${encodeURIComponent(orderId)}/decisions`,
+    )) as FilmDecisions;
   }
   async withdraw(orderId: string, reason: string) {
     await call(

@@ -6,6 +6,7 @@ import { probeImage } from '../brand/probe.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
 import { ImageUnfit, type ImageView } from '../scenes/definition.ts';
 import { definitionOf } from '../scenes/registry.ts';
+import { copyFitIssues } from './copy-fit.ts';
 import { type CutSelection, resolveCut } from './cut.ts';
 import { type ImageSize, screenImageIds } from './media.ts';
 import { type FilmPlan, planFilm } from './plan.ts';
@@ -45,9 +46,11 @@ export interface FilmRequest extends CutSelection {
 export interface MediaProbe {
   image: (url: string) => ReturnType<typeof probeImage>;
   font: (url: string) => Promise<FontProbe>;
+  /** The copy the templates would refuse to set. It needs the fonts loaded, so a browser. */
+  copy?: (campaign: Campaign, format: Format) => Promise<FilmIssue[]>;
 }
 
-const browserProbe: MediaProbe = { image: probeImage, font: probeFont };
+const browserProbe: MediaProbe = { image: probeImage, font: probeFont, copy: copyFitIssues };
 
 /**
  * Loads both brand fonts. Each render tab loads them again, but a font that fails there fails only
@@ -84,9 +87,10 @@ const MAX_ASPECT = 4;
  * Each scene image against how it is shown in this format: an image of a shape a browser frame
  * shows as a strip, one enlarged past what stays sharp, or one the template cannot show here, such
  * as a page too short to scroll, is refused with what to supply instead. Every image is checked,
- * so one refusal names every capture to replace.
+ * so one refusal names every capture to replace. It needs only the images' sizes, so an agent can
+ * run it on a campaign from the sizes its research recorded, before anything is loaded.
  */
-function checkImageFit(
+export function checkImageFit(
   campaign: Campaign,
   format: Format,
   imageSizes: Record<string, ImageSize>,
@@ -236,6 +240,11 @@ export async function prepareFilm(
   const misfits = checkImageFit(campaign, format, imageSizes);
   if (misfits.length > 0) throw new FilmRejected('sizing the scene images', misfits);
 
+  // Measured here rather than while frames are drawn, where one scene's refusal stops its chunk
+  // on a computer that is already billing, and names only that scene.
+  const unfit = (await probe.copy?.(campaign, format)) ?? [];
+  if (unfit.length > 0) throw new FilmRejected('laying out the copy', unfit);
+
   const logoAsset = campaign.assets[campaign.brand.logoAssetId];
   const logoSrc = logoAsset?.src ?? '';
   const seenLogo = logoAsset ? await probe.image(assetUrl(logoSrc)) : { loaded: false };
@@ -247,4 +256,34 @@ export async function prepareFilm(
       : resolved;
 
   return planFilm({ campaign, format, logo, imageSizes });
+}
+
+/**
+ * The copy check of `prepareFilm` on its own, for a script nobody has approved yet: the campaign
+ * and the cut are validated as `prepareFilm` validates them, the brand fonts are loaded, and the
+ * copy every template would refuse to set is measured in them, in one refusal that names every
+ * scene. Pictures are neither loaded nor sized, so a script whose pictures are not chosen yet can
+ * be measured. It needs a browser: the `CopyFit` composition runs it in `calculateMetadata`.
+ */
+export async function prepareCopy(
+  { campaign: input, format, hookId, ctaId }: FilmRequest,
+  probe: MediaProbe = browserProbe,
+): Promise<void> {
+  const written = await validateForRender(input);
+  if (!written.ok) throw new FilmRejected('validateCampaign', written.issues);
+
+  const selection = { hookId, ctaId };
+  const filmIssues = validateFilm(written.campaign, format, selection);
+  if (filmIssues.some(({ severity }) => severity === 'error')) {
+    throw new FilmRejected('validateFilm', filmIssues);
+  }
+
+  const cut = await validateForRender(resolveCut(written.campaign, selection));
+  if (!cut.ok) throw new FilmRejected('validateCampaign on the selected cut', cut.issues);
+
+  const fontIssues = await checkFonts(cut.campaign, probe);
+  if (fontIssues.length > 0) throw new FilmRejected('loading the brand fonts', fontIssues);
+
+  const unfit = (await probe.copy?.(cut.campaign, format)) ?? [];
+  if (unfit.length > 0) throw new FilmRejected('laying out the copy', unfit);
 }

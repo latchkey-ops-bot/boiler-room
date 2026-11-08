@@ -9,7 +9,7 @@
  * Remotion's distributed rendering requires, because they all come from the one job builder.
  */
 import { readFileSync, statSync } from 'node:fs';
-import { type Codec, ensureBrowser, renderMedia } from '@remotion/renderer';
+import type { Codec } from '@remotion/renderer';
 import type { VideoConfig } from 'remotion';
 
 export interface WorkerJob {
@@ -30,12 +30,19 @@ export interface WorkerJob {
 const job = JSON.parse(readFileSync(process.argv[2] as string, 'utf8')) as WorkerJob;
 const say = (message: Record<string, unknown>) => console.log(JSON.stringify(message));
 
-await ensureBrowser();
-const started = performance.now();
-let lastReport = 0;
-// A heartbeat while the browser starts and the first frames render, before progress is reported.
+// A heartbeat from the first moment, through loading the renderer, the browser and the first
+// frames, before progress is reported. On a fresh fork of the base snapshot that took about 45 s
+// with nothing printed, and those streams ended with exit code -1 even when the chunk was done,
+// so the renderer is imported only once the heartbeat runs and no stream is quiet that long.
 const heartbeat = setInterval(() => say({ type: 'alive' }), 5000);
+say({ type: 'alive' });
+let started = performance.now();
+let lastReport = 0;
 try {
+  const { ensureBrowser, renderMedia } = await import('@remotion/renderer');
+  await ensureBrowser();
+  // `seconds` stays the render's own time, from once the browser is there.
+  started = performance.now();
   await renderMedia({
     serveUrl: job.serveUrl,
     composition: job.composition,

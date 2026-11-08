@@ -1,12 +1,14 @@
-import { validateResearchParts } from '@boiler-room/schema';
+import { readableOn, validateResearchParts } from '@boiler-room/schema';
 import type { z } from 'zod';
 import { fileIdOf, type ResearchOutput, researchOutputSchema } from './output.ts';
 import { normaliseWhitespace } from './text.ts';
 import {
   type Failure,
+  measuredValue,
   PageIndex,
   type PagesBundle,
   priceClaims,
+  unmeasuredColors,
   verifyResearch,
   yearlyBillingLabel,
 } from './verify.ts';
@@ -27,6 +29,8 @@ export interface GateFailure {
   claimTextId?: string;
   /** The brief fact that says more than its quotes, which the gate settles. */
   briefPath?: string;
+  /** A colour that is not measured, which the gate sets back to the capture's measured value. */
+  colorPath?: string;
 }
 
 export const PLACEHOLDER_MARK = 'PUBLISH:';
@@ -275,8 +279,40 @@ export function prunable(failure: GateFailure): boolean {
     failure.nonClaimIndex !== undefined ||
     failure.pageIndex !== undefined ||
     failure.claimTextId !== undefined ||
-    failure.briefPath !== undefined
+    failure.briefPath !== undefined ||
+    failure.colorPath !== undefined
   );
+}
+
+/**
+ * The result with its colours set back to what the capture measured: `brand_details.measured` as
+ * the capture wrote it, each brand colour that is not a measured colour set to the capture's own
+ * choice (a foreground with none is black or white, whichever reads better on the background),
+ * and accents that were not measured dropped. A colour made up downstream never passes.
+ */
+export function withMeasuredColors(output: ResearchOutput, bundle: PagesBundle): ResearchOutput {
+  const measured = bundle.measured_colors;
+  if (!measured) return output;
+  const colors = { ...output.brand.colors };
+  const wrong = unmeasuredColors(colors, measured, output.brand_details.accents);
+  const tokens = new Set(wrong.map((item) => item.token));
+  for (const item of wrong) {
+    if (item.token === 'accents') continue;
+    const value = measuredValue(item.path, measured);
+    const key = item.token as 'background' | 'foreground' | 'primary' | 'accent' | 'muted';
+    if (value) colors[key] = value;
+    else if (key === 'accent' || key === 'muted') delete colors[key];
+  }
+  if (tokens.has('foreground') && !measuredValue('brand.colors.foreground', measured))
+    colors.foreground = readableOn(colors.background);
+  const accents = output.brand_details.accents.filter(
+    (_, index) => !wrong.some((item) => item.path === `brand_details.accents[${index}]`),
+  );
+  return {
+    ...output,
+    brand: { ...output.brand, colors },
+    brand_details: { ...output.brand_details, accents, measured },
+  };
 }
 
 /** The indexes of the items of one brief list that failed, such as `brief.features[2]`. */
@@ -365,8 +401,9 @@ export function settleBrief(
  * The result with every failure the gate can settle itself settled: failing claims dropped with
  * every reference to them, a claim's text that says more than its quote set to the quote, brief
  * facts that say more than their quotes settled in the quotes' words (`settleBrief`), failing
- * non-claims dropped, pages that were not captured dropped from the brief, and each listed page's
- * title set to the one the capture stored. Used when repair
+ * non-claims dropped, pages that were not captured dropped from the brief, each listed page's
+ * title set to the one the capture stored, and colours that were not measured set back to the
+ * capture's (`withMeasuredColors`). Used when repair
  * rounds run out, so a wrong note never fails a result whose claims are verified, and an
  * unverified claim never reaches the output.
  */
@@ -423,7 +460,10 @@ export function withoutFailures(
       pages: trimmed.brief.pages.filter((_, index) => !uncaptured.has(index)),
     },
   };
-  return withStoredTitles(settled, bundle);
+  const coloured = failures.some((failure) => failure.colorPath !== undefined)
+    ? withMeasuredColors(settled, bundle)
+    : settled;
+  return withStoredTitles(coloured, bundle);
 }
 
 /**

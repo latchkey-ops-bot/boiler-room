@@ -37,9 +37,15 @@ export class Aborted extends Error {
 export interface CommandResult {
   stdout: string;
   stderr: string;
-  /** -1 when the stream ended without an exit frame, so the command's status is not known. */
+  /** -1 when the command's status is not known: no exit frame, or no real exit code in it. */
   exitCode: number;
-  /** False when the stream ended without an exit frame. */
+  /**
+   * False when the command's status is not known. Naive ends some streams without an exit frame,
+   * and ends others with an exit frame whose `exit_code` is -1 or null. A process exits with 0 to
+   * 255, so neither is how the command ended: on 8 November renders that had printed `done` and
+   * renders that had thrown both ended with -1. Each of them had also been quiet for about 45 s
+   * before its first frame; whether that is the cause is not known.
+   */
   exited: boolean;
   timedOut: boolean;
   durationMs: number;
@@ -102,6 +108,12 @@ export async function runCommand(
         exit = frame.exit;
       }
     }
+  } catch (error) {
+    // What the command printed before its stream broke can say why it failed.
+    if (error instanceof Error && !(error instanceof Aborted)) {
+      Object.assign(error, { output: { stdout, stderr } });
+    }
+    throw error;
   } finally {
     if (signal?.aborted) void frames.return(undefined).catch(() => undefined);
   }
@@ -110,12 +122,20 @@ export async function runCommand(
     stdout,
     stderr,
     exitCode: exit?.exit_code ?? -1,
-    exited: exit !== undefined,
+    exited: typeof exit?.exit_code === 'number' && exit.exit_code >= 0,
     timedOut: exit?.timed_out ?? false,
     durationMs: performance.now() - started,
   };
   if (check && (result.exitCode !== 0 || result.timedOut)) throw failure(computerId, result);
   return result;
+}
+
+/** What a command printed before its stream broke, as `runCommand` attaches it to the error. */
+export function outputOf(error: unknown): { stdout: string; stderr: string } | undefined {
+  const output = (error as { output?: { stdout?: unknown; stderr?: unknown } } | null)?.output;
+  return typeof output?.stdout === 'string' && typeof output.stderr === 'string'
+    ? { stdout: output.stdout, stderr: output.stderr }
+    : undefined;
 }
 
 /** The error for a command that did not exit 0, with the tail of what it printed. */

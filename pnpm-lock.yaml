@@ -14,6 +14,15 @@ importers:
 
   agents:
     dependencies:
+      '@boiler-room/film-runner':
+        specifier: workspace:*
+        version: link:../services/film-runner
+      '@boiler-room/motion':
+        specifier: workspace:*
+        version: link:../packages/motion
+      '@boiler-room/render':
+        specifier: workspace:*
+        version: link:../services/render
       '@boiler-room/schema':
         specifier: workspace:*
         version: link:../packages/schema
@@ -26,6 +35,9 @@ importers:
       tldts:
         specifier: 6.1.86
         version: 6.1.86
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
       zod:
         specifier: 4.6.7
         version: 4.6.7

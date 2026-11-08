@@ -44,7 +44,8 @@ export const researcher: AgentDefinition = {
         'How the Researcher captures a product website and writes a verified research result.',
     },
   ],
-  budget: { cap_micro_usd: 10_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
+  // Raised on Naive on 8 November to $15 a day and $3 a task; agents:sync keeps them.
+  budget: { cap_micro_usd: 15_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
   output_schema: researchOutputJsonSchema,
   structured_output_required: true,
   handoffs: false,

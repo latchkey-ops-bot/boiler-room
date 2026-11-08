@@ -6,9 +6,9 @@ import { BrandProvider } from '../brand/brand-context.tsx';
 import { loadBrandFonts } from '../brand/fonts.ts';
 import { resolveTheme } from '../brand/theme.ts';
 import { StageProvider } from '../components/scene-runtime.tsx';
-import { stageFor } from '../layout/stage.ts';
+import { FORMAT_SIZES, stageFor } from '../layout/stage.ts';
 import type { FilmPlan } from './plan.ts';
-import { prepareFilm } from './prepare.ts';
+import { prepareCopy, prepareFilm } from './prepare.ts';
 import { Stage } from './stage.tsx';
 
 export const campaignFilmSchema = z.object({
@@ -39,6 +39,24 @@ export const calculateCampaignFilm: CalculateMetadataFunction<CampaignFilmProps>
     props: { ...props, plan },
   };
 };
+
+export const copyFitSchema = campaignFilmSchema.omit({ plan: true });
+export type CopyFitProps = z.infer<typeof copyFitSchema>;
+
+/**
+ * Measures a script's copy in its brand fonts, and nothing else: `prepareCopy` throws the same
+ * `FilmRejected` the film would, for every scene whose copy its template would refuse to set. The
+ * crew selects it before a script is shown to anyone, so copy that does not fit is sent back to
+ * the Director while it may still change it. It draws no frame.
+ */
+export const calculateCopyFit: CalculateMetadataFunction<CopyFitProps> = async ({ props }) => {
+  const { campaign, format, hookId, ctaId } = props;
+  await prepareCopy({ campaign, format, hookId, ctaId });
+  return { durationInFrames: 1, fps: 30, ...FORMAT_SIZES[format] };
+};
+
+/** `CopyFit` draws nothing: it exists for its `calculateMetadata`. */
+export const CopyFit = () => null;
 
 function useBrandFonts(campaign: FilmPlan['campaign']): boolean {
   const { delayRender, continueRender, cancelRender } = useDelayRender();

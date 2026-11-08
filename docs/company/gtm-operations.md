@@ -327,22 +327,29 @@ every live lane.
 ## 8. Ordering films: the GTM account and `FilmOrder`
 
 GTM orders films the way a customer does: an account in the Boiler Room app asks for a film of a
-URL, the pipeline makes it, Quality Check must pass it, and the account gets a page and a file. There
-is no URL-to-film command yet, so GTM is written against this interface (`agents/src/gtm/ports.ts`),
-with `DryRunFilmOrder` and an `AppFilmOrder` against the routes below.
+URL, the pipeline makes it, Quality Check must pass it, and the account gets a page and a file. The
+URL-to-film command is `pnpm film`, and the interface is shared by GTM, the web app and that command
+in `agents/src/film/order.ts` (`@boiler-room/agents/film-order`, with no `node:` import);
+`agents/src/gtm/ports.ts` re-exports it. GTM uses `DryRunFilmOrder` and an `AppFilmOrder` against
+the routes below. `LocalFilmOrder` runs `pnpm film` on this machine; it has no page to share, so
+GTM never treats it as live.
 
 ```ts
 export interface FilmOrder {
-  readonly kind: 'dry-run' | 'app';
+  readonly kind: 'dry-run' | 'app' | 'local';
   order(input: {
     url: string;
     idempotencyKey: string;
     budgetMicroUsd: number;
     leadRef: string;
+    sample?: boolean; // default true: an outreach sample, Short
+    length?: 'short' | 'standard';
+    format?: '16:9' | '9:16' | '1:1';
   }): Promise<{ orderId: string }>;
   status(orderId: string): Promise<FilmOrderStatus>;
   share(orderId: string): Promise<{ pageUrl: string; shareId: string }>;
   file(orderId: string): Promise<FilmFile>;
+  decisions(orderId: string): Promise<FilmDecisions>; // who decided what, and why
   withdraw(orderId: string, reason: 'removal' | 'opt_out' | 'failed' | 'manual'): Promise<void>;
 }
 export interface FilmOrderStatus {
@@ -381,6 +388,7 @@ the film lane is live, so dry-run days cost nothing in films.
 | `POST /api/gtm/v1/films/{id}/share`                                           | Publishes `/f/<share_id>`: unlisted, `noindex`, the film with a download button, the label "Made by Boiler Room from <host>'s public website. <host> did not ask for it and is not affiliated with Boiler Room.", a link to the startup's site, "Make one for your launch", "Remove this film" linking to `/remove?f=<share_id>`. Answers `{page_url, share_id}`. |
 | `POST /f/<share_id>/consent`                                                  | A "Yes, you may post this film" button on the film page. Records consent only when the `POST` carries the opt-out token of the email we sent that startup. The only way consent is recorded (section 11).                                                                                                                                                         |
 | `GET /api/gtm/v1/films/{id}/file`                                             | The 16:9 MP4 as `FilmFile`, with a signed R2 link valid 10 minutes                                                                                                                                                                                                                                                                                                |
+| `GET /api/gtm/v1/films/{id}/decisions`                                        | The film's `decisions.json` as `FilmDecisions`: each decision's agent, kind, stage, status, round, message and why, in the web app's words                                                                                                                                                                                                                        |
 | `POST /api/gtm/v1/films/{id}/withdraw` `{reason}`                             | Page answers 410 from then on, R2 files deleted, a tombstone kept. **A withdrawn film stops the pipeline (cancels its sessions) and does not count as in progress** against `MAX_FILMS_IN_PROGRESS`.                                                                                                                                                              |
 | `POST /api/gtm/v1/optout-tokens` `{token_hash, ref}`                          | Registers a token before an email goes out                                                                                                                                                                                                                                                                                                                        |
 | `GET`/`POST /u/<token>`                                                       | A page with one "Stop all email from Boiler Room" button, no sign-in, no other field; and the RFC 8058 one-click `POST`. Records the request at once and says so. Tokens never expire. A one-click `GET` does not opt out, because mail scanners open links.                                                                                                      |

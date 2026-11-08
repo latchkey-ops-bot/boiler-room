@@ -48,7 +48,7 @@ export interface McpServer {
 /**
  * A skill kept in this repo and pushed by `agents:sync`: `agents/skills/<slug>/SKILL.md`, or
  * `skills/<slug>/SKILL.md` at the repo root when `root` is `repo`, for a skill that people's docs
- * share, such as `engineering-deploy`.
+ * share, such as `engineering-deploy` or a production-crew skill.
  */
 export interface SkillDefinition {
   slug: string;

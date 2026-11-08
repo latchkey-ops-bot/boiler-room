@@ -1,14 +1,63 @@
+import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { planBatches } from '../src/art/apply.ts';
+import { classifyAssets, distinctAssets, proposeAssets } from '../src/art/assets.ts';
+import { reviewTask } from '../src/art/prompt.ts';
+import { decideStyle } from '../src/art/style.ts';
 import { ALWAYS_OFF } from '../src/define.ts';
-import { agents, researcher } from '../src/definitions/index.ts';
+import { agents, artDirector, researcher } from '../src/definitions/index.ts';
 import type { Naive } from '../src/naive/client.ts';
 import { repairMessage, researchTask } from '../src/researcher/prompt.ts';
-import { agentConfig, canonicalJson, HASH_KEY, skillContent, syncAgents } from '../src/sync.ts';
+import {
+  AgentDrift,
+  agentConfig,
+  canonicalJson,
+  checkAgents,
+  ensureAgents,
+  HASH_KEY,
+  skillContent,
+  syncAgents,
+} from '../src/sync.ts';
+import { artCampaign, DIGESTS } from './art-fixtures.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
+
+describe('every agent definition', () => {
+  it.each(agents.map((agent) => [agent.name, agent] as const))(
+    '%s names the company board tools off',
+    (_name, agent) => {
+      for (const name of ['board_read', 'board_write']) {
+        expect(agent.tools.configs[name], name).toEqual({ enabled: false, permission: 'deny' });
+      }
+    },
+  );
+
+  // The caps raised on Naive on 8 November. A sync writes the whole definition, so a cap that
+  // lived only on Naive would be put back to the old one by the next agents:sync.
+  it('keeps the daily and per-task caps the crew runs on', () => {
+    const caps = Object.fromEntries(
+      agents.map((agent) => [
+        agent.name,
+        [agent.budget.cap_micro_usd, agent.budget.max_task_micro_usd],
+      ]),
+    );
+    expect(caps).toEqual({
+      'br-researcher': [15_000_000, 3_000_000],
+      'br-director': [40_000_000, 3_000_000],
+      'br-art-director': [20_000_000, 2_000_000],
+      'br-quality-check': [15_000_000, 2_000_000],
+    });
+    for (const agent of agents) {
+      expect(agent.budget.period, agent.name).toBe('day');
+      expect(agent.session.budget_micro_usd, agent.name).toBeLessThanOrEqual(
+        agent.budget.max_task_micro_usd ?? 0,
+      );
+    }
+  });
+});
 
 describe('the researcher definition', () => {
   const { configs, default_config } = researcher.tools;
@@ -122,6 +171,83 @@ describe('the researcher definition', () => {
   });
 });
 
+describe('the art director definition', () => {
+  const { configs, default_config } = artDirector.tools;
+
+  it('allows only looking at pictures and reading its skill: no shell, no files, no web, no generation', () => {
+    expect(default_config.permission).toBe('deny');
+    const allowed = Object.entries(configs)
+      .filter(([, config]) => config.permission === 'allow')
+      .map(([name]) => name)
+      .sort();
+    expect(allowed).toEqual(['read_skill', 'view_image']);
+    for (const name of [
+      ...ALWAYS_OFF,
+      'bash',
+      'write',
+      'fetch_file',
+      'publish_file',
+      'web_fetch',
+      'web_search',
+      'browser',
+    ]) {
+      expect(configs[name], name).toEqual({ enabled: false, permission: 'deny' });
+    }
+  });
+
+  it('runs Sonnet alone, on a budget Sonnet accepts, with a typed result', () => {
+    expect(artDirector).toMatchObject({
+      name: 'br-art-director',
+      model: 'anthropic/claude-sonnet-5.5',
+      harness: 'pi',
+      handoffs: false,
+      structured_output_required: true,
+    });
+    expect(artDirector.session.budget_micro_usd).toBeGreaterThanOrEqual(1_000_000);
+    expect(artDirector.session.budget_micro_usd).toBeLessThanOrEqual(
+      artDirector.budget.max_task_micro_usd,
+    );
+    expect(artDirector.output_schema).toMatchObject({ type: 'object' });
+  });
+
+  it('uploads the art-director skill from the repo root', () => {
+    expect(artDirector.skills).toEqual([
+      expect.objectContaining({ slug: 'art-director', root: 'repo' }),
+    ]);
+    expect(skillContent(artDirector.skills[0] ?? { slug: '', description: '' })).toContain(
+      '# Art Director',
+    );
+  });
+
+  it('gives each review its file ids, at most 4, and no approval steps', () => {
+    const campaign = artCampaign();
+    const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
+    const style = decideStyle(campaign.brand.colors);
+    const batches = planBatches(proposeAssets(campaign, infos), []);
+    const calendar = batches.find((batch) => batch.id === 'calendar');
+    if (!calendar) throw new Error('fixture changed');
+    const task = reviewTask(calendar, { campaign, style, infos });
+    expect(task).toMatch(/File ids, in order: \["fil_featuresui1",/);
+    expect(task).toContain('"scene_id":"calendar"');
+    expect(task).toContain('Call view_image once');
+    expect(task).toContain('submit_output');
+    expect(task).not.toMatch(/approv|confirm with|ask the user/i);
+  });
+
+  // A review's input is the harness, the system prompt, at most 4 pictures and this task. Measured
+  // live at about 26k tokens a review, under the 40k target; the task itself stays a small part.
+  it('keeps every review task small: no page text, no base64, only the batch', () => {
+    const campaign = artCampaign();
+    const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
+    const style = decideStyle(campaign.brand.colors);
+    for (const batch of planBatches(proposeAssets(campaign, infos), [])) {
+      const task = reviewTask(batch, { campaign, style, infos });
+      expect(task.length, batch.id).toBeLessThan(2_500);
+      expect(task).not.toMatch(/base64|data:image/);
+    }
+  });
+});
+
 describe('agentConfig', () => {
   const versions = new Map([['site-research', 3]]);
 
@@ -211,6 +337,97 @@ describe('syncAgents', () => {
     await expect(syncAgents(client as unknown as Naive, [researcher])).rejects.toThrow(
       /2 agents are named/,
     );
+  });
+});
+
+describe('checking the deployed agents without changing them', () => {
+  const skill = researcher.skills[0];
+  if (!skill) throw new Error('the researcher has a skill');
+  const local = createHash('sha256').update(skillContent(skill)).digest('hex');
+  const hash = agentConfig(researcher, new Map([[skill.slug, 4]])).metadata?.[HASH_KEY];
+
+  function deployed(agent: Record<string, unknown>, skillSha = local) {
+    const client = {
+      skills: {
+        push: vi.fn(),
+        listVersions: vi.fn(async () => ({
+          data: [{ version: 4, sha256: skillSha, size_bytes: 1, created_at: '' }],
+          has_more: false,
+          next_cursor: null,
+        })),
+      },
+      agents: {
+        list: vi.fn(async () => ({
+          data: [
+            {
+              id: 'agt_1',
+              name: 'br-researcher',
+              current_version: 12,
+              skills: [`${skill?.slug}@4`],
+              mcp_servers: [],
+              metadata: { [HASH_KEY]: hash },
+              ...agent,
+            },
+          ],
+          has_more: false,
+          next_cursor: null,
+        })),
+        create: vi.fn(),
+        update: vi.fn(),
+      },
+    };
+    return client;
+  }
+
+  it('runs a matching agent as it is, and writes nothing', async () => {
+    const client = deployed({});
+    expect(await ensureAgents(client as unknown as Naive, [researcher], 'verify')).toEqual([
+      { name: 'br-researcher', id: 'agt_1', version: 12, action: 'unchanged' },
+    ]);
+    expect(client.skills.push).not.toHaveBeenCalled();
+    expect(client.agents.create).not.toHaveBeenCalled();
+    expect(client.agents.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a deployed definition hash that is not this checkout', async () => {
+    const client = deployed({ metadata: { [HASH_KEY]: 'b1d457cfd999aaaa' } });
+    const run = ensureAgents(client as unknown as Naive, [researcher], 'verify');
+    await expect(run).rejects.toThrow(AgentDrift);
+    await expect(run).rejects.toThrow(/br-researcher: its definition hash is b1d457cfd999/);
+    expect(client.agents.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses a pinned skill whose content is not this checkout, and a missing agent', async () => {
+    const { drift } = await checkAgents(deployed({}, 'f'.repeat(64)) as unknown as Naive, [
+      researcher,
+      artDirector,
+    ]);
+    expect(drift).toEqual([
+      {
+        name: 'br-researcher',
+        problem: `its skill ${skill.slug}@4 is not the one in this checkout`,
+      },
+      { name: 'br-art-director', problem: 'no agent of this name is deployed' },
+    ]);
+  });
+});
+
+describe('the roster', () => {
+  it('syncs the Researcher and the whole production crew, each name once', () => {
+    expect(agents.map((agent) => agent.name)).toEqual([
+      'br-researcher',
+      'br-director',
+      'br-art-director',
+      'br-quality-check',
+    ]);
+  });
+
+  it('exports every definition from the package entry', async () => {
+    const entry = await import('../src/index.ts');
+    expect(entry.agents).toBe(agents);
+    for (const name of ['researcher', 'director', 'artDirector', 'qualityCheck'] as const) {
+      expect(agents).toContain(entry[name]);
+    }
   });
 });
 

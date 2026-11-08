@@ -29,7 +29,7 @@ the rhythm rule, and T5 between them is exempt from the 3-use limit [D].
 
 | Input           | Required    | Limit                                                                                                               |
 | --------------- | ----------- | ------------------------------------------------------------------------------------------------------------------- |
-| `headline` text | yes         | 2 to 6 words, 40 characters, 1 line. Cite a claim for any number                                                    |
+| `headline` text | yes         | 2 to 6 words, 40 characters, 1 or 2 lines at `capS` (see Layout). Cite a claim for any number                       |
 | `label` text    | no, up to 2 | 2 words and 16 characters each: the cause and the effect node labels                                                |
 | Asset           | no, up to 2 | Tier 1 to 3 crops: `kind: 'image'`, `provenance: 'captured'` or `'uploaded'`. First is the cause, second the effect |
 
@@ -41,18 +41,30 @@ cards must be visible to the customer at script approval [D rule 6, section 6].
 |               | 16:9                                                                                 | 9:16                             | 1:1                              | Tag                          |
 | ------------- | ------------------------------------------------------------------------------------ | -------------------------------- | -------------------------------- | ---------------------------- |
 | Headline slot | `capS`, centred, cap top at 0.16 H. One exact coordinate for every card in the group | cap top at 0.14 H                | cap top at 0.14 H                | [M] fixed slot; [N] position |
+| Headline box  | Up to 2 lines of `min(lineBox, safe width) / (1 + 0.0013 * dur)`                     | same                             | same                             | [N]; [D] 2 lines             |
 | Demo panel    | 0.56 W x 0.50 H, centred at (W/2, 0.62 H), `brand.radius`                            | 0.86 W x 0.46 H at (W/2, 0.56 H) | 0.80 W x 0.52 H at (W/2, 0.62 H) | [N]                          |
+| Panel top     | Moved down, if needed, to 36 px under the slot's two lines at `dur`                  | same                             | same                             | [N]                          |
 | Cause node    | left third of the panel: the first crop, or a greeked pill                           | top half of the panel            | left third                       | [N]                          |
 | Effect node   | right third: the second crop, or an accent-filled pill                               | bottom half                      | right third                      | [N]                          |
 | Connector     | 2 px line in `muted` from cause to effect                                            |                                  |                                  | [N]                          |
 | Node labels   | 0.6 x `capS` (47 px cap), body family, under each node                               |                                  |                                  | [N]                          |
+
+The headline is set at `capS` and never smaller: fit or fail [N]. Copy that does not fit two lines
+of the headline box stops the render with `LAYOUT_UNFIT`, naming the scene and the text id, and
+the Director shortens it. The box is the line box divided by the drift the headline gains by
+`dur`, so no line is wider than `lineBox`, or outside the safe area, on any frame. The first real
+film set 30-character headlines on one line at a 60 px cap, and their drift carried them to 69% of
+the width. The panel keeps its size and moves down only as far as the slot needs: two line boxes
+at `capS`, line 1's cap top on the slot, drifted to `dur`, and 36 px under them, inside the safe
+area. The slot is reserved for two lines on every card, so the panel sits in one place across a
+group, whatever each card's headline.
 
 ## Motion
 
 | Element                                 | Frames                                                   | Motion                                                                                                                                                                                                                     | Tag                                 |
 | --------------------------------------- | -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | T5 entry (inside a group)               | `f` 0 to 6                                               | Ground only on 0 and 1. Headline at full ink from 2, blur 6, 3, 1.2, 0 px, y 13, 7, 4, 1, 0 px                                                                                                                             | [M] y and blanks; [E] blur          |
-| T1 entry (first card)                   | `f` 0 to 13                                              | Headline and panel enter together with `seamIn` on x                                                                                                                                                                       | [M]                                 |
+| T1 entry (first card)                   | `f` 0 to 13                                              | Headline and panel enter together with `seamIn` on x. The headline is never carried from the outgoing scene's anchor, and is drawn above the panel                                                                         | [M]; [N] no carry, layer order      |
 | T3 entry                                | `f` 0 to 5                                               | The rack above with no blank frames: headline at full ink, blurred, from `f = 0`                                                                                                                                           | [N]                                 |
 | Panel                                   | `f` 6 to 13                                              | `y = 40 * (1 - arriveN(f - 6, 0.5, 8))`, opacity 1 from 6                                                                                                                                                                  | [M] `arrive.snap`; [N] travel       |
 | Cause lights                            | `f` 14 to 25                                             | `light.sweep` across the cause node, 12 frames                                                                                                                                                                             | [E] 10 to 20 frames                 |
@@ -75,12 +87,13 @@ type [D].
 
 ## Acceptance stills
 
-| Frame                       | Must show                                                                               |
-| --------------------------- | --------------------------------------------------------------------------------------- |
-| `f = 0`, `f = 1` (after T5) | Uniform ground only                                                                     |
-| `f = 2`                     | Headline at full ink, soft                                                              |
-| `f = 6`                     | Headline sharp and at rest, at the same pixel position as every other card in the group |
-| `f = 20`                    | The cause node lit, nothing else lit                                                    |
-| `f = 32`                    | Effect node and its label present. The demo reads as cause, then effect                 |
-| `f = dur - 1`               | Content present: drifting, or on T1 displaced along x and moving                        |
-| any                         | Tier 4 panels show no numerals. Every numeral on screen comes from `scene.text`         |
+| Frame                       | Must show                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| `f = 0`, `f = 1` (after T5) | Uniform ground only                                                                                |
+| `f = 0` (after T1)          | Headline at its slot and the panel, both displaced along x and moving. Nothing covers the headline |
+| `f = 2`                     | Headline at full ink, soft                                                                         |
+| `f = 6`                     | Headline sharp and at rest, at the same pixel position as every other card in the group            |
+| `f = 20`                    | The cause node lit, nothing else lit                                                               |
+| `f = 32`                    | Effect node and its label present. The demo reads as cause, then effect                            |
+| `f = dur - 1`               | Content present: drifting, or on T1 displaced along x and moving                                   |
+| any                         | Tier 4 panels show no numerals. Every numeral on screen comes from `scene.text`                    |

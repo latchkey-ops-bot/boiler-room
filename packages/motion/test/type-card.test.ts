@@ -240,7 +240,8 @@ describe('type-card frames', () => {
       for (const row of state.lines) {
         expect(row.words.every(({ visible, y }) => visible && y === 0)).toBe(true);
         for (const [index, word] of row.words.entries()) {
-          const d = index - (row.words.length - 1) / 2;
+          // The seam moves right, so the trailing side is the left: the first word of the line.
+          const d = (row.words.length - 1) / 2 - index;
           // The seam layer moves every word by seamIn; each word adds the rest of its gain.
           expect(seamIn(f, seamX) + word.x).toBeCloseTo(seamIn(f, seamX) * wordGapGain(d), 10);
         }
@@ -249,12 +250,37 @@ describe('type-card frames', () => {
         layout.lines.map(({ restBaseline }) => restBaseline),
       );
     }
-    // At f = 0 every word is displaced along x, the trailing word furthest.
+    // At f = 0 every word is displaced against the seam, the trailing word, on the left, furthest:
+    // the gaps start stretched and close up, as in ref A, so no two words ever touch.
     const first = typeCardState(0, layout, entry).lines[0]?.words ?? [];
     expect(seamIn(0, seamX)).toBeLessThan(0);
-    expect(first[2]?.x).toBeLessThan(0);
+    expect(first[0]?.x).toBeLessThan(0);
     expect(first[1]?.x).toBe(0);
-    expect(first[0]?.x).toBeGreaterThan(0);
+    expect(first[2]?.x).toBeGreaterThan(0);
+    for (const f of frames(0, 14)) {
+      const words = typeCardState(f, layout, entry).lines[0]?.words ?? [];
+      const xs = words.map(({ x }) => x);
+      // Each gap is at least as wide as at rest on every frame of the entry.
+      for (const [index, x] of xs.entries())
+        if (index > 0) expect(x).toBeGreaterThanOrEqual(xs[index - 1] ?? 0);
+    }
+  });
+
+  it('stretches the gaps on a T1 moving left, and on a right-to-left line, from the trailing side', () => {
+    const left: TypeCardEntry = { kind: 't1', seam: { ...seamX, sign: -1 } };
+    const ltr = typeCardState(0, twoLines(), left).lines[0]?.words ?? [];
+    // Moving left, the words start displaced to the right, the last word furthest.
+    expect(seamIn(0, { ...seamX, sign: -1 })).toBeGreaterThan(0);
+    expect(ltr[2]?.x).toBeGreaterThan(0);
+    expect(ltr[0]?.x).toBeLessThan(0);
+    // A Hebrew line runs its first word from the right, so on a seam moving right that word leads
+    // and the last word, on the left, trails.
+    const hebrew = layoutOf([line(['כל', 'בנייה', 'מחכה'])]);
+    const right: TypeCardEntry = { kind: 't1', seam: seamX };
+    const rtl = typeCardState(0, hebrew, right).lines[0]?.words ?? [];
+    expect(rtl[2]?.x).toBeLessThan(0);
+    expect(rtl[1]?.x).toBe(0);
+    expect(rtl[0]?.x).toBeGreaterThan(0);
   });
 
   it('moves its block on the seam even where the resolver names a carry, at full size', () => {

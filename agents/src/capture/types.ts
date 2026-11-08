@@ -8,8 +8,21 @@ export interface SeenColor {
   alpha: number;
 }
 
+/**
+ * Where a colour was read: the element whose computed style gave it, at a point in CSS px from the
+ * page's top left (document coordinates) in the capture's viewport. `element` is `tag#id.class`,
+ * clipped. A colour with a point was painted there, not inferred.
+ */
+export interface PagePoint {
+  x: number;
+  y: number;
+  element: string;
+}
+
 export interface WeightedColor extends SeenColor {
   weight: number;
+  /** The first place this colour was read. Absent in captures from before points were recorded. */
+  at?: PagePoint;
 }
 
 export interface RawCta {
@@ -22,6 +35,10 @@ export interface RawCta {
   radius: number;
   pill: boolean;
   area: number;
+  /** The centre of the button and the element drawn as its face. Absent in older captures. */
+  at?: PagePoint;
+  /** The element whose `color` the text takes, when it is not the face. */
+  textAt?: PagePoint;
 }
 
 export interface RawStyles {
@@ -32,9 +49,18 @@ export interface RawStyles {
    * only the browser's white canvas. Absent in captures from before it was measured.
    */
   rootSet?: boolean;
+  /**
+   * Where `root` was read: the body or html element, at the first sample point where it showed,
+   * or `canvas` when both are transparent and the browser's canvas colour (the CSS system colour
+   * `Canvas`, which follows the page's colour scheme) shows through. Absent in older captures.
+   */
+  rootAt?: PagePoint;
   /** Cookie banners, dialogs, scrims and fixed overlays hidden before the colours were measured. */
   overlays?: number;
-  /** The painted background at sample points across the first screens, weighted by count. */
+  /**
+   * The painted background at sample points across the first screens, weighted by count, each
+   * with the first sample point that read it.
+   */
   backgrounds: WeightedColor[];
   /**
    * Text colours weighted by the number of visible characters in that colour. `link` is text in a
@@ -89,12 +115,35 @@ export interface RawLogoCandidate {
   url: string | null;
   svg: string | null;
   alt: string;
+  /**
+   * Size in CSS px. For an SVG, its `viewBox` when it has one, since a mark is often drawn
+   * letterboxed in a square box; else the rendered box. Icons give their declared size.
+   */
   width: number;
   height: number;
   inHeader: boolean;
   homeLink: boolean;
+  /**
+   * Inside the header's home link: the first link to the home page near the top of the page that
+   * holds a picture, and is not labelled as navigation ("Home"). Absent in older captures.
+   */
+  headerHome?: boolean;
   logoHint: boolean;
   type: string;
+  /**
+   * Not displayed at the capture's width: a responsive variant inside the header's home link,
+   * such as a full lockup shown only on phones. Absent means shown.
+   */
+  hidden?: boolean;
+  /** Shapes in an inline SVG: a lockup of mark and name has more than the mark alone. */
+  shapes?: number;
+  /** Distinct fill and stroke colours in an inline SVG. */
+  colors?: number;
+  /**
+   * A visible SVG on the first screen with the same `viewBox` and at least one identical path as
+   * an SVG in the header's home link: the same logo, drawn again, often in its full colours.
+   */
+  twin?: boolean;
 }
 
 export interface RawUiCandidate {
