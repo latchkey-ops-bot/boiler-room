@@ -82,7 +82,8 @@ and its card goes to `blocked` with `credential missing`.
 
 ## Working on it locally
 
-Requires Node 24 and pnpm 10.
+Requires Node 24 and pnpm 10. Any pnpm 10 runs as it is: `pnpm-workspace.yaml` turns off pnpm's
+download of the version `packageManager` pins, which failed on an agent computer on 2026-11-08.
 
 ```sh
 pnpm install

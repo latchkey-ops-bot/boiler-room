@@ -7,3 +7,9 @@ packages:
 # esbuild ships its binary as a platform package, so its install script is not needed.
 ignoredBuiltDependencies:
   - esbuild
+
+# pnpm of another version than packageManager names would download that one before every command.
+# On a 1 vCPU agent computer that download left ~/.local/share/pnpm/.tools/pnpm/10.30.3 without its
+# bin on 2026-11-08, and every pnpm command failed. Any pnpm 10 reads this lockfile, so each runs as
+# it is.
+managePackageManagerVersions: false

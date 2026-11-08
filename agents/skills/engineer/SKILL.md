@@ -32,11 +32,24 @@ One `ENG` card is one branch and one pull request into `dev` of
    the card asks for, and nothing else. Follow every rule in `CLAUDE.md`.
 5. Check it. Turn on swap first, once per computer, with the recipe in "Working on
    `packages/motion`" below: without it `pnpm install` and `pnpm test` are killed for memory
-   (`CHECK_EXIT 137`, seen in the role evals on 2026-11-08). A `bash` call is killed after about 30
-   seconds, so put the checks in a script file and run it in the background:
+   (`CHECK_EXIT 137`, seen in the role evals on 2026-11-08). Then check that pnpm runs:
+
+   ```bash
+   rm -rf ~/.local/share/pnpm/.tools/pnpm; npm_config_manage_package_manager_versions=false pnpm --version
+   ```
+
+   It must print a version that starts with `10.`. The repo pins pnpm in `package.json`
+   (`packageManager`), and a pnpm of another version, such as your computer's, downloads the pinned
+   one into `~/.local/share/pnpm/.tools` before every command. On your computer on 2026-11-08 that
+   download left the pinned copy without its `bin`, and every pnpm command failed with
+   `Failed to switch pnpm to v10.30.3`. `dev` turns the switch off in `pnpm-workspace.yaml`; the
+   variable keeps it off on a branch cut before that. A `bash` call is killed after about 30
+   seconds, so put the checks in a script file, starting with that variable, and run it in the
+   background:
 
    ```bash
    cat > ~/check.sh <<'SH'
+   export npm_config_manage_package_manager_versions=false
    cd ~/boiler-room && pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test
    echo "CHECK_EXIT $?"
    SH

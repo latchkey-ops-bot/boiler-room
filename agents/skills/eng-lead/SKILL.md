@@ -24,14 +24,29 @@ file.
 
 ## Your computer
 
-Once per session, before the first install, check or script, turn on 2 GiB of swap. Your computer
-has 1 GiB of memory, and without swap the checks are killed with exit 137 (seen in the role evals on
-2026-11-08):
+Once per session, before the first install, check or script:
 
-```bash
-swapon --show | grep -q swapfile || sudo swapon /swapfile \
-  || (sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)
-```
+1. Turn on 2 GiB of swap. Your computer has 1 GiB of memory, and without swap the checks are killed
+   with exit 137 (seen in the role evals on 2026-11-08):
+
+   ```bash
+   swapon --show | grep -q swapfile || sudo swapon /swapfile \
+     || (sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)
+   ```
+
+2. Keep pnpm on the version it is. The repo pins pnpm in `package.json` (`packageManager`), and a
+   pnpm of another version, such as the one your computer has, then downloads the pinned one into
+   `~/.local/share/pnpm/.tools` before every command. On `br-engineer-1`'s computer on 2026-11-08
+   that download left the pinned copy without its `bin`, and every pnpm command failed with
+   `Failed to switch pnpm to v10.30.3`. `dev` turns the switch off in `pnpm-workspace.yaml`, but a
+   pull request cut before that does not have it. So remove any half-made copy and check pnpm:
+
+   ```bash
+   rm -rf ~/.local/share/pnpm/.tools/pnpm; npm_config_manage_package_manager_versions=false pnpm --version
+   ```
+
+   It must print a version that starts with `10.`, and every script you write that runs pnpm starts
+   with `export npm_config_manage_package_manager_versions=false`.
 
 ## Checking a pull request
 
@@ -52,6 +67,7 @@ request merged to find out breaks `dev` for everyone.
    ```bash
    cat > ~/check.sh <<'SH'
    # bash ~/check.sh <base> [<pull request number>]
+   export npm_config_manage_package_manager_versions=false
    cd ~/boiler-room && { git merge --abort 2>/dev/null; git reset -q --hard; } \
      && git fetch -q origin && git checkout -q --detach "origin/$1" || { echo "CHECK_EXIT setup"; exit; }
    if [ -n "$2" ]; then
@@ -208,7 +224,8 @@ Then release, following `engineering-deploy`, "Releases: the `RELEASE` card and 
 1. Open a pull request from `dev` into `main` titled `release: <slug>`, with the `DIR` and `SHIP`
    cards in its body. Wait for its checks, and merge it with a merge commit. Never push to `main`.
 2. In a clean checkout of `origin/main` (`git -C ~/boiler-room fetch origin && git -C ~/boiler-room
-   checkout --detach origin/main`), run `pnpm install --frozen-lockfile`. If the release has
+   checkout --detach origin/main`), run `pnpm install --frozen-lockfile`, with pnpm checked as "Your
+   computer" says. If the release has
    migrations, run `pnpm web:db:migrate:production --release-card <card id>`. Then run
    `pnpm web:deploy:production --release-card <card id>`. `<card id>` is this card's own `crd_`
    id, as `board_read` gives it. Run each in a background script. Production scripts stop for a

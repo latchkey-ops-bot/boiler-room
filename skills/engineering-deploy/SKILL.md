@@ -42,6 +42,7 @@ the slot. It is empty in every environment until the founder's film exists; set 
 
    ```bash
    cat > ~/step.sh <<'SH'
+   export npm_config_manage_package_manager_versions=false
    cd ~/boiler-room && pnpm install --frozen-lockfile && pnpm web:deploy:staging
    echo "STEP_EXIT $?"
    SH
@@ -49,6 +50,9 @@ the slot. It is empty in every environment until the founder's film exists; set 
    ```
 
    Poll with `tail -n 30 ~/step.log` until it prints `STEP_EXIT`. Never background a loop inline.
+   The first line keeps pnpm from downloading the version `packageManager` pins before each
+   command, which failed on an agent computer on 2026-11-08 (`Failed to switch pnpm`); the
+   `eng-lead` skill, "Your computer", has the check.
 3. **The commit.** `web:deploy:staging` deploys only a clean tree whose `HEAD` is the tip of
    `origin/dev`. Run `git -C ~/boiler-room fetch origin && git -C ~/boiler-room checkout --detach
    origin/dev` first.

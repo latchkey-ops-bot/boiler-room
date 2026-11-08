@@ -632,6 +632,34 @@ describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
   });
 });
 
+describe('pnpm on agent computers', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it("never downloads the pinned pnpm, which left a broken copy on the engineer's computer", () => {
+    const workspace = readFileSync(new URL('../../pnpm-workspace.yaml', import.meta.url), 'utf8');
+    expect(workspace).toMatch(/^managePackageManagerVersions: false$/m);
+    for (const slug of ['engineer', 'eng-lead']) {
+      const skill = flat(slug);
+      expect(skill, slug).toContain(
+        'rm -rf ~/.local/share/pnpm/.tools/pnpm; npm_config_manage_package_manager_versions=false pnpm --version',
+      );
+      expect(skill, slug).toContain('It must print a version that starts with `10.`');
+      // Every check script starts with the variable, for branches cut before the workspace setting.
+      const raw = skillContent({ slug, description: '' });
+      const scripts = [...raw.matchAll(/cat > ~\/check\.sh <<'SH'\n([\s\S]*?)\n\s*SH\n/g)];
+      expect(scripts.length, slug).toBeGreaterThan(0);
+      for (const script of scripts) {
+        expect(script[1]?.trim().split('\n')[0]?.trim(), slug).toMatch(
+          /^(# .*|export npm_config_manage_package_manager_versions=false)$/,
+        );
+        expect(script[1], slug).toContain(
+          'export npm_config_manage_package_manager_versions=false',
+        );
+      }
+    }
+  });
+});
+
 describe('main and production', () => {
   // The GTM agents are started only by the executor, never by a card, so they have no card rules.
   const gtmNames = new Set(GTM.map((agent) => agent.name));
