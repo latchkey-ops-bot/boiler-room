@@ -15,6 +15,8 @@ describe('@boiler-room/schema', () => {
         'TEXT_ROLES',
         'campaignJsonSchema',
         'campaignSchema',
+        'extractNumericTokens',
+        'sceneRegistry',
         'researchPartsSchema',
         'sceneFrames',
         'toFrame',
