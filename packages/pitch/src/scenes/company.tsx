@@ -391,7 +391,11 @@ export function CompanyPr({ duration }: SceneProps) {
  * says it was.
  */
 const DEADLOCK: Card[] = [
-  { at: '11:22:09', who: 'Engineer', what: 'Blocks its own card: won’t stack on an unmerged branch' },
+  {
+    at: '11:22:09',
+    who: 'Engineer',
+    what: 'Blocks its own card: won’t stack on an unmerged branch',
+  },
   { at: '11:24:05', who: 'CEO', what: 'Finds the deadlock: 4 decision comments' },
   { at: '15:11:03', who: 'CEO', what: 'FOUNDER: clear SHIP dependency deadlock' },
 ];
