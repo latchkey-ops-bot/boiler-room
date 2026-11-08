@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { FilmRejected } from '@boiler-room/motion';
-import { CostLimitExceeded, gateCampaign, renderCampaign } from '@boiler-room/render';
+import { CostLimitExceeded, chargesOf, gateCampaign, renderCampaign } from '@boiler-room/render';
 import { DEFAULT_CAP, DEFAULT_IMAGE_MODEL } from '../art/generate.ts';
 import type { ArtIssue } from '../art/prompt.ts';
 import { artDirect } from '../art/run.ts';
@@ -88,6 +88,54 @@ export const artIssueOf = (issue: QcIssue): ArtIssue => ({
   what: issue.what,
   fix: issue.fix,
 });
+
+/**
+ * The copy a scene template refused to set while frames were drawn, as Quality Check issues the
+ * Director owns. motion never shrinks type to make copy fit, and neither the campaign validator
+ * nor `validateFilm` measures type, so a type card or a stat-counter whose words do not fit their
+ * line at their cap height stops the render with `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`. The fix is
+ * shorter copy. The same error comes back from every computer that drew the scene; it is one issue.
+ */
+export function renderLayoutIssues(text: string): QcIssue[] {
+  const found = new Map<string, QcIssue>();
+  const add = (check: string, sceneId: string | null, what: string, fix: string) => {
+    const key = `${check} ${sceneId} ${what}`;
+    if (!found.has(key))
+      found.set(key, {
+        severity: 'blocker',
+        check,
+        sceneId,
+        frame: null,
+        timecode: null,
+        what,
+        fix,
+        owner: 'director',
+        source: 'code',
+      });
+  };
+  for (const match of text.matchAll(
+    /TYPE_CARD_LAYOUT at (?:scene "([^"]+)", )?text "([^"]+)": ([^\n]+)/g,
+  )) {
+    const [, sceneId, textId, rest] = match;
+    add(
+      'type-card-layout',
+      sceneId ?? null,
+      `Text "${textId}": ${(rest ?? '').trim()}`,
+      `Shorten text "${textId}" until it sets on its lines at its cap height. motion never sets type smaller to make copy fit.`,
+    );
+  }
+  for (const match of text.matchAll(/LAYOUT_UNFIT: ([^\n]+)/g)) {
+    const rest = (match[1] ?? '').trim();
+    const sceneId = /Scene "([^"]+)"/.exec(rest)?.[1] ?? null;
+    add(
+      'stat-counter-layout',
+      sceneId,
+      rest,
+      'Shorten the number or its label until both set at their cap heights. motion never sets type smaller to make copy fit.',
+    );
+  }
+  return [...found.values()];
+}
 
 /** Which gate a `FilmRejected` names: "This campaign cannot be rendered: <check> found ...". */
 export function rejectedBy(error: FilmRejected): string {
@@ -383,18 +431,28 @@ export class NaiveCrew implements FilmCrew {
         files: { film: result.output, manifest: result.manifestFile, campaign: local.campaignFile },
       };
     } catch (cause) {
-      // Nothing is spent before the estimate is accepted. After it, the pool stops the run before
-      // it would pass the limit, so the limit is what a failed render is counted at.
+      // A run that created computers says what they cost. Nothing is spent before the estimate
+      // is accepted; any other failure is counted at the limit the pool stops before.
+      const charges = chargesOf(cause);
       const before =
         cause instanceof FilmRejected ||
         (cause instanceof CostLimitExceeded && cause.message.startsWith('The estimate'));
+      const issues = renderLayoutIssues(message(cause));
       return {
         ok: false,
         failure: message(cause),
         capped: cause instanceof CostLimitExceeded,
-        cost: cost(0, before ? 0 : input.ceilingMicroUsd),
+        cost: cost(0, charges ? charges.chargedUsd * 1e6 : before ? 0 : input.ceilingMicroUsd),
         sessionIds: [],
-        decisions: [],
+        computerIds: charges?.computerIds ?? [],
+        ...(issues.length ? { issues } : {}),
+        decisions: issues.map((issue) => ({
+          agent: 'motion' as const,
+          kind: 'failed' as const,
+          stage: 'render' as const,
+          message: `Refused to draw ${issue.sceneId ?? 'a scene'}: ${issue.check}`,
+          why: issue.what,
+        })),
       };
     }
   }

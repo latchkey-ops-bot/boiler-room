@@ -72,6 +72,8 @@ export interface StageOutcome<T> {
   files?: Record<string, string>;
   /** Render computers, for the manifest. */
   computerIds?: string[];
+  /** What the stage refused for its owner to fix, such as copy a scene could not set. */
+  issues?: QcIssue[];
 }
 
 /** What every spending stage is given: what it may spend, and whether this is the smaller retry. */
@@ -364,6 +366,21 @@ export function readManifest(dir: string): FilmManifest | undefined {
   return JSON.parse(readFileSync(file, 'utf8')) as FilmManifest;
 }
 
+/**
+ * A failure in one line: the first line of the message and the line that names the error, without
+ * the progress lines and the stack a failed command prints. The whole text is in the stage's log.
+ */
+export function briefFailure(text: string, max = 600): string {
+  const lines = text
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const first = lines[0] ?? 'failed';
+  const cause = lines.slice(1).find((line) => /^[\w.]*(?:Error|Exception)\b[^:]*:/.test(line));
+  const brief = cause ? `${first} ${cause}` : first;
+  return brief.length > max ? `${brief.slice(0, max - 1)}…` : brief;
+}
+
 const sha256 = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
 const usd = (micro: number) => `$${(micro / 1e6).toFixed(2)}`;
 
@@ -612,6 +629,7 @@ class FilmRun {
         decisions: [],
       };
     }
+    if (!outcome.ok) outcome = { ...outcome, failure: briefFailure(outcome.failure ?? 'failed') };
     // Whatever the stage did, none of its sessions is left spending or waiting for a person.
     const cancelled: string[] = [];
     let budgetPaused = outcome.budgetPaused ?? false;
@@ -847,7 +865,8 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
     return film.finish('failed', first.failure ?? 'the Director wrote no campaign');
   let director = first.value;
   let artIssues: QcIssue[] = [];
-  let renderedSha: string | undefined;
+  /** The campaign the last render was asked to draw. */
+  let triedSha: string | undefined;
 
   for (;;) {
     const round = film.manifest.round;
@@ -864,7 +883,7 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
     if (!art.ok || !art.value) return stop(art.failure ?? 'the Art Director wrote no campaign');
     const { campaignFile } = art.value;
     const sha = sha256(campaignFile);
-    if (renderedSha === sha) {
+    if (triedSha === sha) {
       film.decide({
         agent: 'coordinator',
         kind: 'decision',
@@ -879,6 +898,7 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
     if (!gate.ok) return stop(`${gate.check} refused the film, so it was not rendered`);
     if (aborted()) return stop('interrupted');
 
+    triedSha = sha;
     const render = await film.step('render', (limits) =>
       crew.render({
         campaignFile,
@@ -888,26 +908,31 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
         ...limits,
       }),
     );
-    if (!render.ok || !render.value) return stop(render.failure ?? 'the render failed');
-    renderedSha = sha;
-    const rendered = render.value;
-
-    const qc = await film.step('quality-check', (limits) =>
-      crew.qc({ renderDir: rendered.renderDir, researchFile, ...limits }),
-    );
-    if (!qc.ok || !qc.value) {
-      film.deliver(rendered, campaignFile, format);
-      return film.finish(
-        'ready',
-        `Quality Check did not review the film: ${qc.failure ?? 'no report'}`,
+    // What failed, and who can fix it: a scene motion refused to draw, or Quality Check's review.
+    let failed: { by: string; issues: QcIssue[] };
+    if (!render.ok || !render.value) {
+      if (!render.issues?.length) return stop(render.failure ?? 'the render failed');
+      failed = { by: 'motion refused to draw the film', issues: render.issues };
+    } else {
+      const rendered = render.value;
+      const qc = await film.step('quality-check', (limits) =>
+        crew.qc({ renderDir: rendered.renderDir, researchFile, ...limits }),
       );
+      if (!qc.ok || !qc.value) {
+        film.deliver(rendered, campaignFile, format);
+        return film.finish(
+          'ready',
+          `Quality Check did not review the film: ${qc.failure ?? 'no report'}`,
+        );
+      }
+      film.deliver(rendered, campaignFile, format, qc.value);
+      const { report } = qc.value;
+      if (report.verdict === 'pass') return film.finish('ready', null);
+      failed = { by: 'Quality Check failed the film', issues: report.issues };
     }
-    film.deliver(rendered, campaignFile, format, qc.value);
-    const { report } = qc.value;
-    if (report.verdict === 'pass') return film.finish('ready', null);
 
     // Route the failure back to the agents that can fix it, within the limits.
-    const owners = routable(report);
+    const owners = routable(failed);
     const toDirector = owners.get('director') ?? [];
     const toArt = owners.get('art-director') ?? [];
     const toMotion = owners.get('motion') ?? [];
@@ -920,7 +945,7 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
         why,
         ...(data ? { data } : {}),
       });
-      return film.finish('ready', why);
+      return stop(why);
     };
     if (toDirector.length === 0 && toArt.length === 0) {
       return routeBack(
@@ -963,7 +988,7 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
         kind: 'sent_back',
         stage: 'script',
         message: `Sent ${toDirector.length} issue(s) back to the Director: ${[...new Set(toDirector.map((issue) => issue.check))].join(', ')}`,
-        why: `Quality Check failed the film, and the Director owns these. Route-back ${film.manifest.routeBacks} of ${maxRouteBacks}.${toArt.length ? ' The Art Director gets its own issues after the Director has revised.' : ''}`,
+        why: `${failed.by}, and the Director owns these. Route-back ${film.manifest.routeBacks} of ${maxRouteBacks}.${toArt.length ? ' The Art Director gets its own issues after the Director has revised.' : ''}`,
         data: { issues: qcIssueToDecisionData(toDirector) },
       });
       const revised = await film.step('director', (limits) =>
@@ -985,7 +1010,7 @@ export async function makeFilm(options: FilmOptions, deps: FilmDeps): Promise<Fi
         kind: 'sent_back',
         stage: 'art_direction',
         message: `Sent ${toArt.length} issue(s) back to the Art Director: ${[...new Set(toArt.map((issue) => issue.check))].join(', ')}`,
-        why: `Quality Check failed the film, and the Art Director owns these. Route-back ${film.manifest.routeBacks} of ${maxRouteBacks}.`,
+        why: `${failed.by}, and the Art Director owns these. Route-back ${film.manifest.routeBacks} of ${maxRouteBacks}.`,
         data: { issues: qcIssueToDecisionData(toArt) },
       });
     }

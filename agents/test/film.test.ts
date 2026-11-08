@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { expectedTemplate, type ResearchFacts } from '../src/director/checks.ts';
 import { localizeCampaign } from '../src/film/assets.ts';
 import { type CappableClient, CapReached, capClient } from '../src/film/cap.ts';
-import { directorIssueOf, gateFilm } from '../src/film/crew.ts';
+import { directorIssueOf, gateFilm, renderLayoutIssues } from '../src/film/crew.ts';
 import { artDecisions, directorDecisions, qcDecisions } from '../src/film/decisions.ts';
 import { LocalFilmOrder } from '../src/film/local-order.ts';
 import {
@@ -17,6 +17,7 @@ import {
   FILM_STATUSES,
 } from '../src/film/order.ts';
 import {
+  briefFailure,
   briefFor,
   type FilmCrew,
   type FilmOptions,
@@ -208,6 +209,25 @@ const clock = () => {
 };
 
 const json = (file: string) => JSON.parse(readFileSync(file, 'utf8'));
+
+/** What a render stopped by a type card's layout check said, as it came back from Naive. */
+const LAYOUT_ERROR =
+  'SymbolicateableError [TypeCardLayoutError]: TYPE_CARD_LAYOUT at scene "name", text "name-descriptor": "Product development system" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.';
+const LAYOUT_FAILURE = [
+  'Chunk 4 failed on 2 computers: A command on cmp_1 exited with 1:',
+  '{"type":"progress","renderedFrames":9,"encodedFrames":0,"progress":0.03}',
+  '',
+  'node:internal/modules/run_main:107',
+  '    triggerUncaughtException(',
+  '    ^',
+  '',
+  LAYOUT_ERROR,
+  '    at measure (http://localhost:3000/bundle.js:6115:13)',
+  '    at TypeCard (http://localhost:3000/bundle.js:6233:18)',
+  '',
+  'A command on cmp_2 exited with 1:',
+  LAYOUT_ERROR,
+].join('\n');
 
 // ---------------------------------------------------------------------------------------------
 
@@ -489,6 +509,58 @@ describe('makeFilm', () => {
     );
   });
 
+  it('sends copy a scene refused to set while drawing back to the Director, and renders again', async () => {
+    const root = outRoot();
+    const { crew } = fakeCrew();
+    const refused = renderLayoutIssues(LAYOUT_FAILURE);
+    crew.render.mockImplementationOnce(async () => ({
+      ok: false,
+      failure: LAYOUT_FAILURE,
+      cost: { ...NO_COST, computeMicroUsd: usd(0.04) },
+      sessionIds: [],
+      issues: refused,
+      decisions: [],
+    }));
+    const manifest = await makeFilm(order(root), {
+      crew,
+      sessions: fakeSessions(),
+      clock: clock(),
+    });
+
+    expect(manifest).toMatchObject({ state: 'ready', qc: 'pass', routeBacks: 1, round: 2 });
+    expect(crew.direct.mock.calls[1]?.[0].revise?.issues).toEqual(refused);
+    expect(crew.render).toHaveBeenCalledTimes(2);
+    expect(crew.qc).toHaveBeenCalledTimes(1);
+    // The failure is kept in a line, without the progress output and the stack.
+    const failed = manifest.stages.find((stage) => stage.step === 'render');
+    expect(failed?.failure).toBe(briefFailure(LAYOUT_FAILURE));
+    expect(failed?.cost.computeMicroUsd).toBe(usd(0.04));
+    const sent = json(join(root, 'example.com', 'run-1', 'decisions.json')).decisions.find(
+      (entry: { kind: string }) => entry.kind === 'sent_back',
+    );
+    expect(sent.why).toMatch(/^motion refused to draw the film, and the Director owns these/);
+  });
+
+  it('fails the film when a refused render cannot be sent back', async () => {
+    const root = outRoot();
+    const { crew } = fakeCrew();
+    crew.render.mockImplementation(async () => ({
+      ok: false,
+      failure: LAYOUT_FAILURE,
+      cost: NO_COST,
+      sessionIds: [],
+      issues: renderLayoutIssues(LAYOUT_FAILURE),
+      decisions: [],
+    }));
+    const manifest = await makeFilm(order(root, { maxRouteBacks: 0 }), {
+      crew,
+      sessions: fakeSessions(),
+      clock: clock(),
+    });
+    expect(manifest).toMatchObject({ state: 'failed', film: null, routeBacks: 0 });
+    expect(crew.qc).not.toHaveBeenCalled();
+  });
+
   it('never renders a campaign validateFilm refuses', async () => {
     const root = outRoot();
     const nova = json(
@@ -530,6 +602,38 @@ describe('makeFilm', () => {
     expect(
       orderProblem({ url: 'ftp://a.com', length: 'short', sample: true, maxMicroUsd: usd(5) }),
     ).toMatch(/http/);
+  });
+});
+
+describe('a render that motion refused', () => {
+  it('reads the copy a template could not set, once, as an issue for the Director', () => {
+    expect(renderLayoutIssues(LAYOUT_FAILURE)).toEqual([
+      {
+        severity: 'blocker',
+        check: 'type-card-layout',
+        sceneId: 'name',
+        frame: null,
+        timecode: null,
+        what: 'Text "name-descriptor": "Product development system" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.',
+        fix: 'Shorten text "name-descriptor" until it sets on its lines at its cap height. motion never sets type smaller to make copy fit.',
+        owner: 'director',
+        source: 'code',
+      },
+    ]);
+    const unfit = renderLayoutIssues(
+      'Error: LAYOUT_UNFIT: Scene "proof": the number "50,000+" does not fit at its cap height.',
+    );
+    expect(unfit).toMatchObject([
+      { check: 'stat-counter-layout', sceneId: 'proof', owner: 'director' },
+    ]);
+    expect(renderLayoutIssues('Chunk 2 failed: ECONNRESET')).toEqual([]);
+  });
+
+  it('keeps a failure to its first line and the line that names the error', () => {
+    expect(briefFailure(LAYOUT_FAILURE)).toBe(
+      'Chunk 4 failed on 2 computers: A command on cmp_1 exited with 1: SymbolicateableError [TypeCardLayoutError]: TYPE_CARD_LAYOUT at scene "name", text "name-descriptor": "Product development system" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.',
+    );
+    expect(briefFailure('no campaign written')).toBe('no campaign written');
   });
 });
 

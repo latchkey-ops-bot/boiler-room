@@ -26,7 +26,13 @@ export type {
   DryRunResult,
   RenderCampaignOptions,
   RenderCampaignResult,
+  RenderCharges,
 } from './render-campaign.ts';
-export { DEFAULT_MAX_COST_USD, DEFAULT_WORKERS, renderCampaign } from './render-campaign.ts';
+export {
+  chargesOf,
+  DEFAULT_MAX_COST_USD,
+  DEFAULT_WORKERS,
+  renderCampaign,
+} from './render-campaign.ts';
 export type { FilmCheck, SeamCheck, SeamReport } from './verify.ts';
 export { checkFilm, judgeSeam, SEAM_ALLOWANCE_DB } from './verify.ts';

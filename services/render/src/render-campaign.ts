@@ -86,6 +86,18 @@ export interface DryRunResult {
   base: 'snapshot' | 'cold' | null;
 }
 
+/** What the computers of a run that failed cost, attached to its error as `charges`. */
+export interface RenderCharges {
+  chargedUsd: number;
+  computerIds: string[];
+}
+
+/** The charges a failed `renderCampaign` attached to its error, if it had created computers. */
+export function chargesOf(error: unknown): RenderCharges | undefined {
+  const charges = (error as { charges?: RenderCharges } | null)?.charges;
+  return charges && typeof charges.chargedUsd === 'number' ? charges : undefined;
+}
+
 export const DEFAULT_MAX_COST_USD = 2;
 export const DEFAULT_WORKERS = 4;
 
@@ -242,6 +254,7 @@ export async function renderCampaign(
     ? new ComputerPool(client, { runId, limitUsd, log, onStop: stop })
     : undefined;
   const naiveFiles: string[] = [];
+  let failure: unknown;
   let computersLeft: string[] = [];
   let filesDeleted = 0;
 
@@ -550,6 +563,7 @@ export async function renderCampaign(
     return { output, manifestFile, manifest };
   } catch (error) {
     if (error instanceof Error) error.message = scrub(error.message);
+    failure = error;
     throw error;
   } finally {
     if (pool) {
@@ -559,6 +573,14 @@ export async function renderCampaign(
         else log('no computers of this run remain');
       } catch (error) {
         log(`could not confirm the computers were destroyed: ${scrub(String(error))}`);
+      }
+      // A failed run's computers were still paid for: the error says what they cost.
+      if (failure instanceof Error) {
+        const charges: RenderCharges = {
+          chargedUsd: pool.chargedUsd(),
+          computerIds: pool.records.map(({ id }) => id),
+        };
+        Object.assign(failure, { charges });
       }
     }
     if (client && naiveFiles.length > 0) {
