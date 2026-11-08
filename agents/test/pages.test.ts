@@ -69,6 +69,9 @@ describe('judgeProbe', () => {
       'sign-in',
     );
     expect(judge(ok({ final_url: 'https://other.example/demo' })).reason).toContain('off the site');
+    expect(judge(ok({ final_url: 'https://site.example.org/talk-to-sales' })).reason).toContain(
+      'contact or sales',
+    );
     expect(judge(ok({ content_type: 'application/pdf' })).found).toBe(false);
   });
 

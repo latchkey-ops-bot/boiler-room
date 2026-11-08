@@ -149,6 +149,8 @@ export function judgeProbe(
       return verdict(false, 'redirects to the home page');
     if (classifyLink(response.final_url) === 'login')
       return verdict(false, `redirects to sign-in (${response.final_url})`);
+    if (classifyLink(response.final_url) === 'contact')
+      return verdict(false, `redirects to a contact or sales page (${response.final_url})`);
     if (!sameSite(response.final_url, home))
       return verdict(false, `redirects off the site (${response.final_url})`);
   }

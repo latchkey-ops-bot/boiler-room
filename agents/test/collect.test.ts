@@ -75,6 +75,7 @@ const MEDIA_SITE = `<!doctype html><html><head><title>Media</title><style>
 <iframe src="https://www.youtube.com/embed/abc" title="Video"></iframe>
 <iframe src="https://app.storylane.io/share/xyz" title="Interactive tour"></iframe>
 <img alt="The app dashboard" width="1600" height="800" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='800'/>">
+<div class="app-frame" aria-hidden="true" style="width:1200px;height:600px;background:#0E1117">Inbox 12</div>
 </body></html>`;
 
 // Text nobody can see, next to text that only looks hidden to a naive colour check: white on a
@@ -283,6 +284,11 @@ describe('collectPage in Chromium', () => {
       expect.arrayContaining(['media', 'product']),
     );
     expect(raw.ui.some((item) => item.label.includes('drawn quietly'))).toBe(false);
+    // A mockup marked aria-hidden, as sites mark illustrations, is still product UI.
+    expect(raw.ui.find((item) => item.label.includes('app-frame'))).toMatchObject({
+      kind: 'frame',
+      grade: 'product',
+    });
     expect(await page.locator('[data-br-header]').count()).toBe(1);
     await page.close();
   });

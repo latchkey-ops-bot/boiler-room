@@ -513,13 +513,12 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   const DEMO_EMBED =
     /storylane|navattic|arcade|supademo|walnut|reprise|howdygo|tourial|\/(demo|tour|interactive)\b/i;
   const VIDEO_EMBED = /youtube|youtu\.be|vimeo|loom|wistia|vidyard|player\./i;
-  // A decoration: hidden from assistive technology, or faded into the background.
+  // A decoration faded into the background, or a slide not on show. Being hidden from assistive
+  // technology says nothing: sites mark their product mockups aria-hidden as illustrations.
   const decorative = (el: Element) => {
     let opacity = 1;
-    for (let node: Element | null = el; node; node = node.parentElement) {
-      if (node.getAttribute('aria-hidden') === 'true') return true;
+    for (let node: Element | null = el; node; node = node.parentElement)
       opacity *= Number(styleOf(node).opacity) || 0;
-    }
     return opacity < 0.6;
   };
   const ui: RawUiCandidate[] = [];
