@@ -32,6 +32,9 @@ export const BLOCKED_IPV4: readonly string[] = [
 /** IPv6 ranges no connection may reach. */
 export const BLOCKED_IPV6: readonly string[] = ['fc00::/7', 'fe80::/10'];
 
+/** Local shell services a page must never reach over loopback: ttyd (7681) and sshd (22). */
+export const LOCAL_SHELL_PORTS: readonly number[] = [7681, 22];
+
 /**
  * Where the nameservers are named. With systemd-resolved, `/etc/resolv.conf` names only its stub on
  * loopback and the upstream servers, which some clouds put on a link-local address, are in the second.
@@ -87,6 +90,13 @@ export function nameservers(texts: readonly string[]): string[] {
  */
 export function egressRules(family: Family, servers: readonly string[]): string[] {
   const rules = [
+    // The computer's own shell services: ttyd serves a writable bash on 7681 with no origin check,
+    // and sshd listens on 22. Page JavaScript could reach them over loopback, or the machine's own
+    // address, which also leaves through lo. Local connections to them are refused; inbound
+    // connections from outside arrive on another interface and are not affected.
+    ...LOCAL_SHELL_PORTS.map(
+      (port) => `-A ${CHAIN} -o lo -p tcp -m tcp --dport ${port} -j REJECT --reject-with tcp-reset`,
+    ),
     `-A ${CHAIN} -o lo -j ACCEPT`,
     `-A ${CHAIN} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT`,
   ];

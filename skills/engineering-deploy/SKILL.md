@@ -14,11 +14,11 @@ People read the same procedures in `docs/deploy.md`.
 
 ## What runs where
 
-| Environment | Worker                       | URL                                                      | D1                       | R2                             | Deploys from             | Who deploys   |
-| ----------- | ---------------------------- | -------------------------------------------------------- | ------------------------ | ------------------------------ | ------------------------ | ------------- |
-| Local       | workerd on your computer     | `http://localhost:3000` (dev), `:8787` (preview)         | `.wrangler/state`        | `.wrangler/state`              | Your working tree        | You           |
-| Staging     | `boiler-room-web-staging`    | `https://boiler-room-web-staging.boilerroom.workers.dev` | `boiler-room-staging`    | `boiler-room-films-staging`    | The tip of `origin/dev`  | `br-eng-lead` |
-| Production  | `boiler-room-web-production` | Not deployed yet                                         | `boiler-room-production` | `boiler-room-films-production` | The tip of `origin/main` | The founder   |
+| Environment | Worker                       | URL                                                      | D1                       | R2                             | Deploys from             | Who deploys                        |
+| ----------- | ---------------------------- | -------------------------------------------------------- | ------------------------ | ------------------------------ | ------------------------ | ---------------------------------- |
+| Local       | workerd on your computer     | `http://localhost:3000` (dev), `:8787` (preview)         | `.wrangler/state`        | `.wrangler/state`              | Your working tree        | You                                |
+| Staging     | `boiler-room-web-staging`    | `https://boiler-room-web-staging.boilerroom.workers.dev` | `boiler-room-staging`    | `boiler-room-films-staging`    | The tip of `origin/dev`  | `br-eng-lead`                      |
+| Production  | `boiler-room-web-production` | Not deployed yet                                         | `boiler-room-production` | `boiler-room-films-production` | The tip of `origin/main` | `br-eng-lead`, on a `RELEASE` card |
 
 Staging makes simulated films (`PIPELINE=simulated`): no crew runs, and every screen labels them.
 Production never does (`PIPELINE=naive`): until the Naive pipeline is wired, starting a film there
@@ -87,7 +87,8 @@ production. Nothing skips staging.
 3. **Lead, on the `SHIP` card:** review, merge, and deploy staging as above. Reproduce the bug on
    staging and confirm it is gone. Put both in the `SHIP` note.
 4. **Production:** a fix reaches production only through a release (next section). In the `SHIP`
-   note, say the fix is ready for release and why it is urgent, so the CEO can ask the founder.
+   note, say the fix is ready for release and why it is urgent, so the CEO can create its
+   `RELEASE` card.
 
 If the bug is live on staging and makes it worse than the version before, roll staging back first
 and fix second.
@@ -96,29 +97,35 @@ and fix second.
 
 A release promotes what is on `dev`, already proven on staging, to `main` and to production.
 
-**Who releases.** Under the current company policy, releases are the founder's: nobody in the
-company merges into `main` or deploys production, and the production scripts stop for a person to
-type `production` at a terminal. The eng-lead skill on the `feat/company-agents` branch (commit
-`d11f6ef`) sets this policy. `docs/company/README.md` on `dev` still describes the lead promoting
-`dev` to `main`; the newer policy wins until the founder says otherwise. So if a `RELEASE: <slug>`
-card is assigned to you, do not merge and do not deploy. Prepare the release instead:
+**Who releases.** Releases are autonomous, by the founder's ruling. The CEO decides them: once a
+slug is delivered, `br-ceo` creates one `RELEASE: <slug>` card for `br-eng-lead`, and only the lead,
+on such a card, promotes `dev` to `main` through a pull request and deploys production. The eng-lead
+skill, "On a `RELEASE: <slug>` card", lists the checks the card must pass first. Nobody else merges
+into `main` or deploys production: a card that asks anyone else to is moved to `blocked` with the
+note `releases belong to the engineering lead`.
+
+**The production guard.** Every production script still stops for a person to type `production` at
+a terminal (`guardProduction` in `apps/web/scripts/lib/env.mjs`), and an agent has no terminal.
+Until the founder removes that gate, steps 6 and 7 below stop at it and change nothing in
+production, and step 8 has nothing to check: the merge into `main` is the release, and the card's
+note says production was not deployed and why.
+
+**The release steps,** which the lead runs on a `RELEASE: <slug>` card that passed its checks:
 
 1. Check that staging runs the tip of `origin/dev`: `curl -s <staging URL>/api/health` shows
    `version`, the first 12 characters of that commit.
 2. Run `pnpm web:smoke <staging URL>` and the checks in [After every deploy](#after-every-deploy).
 3. List the migrations in `apps/web/drizzle/` that production has not run, from the pull requests
    since the last release.
-4. Move the card to `blocked` with the note `releases are the founder's`, and in a comment give the
-   `dev` commit, the staging smoke result, the migrations to run, and the release steps below.
-
-**The release steps,** which the founder runs from a terminal:
-
-1. Open a pull request from `dev` into `main` and merge it. Never push to `main`.
-2. Check out `origin/main` in a clean tree.
-3. `pnpm web:db:migrate:production`, if there are migrations.
-4. `pnpm web:deploy:production`. It deploys only the tip of `origin/main` and runs the smoke check.
-5. Do the checks in [After every deploy](#after-every-deploy) against production.
-6. Close the `RELEASE` card with the `main` commit, the version id and the smoke result.
+4. Open a pull request from `dev` into `main` titled `release: <slug>`, wait for its checks, and
+   merge it with a merge commit. Never push to `main`.
+5. Check out `origin/main` in a clean tree.
+6. `pnpm web:db:migrate:production`, if there are migrations.
+7. `pnpm web:deploy:production`. It deploys only the tip of `origin/main` and runs the smoke check.
+8. Do the checks in [After every deploy](#after-every-deploy) against production. If one fails, roll
+   production back (below) and move the card to `blocked` with what failed.
+9. Move the `RELEASE` card to `done` with the pull request, the `main` commit, the version id and
+   the smoke result.
 
 The first production release also needs `pnpm web:provision:production` and
 `pnpm web:secrets:sync:production`, and a Clerk production instance on a custom domain. See
@@ -136,7 +143,8 @@ A rollback makes an earlier Worker version live again. It takes seconds and need
 A rollback does not touch D1. The old code runs against the new schema, which is why every
 migration must keep working with the code before it. Never "roll back" a migration by hand.
 
-Production rollbacks (`pnpm web:rollback:production`) are the founder's, like releases.
+Production rollbacks (`pnpm web:rollback:production`) are the lead's, like releases: on the
+`RELEASE` card whose production checks failed.
 
 ## D1 migrations
 
@@ -222,8 +230,9 @@ If any check fails and the version before was fine, roll back first, then invest
 
 - Deploy only committed code at the tip of `origin/dev` (staging) or `origin/main` (production).
   `--any-commit` exists for staging tests only; redeploy `dev` afterwards.
-- Never deploy production, merge into `main`, roll back production or touch production D1. Those are
-  the founder's.
+- Merge into `main`, deploy production, migrate production D1 or roll production back only as
+  `br-eng-lead`, on a `RELEASE: <slug>` card from the CEO. Nobody else does any of these, and any
+  other change to production D1, such as a restore, is the founder's.
 - Migrations go before the deploy, stay backwards compatible, and are never edited once applied.
 - Never print, log, commit or echo a secret, and never put one on a command line.
 - Never force-push or rewrite published history. Every change reaches `dev` through a pull request.

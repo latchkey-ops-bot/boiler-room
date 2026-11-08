@@ -16,7 +16,16 @@
     "qc": "node src/cli/qc.ts",
     "film": "tsx src/cli/film.ts",
     "test": "vitest run",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "company:sync": "node src/cli/company-sync.ts",
+    "company:status": "node src/cli/company-status.ts",
+    "company:verify": "node src/cli/company-verify.ts",
+    "company:halt": "node src/cli/company-halt.ts",
+    "gtm:day": "node src/cli/gtm-day.ts",
+    "gtm:report": "node src/cli/gtm-report.ts",
+    "gtm:halt": "node src/cli/gtm-halt.ts",
+    "gtm:schedule": "node src/cli/gtm-schedule.ts",
+    "gtm:flags": "node src/cli/gtm-flags.ts"
   },
   "dependencies": {
     "@boiler-room/motion": "workspace:*",
@@ -25,6 +34,7 @@
     "@usenaive-sdk/managed-agents": "0.12.3",
     "esbuild": "0.28.2",
     "tsx": "4.23.15",
+    "tldts": "6.1.86",
     "zod": "4.6.7"
   },
   "devDependencies": {

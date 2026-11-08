@@ -52,8 +52,13 @@ were not benchmarked on real briefs.
 - **Account Manager.** The app's `send_email` tool, under the same allowlist and quota rules as GTM.
   It sees only the inbox reader's fixed fields, never raw email.
 
-Every crew agent uses the [base policy](../README.md#3-roles) except the board tools, which it does
-not have. That includes an explicit `allowed_apps`, and every `br-app.*` tool named off, except
+Every crew agent uses the [base policy](../README.md#3-roles) except the board tools, which it names
+off. `br-ceo` is the organization's CEO, so its board is the company board, which seats every agent
+of the organization, and a seated agent is offered both board tools even under a deny default
+(verified). Named off, a crew agent can neither read nor write company cards. The live
+`br-director`, `br-art-director` and `br-quality-check`, synced from their own branches, did not
+name them yet on 2026-11-07. The base policy also means an explicit `allowed_apps`, and every
+`br-app.*` tool named off, except
 `br-app.send_email` for the Account Manager. Budgets are set per film by the pipeline, through each
 session's `budget_micro_usd`.
 
@@ -69,5 +74,8 @@ These are in `CLAUDE.md`, and the crew must follow them:
 ## A caveat to keep
 
 Naive seats every agent in the org on the **company board** once an agent is bound as the platform
-CEO. This spec binds none. If anyone ever binds one, the crew agents would join that board and
-receive board tools automatically.
+CEO, and `br-ceo` is bound. So every crew agent sits on that board and is offered both board tools
+unless its own toolset names them off, which `toolset()` in `agents/src/define.ts` does. A crew
+agent synced from a branch without that `define.ts`, or a per-run Researcher made from one, can
+create and assign company cards, and an assigned card starts its assignee at once. `company:verify`
+fails while any agent is offered a board tool its definition does not give it.

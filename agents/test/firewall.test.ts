@@ -5,6 +5,7 @@ import {
   CHAIN,
   egressRules,
   JUMP,
+  LOCAL_SHELL_PORTS,
   nameservers,
   parseSave,
   REFUSED_PROBES,
@@ -58,12 +59,15 @@ describe('egressRules', () => {
   const v4 = egressRules(4, servers);
   const v6 = egressRules(6, servers);
 
-  it('keeps loopback and replies open before anything is refused', () => {
-    expect(v4.slice(0, 2)).toEqual([
+  it('refuses local connections to the shell services, then keeps loopback and replies open', () => {
+    expect(v4.slice(0, 4)).toEqual([
+      `-A ${CHAIN} -o lo -p tcp -m tcp --dport 7681 -j REJECT --reject-with tcp-reset`,
+      `-A ${CHAIN} -o lo -p tcp -m tcp --dport 22 -j REJECT --reject-with tcp-reset`,
       `-A ${CHAIN} -o lo -j ACCEPT`,
       `-A ${CHAIN} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT`,
     ]);
-    expect(v6.slice(0, 2)).toEqual(v4.slice(0, 2));
+    expect(v6.slice(0, 4)).toEqual(v4.slice(0, 4));
+    expect(LOCAL_SHELL_PORTS).toEqual([7681, 22]);
   });
 
   it('refuses every private IPv4 range, TCP with a reset and the rest with port unreachable', () => {
@@ -82,7 +86,9 @@ describe('egressRules', () => {
       '0.0.0.0/8',
       '224.0.0.0/4',
     ]);
-    expect(v4.filter((rule) => rule.includes('REJECT'))).toHaveLength(BLOCKED_IPV4.length * 2);
+    expect(v4.filter((rule) => rule.includes('REJECT'))).toHaveLength(
+      BLOCKED_IPV4.length * 2 + LOCAL_SHELL_PORTS.length,
+    );
   });
 
   it('refuses unique-local and link-local IPv6, and never names an IPv4 range there', () => {
@@ -95,7 +101,9 @@ describe('egressRules', () => {
         `-A ${CHAIN} -d ${range} -j REJECT --reject-with icmp6-port-unreachable`,
       );
     }
-    expect(v6.filter((rule) => rule.includes('REJECT'))).toHaveLength(BLOCKED_IPV6.length * 2);
+    expect(v6.filter((rule) => rule.includes('REJECT'))).toHaveLength(
+      BLOCKED_IPV6.length * 2 + LOCAL_SHELL_PORTS.length,
+    );
     expect(v6.some((rule) => /\d+\.\d+\.\d+\.\d+/.test(rule))).toBe(false);
   });
 

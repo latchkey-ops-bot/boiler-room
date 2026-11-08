@@ -65,8 +65,8 @@ export interface FilmOrderStatus {
   orderId: string;
   /** `ready` once a film was rendered and reviewed; `qc` says whether it passed. */
   state: OrderState;
-  /** The app's Stage, such as `render`. */
-  stage: FilmStage | null;
+  /** The app's Stage, such as `render` (a `FilmStage` from `pnpm film`). */
+  stage: string | null;
   qc: 'pending' | 'pass' | 'fail';
   /** True for DryRunFilmOrder and the app's SimulatedPipeline. */
   simulated: boolean;
@@ -166,19 +166,18 @@ export interface FilmDecisions {
 // ---------------------------------------------------------------------------------------------
 // The dry run
 
-/** A short id from `input`, the same every time. FNV-1a, so it needs no crypto module. */
-export function stableId(prefix: string, input: string, length = 6): string {
+/**
+ * A short id from `input`, the same every time: the first bytes of its SHA-256 in an alphabet with
+ * no look-alike characters, as GTM's `stableId` makes them. Web Crypto, so no `node:` import.
+ */
+export async function stableId(prefix: string, input: string, length = 6): Promise<string> {
   const alphabet = '23456789abcdefghjkmnpqrstuvwxyz';
+  const digest = new Uint8Array(
+    await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(input)),
+  );
   let id = '';
-  for (let round = 0; id.length < length; round += 1) {
-    let hash = 0x811c9dc5 ^ round;
-    for (let index = 0; index < input.length; index += 1) {
-      hash ^= input.charCodeAt(index);
-      hash = Math.imul(hash, 0x01000193) >>> 0;
-    }
-    for (let left = 0; left < 4 && id.length < length; left += 1) {
-      id += alphabet[(hash >>> (left * 8)) % alphabet.length];
-    }
+  for (let index = 0; index < length; index++) {
+    id += alphabet[(digest[index] ?? 0) % alphabet.length];
   }
   return `${prefix}-${id}`;
 }
@@ -186,7 +185,7 @@ export function stableId(prefix: string, input: string, length = 6): string {
 /**
  * Needs no network. An order moves from `queued` to `ready` over three status reads, is always
  * `simulated`, has a page address marked as not real, no file and no decisions. A simulated film
- * can only ever produce drafts.
+ * can only ever produce drafts. GTM's dry run, unchanged, with `decisions` added.
  */
 export class DryRunFilmOrder implements FilmOrder {
   readonly kind = 'dry-run' as const;
@@ -197,7 +196,7 @@ export class DryRunFilmOrder implements FilmOrder {
     this.appBase = appBase;
   }
   async order(input: { idempotencyKey: string }) {
-    const orderId = stableId('fo-dry', input.idempotencyKey);
+    const orderId = await stableId('fo-dry', input.idempotencyKey);
     if (!this.reads.has(orderId)) this.reads.set(orderId, 0);
     return { orderId };
   }
@@ -214,7 +213,7 @@ export class DryRunFilmOrder implements FilmOrder {
     return {
       orderId,
       state,
-      stage: state === 'ready' ? 'delivery' : state === 'working' ? 'render' : null,
+      stage: state === 'ready' ? 'delivered' : state === 'working' ? 'render' : null,
       qc: state === 'ready' ? 'pass' : 'pending',
       simulated: true,
       costMicroUsd: 0,

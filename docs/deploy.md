@@ -16,11 +16,11 @@ flowchart LR
   worker -.->|PipelineClient| crew["Film crew on Naive<br/>(not wired yet)"]
 ```
 
-| Environment | Worker                       | URL                                                      | D1                       | R2                             | Deploys                  | Who           |
-| ----------- | ---------------------------- | -------------------------------------------------------- | ------------------------ | ------------------------------ | ------------------------ | ------------- |
-| Local       | workerd on your computer     | `http://localhost:3000`, or `:8787` for the built Worker | `.wrangler/state`        | `.wrangler/state`              | Your working tree        | Anyone        |
-| Staging     | `boiler-room-web-staging`    | https://boiler-room-web-staging.boilerroom.workers.dev   | `boiler-room-staging`    | `boiler-room-films-staging`    | The tip of `origin/dev`  | `br-eng-lead` |
-| Production  | `boiler-room-web-production` | Not deployed yet                                         | `boiler-room-production` | `boiler-room-films-production` | The tip of `origin/main` | The founder   |
+| Environment | Worker                       | URL                                                      | D1                       | R2                             | Deploys                  | Who                                |
+| ----------- | ---------------------------- | -------------------------------------------------------- | ------------------------ | ------------------------------ | ------------------------ | ---------------------------------- |
+| Local       | workerd on your computer     | `http://localhost:3000`, or `:8787` for the built Worker | `.wrangler/state`        | `.wrangler/state`              | Your working tree        | Anyone                             |
+| Staging     | `boiler-room-web-staging`    | https://boiler-room-web-staging.boilerroom.workers.dev   | `boiler-room-staging`    | `boiler-room-films-staging`    | The tip of `origin/dev`  | `br-eng-lead`                      |
+| Production  | `boiler-room-web-production` | Not deployed yet                                         | `boiler-room-production` | `boiler-room-films-production` | The tip of `origin/main` | `br-eng-lead`, on a `RELEASE` card |
 
 Staging makes simulated films: no crew runs, the script is a sample, and every screen says
 "Simulated". Production never makes simulated films. Until the Naive pipeline is wired, starting a
@@ -61,9 +61,11 @@ development instance.
 
 The token in the env file today could create the staging D1 database and R2 bucket, apply
 migrations, set secrets, deploy, list versions and tail logs. A Cloudflare token reaches the whole
-account, not one Worker, so it could deploy production too. What stops an agent is the production
-guard: every production script waits for a person to type `production` at a terminal, and an agent
-has no terminal.
+account, not one Worker, so it could deploy production too. What stops an agent today is the
+production guard: every production script waits for a person to type `production` at a terminal,
+and an agent has no terminal. Releases are the engineering lead's (see "How a change reaches
+customers"), so until the founder removes that guard, the lead's release stops at the merge into
+`main`.
 
 **For the engineering lead's computer (founder action, not done yet):** the lead needs the same
 file with `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the two Clerk keys, written by the
@@ -115,11 +117,12 @@ chromium`.
 1. **Build.** An engineer opens a pull request into `dev` (an `ENG` card).
 2. **Staging.** The engineering lead merges it, migrates staging if the change has a migration, runs
    `pnpm web:deploy:staging`, and checks it (a `SHIP` card).
-3. **Release.** Production is the founder's. A release promotes `dev`, already proven on staging,
-   to `main` and to production (a `RELEASE` card, which the lead prepares and the founder runs):
+3. **Release.** Releases are autonomous. A release promotes `dev`, already proven on staging, to
+   `main` and to production. The CEO creates a `RELEASE` card for the engineering lead once a slug
+   is delivered, and the lead runs it; nobody else merges into `main` or deploys production:
 
    ```sh
-   # 1. Open a pull request from dev into main, and merge it on GitHub.
+   # 1. Open a pull request from dev into main, and merge it with a merge commit.
    git fetch origin && git checkout --detach origin/main   # a clean tree
    pnpm install --frozen-lockfile
    pnpm web:db:migrate:production    # only if the release has migrations

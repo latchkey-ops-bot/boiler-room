@@ -13,7 +13,7 @@ export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';
 export type { NameOptions } from './names.ts';
 export { namesIn, namesNotQuoted } from './names.ts';
-export type { NumericToken } from './numbers.ts';
+export type { NumericKind, NumericToken } from './numbers.ts';
 export { extractNumericTokens, isBacked } from './numbers.ts';
 export type { ResearchParts, ResearchPartsResult } from './research.ts';
 export { researchPartsSchema, validateResearchParts } from './research.ts';

@@ -10,29 +10,32 @@ export const ENV_FILE = process.env.BOILER_ROOM_ENV ?? join(homedir(), '.boiler-
 
 export type Naive = ReturnType<typeof createClient>;
 
-let secret: string | undefined;
+/** Every secret read so far. `scrub` removes each of them from text before it is printed or saved. */
+const secrets = new Set<string>();
 
-function readKey(): string {
-  if (secret) return secret;
+/** Reads one variable from the env file at run time. It is never printed, logged or passed in argv. */
+export function readSecret(name: string): string {
   let text: string;
   try {
     text = readFileSync(ENV_FILE, 'utf8');
   } catch {
-    throw new Error(`Cannot read ${ENV_FILE}. Put NAIVE_API_KEY=... in it.`);
+    throw new Error(`Cannot read ${ENV_FILE}. Put ${name}=... in it.`);
   }
-  const key = /^(?:export\s+)?NAIVE_API_KEY=["']?([^"'\s]+)/m.exec(text)?.[1];
-  if (!key) throw new Error(`${ENV_FILE} has no NAIVE_API_KEY.`);
-  secret = key;
-  return key;
+  const value = new RegExp(`^(?:export\\s+)?${name}=["']?([^"'\\s]+)`, 'm').exec(text)?.[1];
+  if (!value) throw new Error(`${ENV_FILE} has no ${name}.`);
+  secrets.add(value);
+  return value;
 }
 
 export function naiveClient(): Naive {
-  return createClient({ baseUrl: NAIVE_BASE_URL, apiKey: readKey() });
+  return createClient({ baseUrl: NAIVE_BASE_URL, apiKey: readSecret('NAIVE_API_KEY') });
 }
 
-/** Removes the key from any text before it is printed or saved. */
+/** Removes every secret read so far from any text before it is printed or saved. */
 export function scrub(text: string): string {
-  return secret ? text.split(secret).join('[REDACTED]') : text;
+  let out = text;
+  for (const value of secrets) out = out.split(value).join('[REDACTED]');
+  return out;
 }
 
 export const usd = (micro: number) => `$${(micro / 1e6).toFixed(4)}`;

@@ -15,6 +15,7 @@ import {
   DryRunFilmOrder,
   FILM_STAGES,
   FILM_STATUSES,
+  stableId,
 } from '../src/film/order.ts';
 import {
   briefFailure,
@@ -28,6 +29,8 @@ import {
   type StageCost,
   type StageOutcome,
 } from '../src/film/run.ts';
+import { stableId as gtmStableId } from '../src/gtm/domain.ts';
+import { DryRunFilmOrder as GtmDryRun } from '../src/gtm/ports.ts';
 import type { QcIssue, QcReport } from '../src/quality/output.ts';
 
 // ---------------------------------------------------------------------------------------------
@@ -905,6 +908,12 @@ describe('decisions', () => {
 // ---------------------------------------------------------------------------------------------
 
 describe('FilmOrder', () => {
+  it('is the one GTM uses, with the same dry-run ids', async () => {
+    expect(GtmDryRun).toBe(DryRunFilmOrder);
+    for (const key of ['lead-1', 'acme.dev:2026-11-08'])
+      expect(await stableId('fo-dry', key)).toBe(gtmStableId('fo-dry', key));
+  });
+
   it('keeps the dry run: three reads to ready, simulated, no file', async () => {
     const dry = new DryRunFilmOrder('https://app.example');
     const { orderId } = await dry.order({ idempotencyKey: 'lead-1' });
