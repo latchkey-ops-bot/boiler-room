@@ -171,12 +171,19 @@ command, the key file's mode, swap, no run dir, and signing.
 - The website's key holds exactly `computers:write` and `billing:read` (the balance tripwire), which
   `secrets:sync` checks with Naive. Naive keys have no resource binding, so `computers:write` reaches
   every computer and snapshot in the organization: keep no secret on any other computer there.
+- The runner's key (`naiveKey` in the bootstrap) holds exactly `agents:read`, `sessions:read`,
+  `sessions:write`, `files:read`, `files:write`, `computers:write` and `billing:read`: the calls the
+  film command makes, each listed with its reason in `apps/web/scripts/lib/runner-secrets.mjs` and
+  in `docs/deploy.md`. Its `computers:write` is for br-researcher's computer, which the Researcher
+  resumes and pauses, and it reaches every other computer too. It has no `agents:write`, which
+  Naive also requires for image generation, so the Art Director goes on with captured pictures.
+  `pnpm web:runner:keys:staging probe --runner-key` makes every one of those calls with it.
 
 ## The film command
 
-The film command on `feat/crew-agents` (`agents/src/film/command.ts`, documented in
-`agents/README.md`) does 1 to 9 below and refuses `--revise` as bad input; 10 and 11 are still to
-do. Its test runs it with a fake crew and parses every event it writes with `parseFilmEvent`.
+The film command (`agents/src/film/command.ts`, documented in `agents/README.md`) does 1 to 9 below
+and refuses `--revise` as bad input; 10 and 11 are still to do. Its test runs it with a fake crew
+and parses every event it writes with `parseFilmEvent`.
 
 The runner calls the film command as `pnpm run --silent film <args>` in the crew checkout, with
 `filmCommandArgs`:
@@ -209,7 +216,8 @@ and the environment `BOILER_ROOM_ENV=$HOME/br-run/naive.env` (the launch's key f
 7. Exit codes: 0 only after `script_ready` (script) or `delivered` (render, all); 1 the crew
    failed; 2 bad input; 4 the cost cap; 143 stopped.
 8. `--no-sync`: never create or change an agent or push a skill, so the runner's key needs no
-   `agents:write`.
+   `agents:write`. Image generation needs it too, and is refused with a 403: the Art Director
+   records "image generation unavailable" in `decisions.json` and goes on with captured pictures.
 9. `--max-usd <n>`: lower the film's ledger limit to this.
 10. `--revise <file>` with `--phase script`: rewrite from the note as version N+1, without the
     Researcher. Until then the website answers a send-back with "approve it or start a new video".
@@ -230,7 +238,7 @@ once the real command has the items above.
 ## The base snapshot
 
 ```sh
-pnpm runner:snapshot [--film-ref feat/crew-agents | --film-commit <sha>] [--runner-commit <sha>] \
+pnpm runner:snapshot [--film-ref dev | --film-commit <sha>] [--runner-commit <sha>] \
   [--adapter auto|film|standin] [--no-fork-test]
 ```
 
@@ -240,7 +248,7 @@ the crew checkout at the crew commit with `pnpm install --frozen-lockfile`, the 
 this package's checkout at the runner commit (linked at `~/film-runner`), and `~/.film-runner.json`.
 The setup runs detached and is polled, so no exec runs longer than 600 s. Then the ready check
 (swap on, the renderer's browser launches, the self-test passes, which includes **no Naive key on
-disk**), a clean-up, and `LOCK_SUDO_SCRIPT`: the film user keeps one sudo rule, `swapon /swapfile`,
+disk**, and with the `film` adapter the film command answers `--help` with `--phase`), a clean-up, and `LOCK_SUDO_SCRIPT`: the film user keeps one sudo rule, `swapon /swapfile`,
 and loses every other grant, since the film command drives agents on content from a customer's
 URL. Then the snapshot, and the builder destroyed. A fork runs the ready check again, which also
 checks that `sudo -n true` is refused, before the id is printed. Both commits must be on origin,

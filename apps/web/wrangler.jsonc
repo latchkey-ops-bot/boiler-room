@@ -48,6 +48,12 @@
       // PIPELINE stays simulated: only the founders in REAL_FILM_USERS get real films. The
       // snapshot id and the two commits it holds are committed by pull request after a build.
       // Caps are in USD: a film's whole cap, and per founder and for staging per rolling 24 hours.
+      // A real 16:9 film costs about $1.30 for its script and $1.00 a format for the render, and
+      // Opus Director rounds can cost more, so a film may take $6.00. A founder's $15.00 a day
+      // holds two films at that cap, and staging's $20.00 a third, such as a test film, beside
+      // them. A film counts at its whole cap while it works, then at what it spent.
+      // GLOBAL_DAILY_CAP_USD is also the balance tripwire: the Naive balance down more than it in
+      // a day, from any source, halts every real film.
       "vars": {
         "APP_ENV": "staging",
         "PIPELINE": "simulated",
@@ -56,10 +62,10 @@
         "RUNNER_PUBLIC_URL": "https://boiler-room-web-staging.boilerroom.workers.dev",
         "RUNNER_COMMIT": "f68923c6021d849798701c228dba986ae327dd7e",
         "RUNNER_FILM_COMMIT": "7df0046c1b099ecec9459c50cbe1f4ce438b2374",
-        "FILM_CAP_USD": "2.50",
+        "FILM_CAP_USD": "6.00",
         "FILM_COMPUTE_RESERVE_USD": "0.50",
-        "ACCOUNT_DAILY_CAP_USD": "5.00",
-        "GLOBAL_DAILY_CAP_USD": "5.25",
+        "ACCOUNT_DAILY_CAP_USD": "15.00",
+        "GLOBAL_DAILY_CAP_USD": "20.00",
         "MAX_REAL_PER_ACCOUNT": "1",
         "MAX_REAL_GLOBAL": "1",
         "RUNNER_REVISE_SUPPORTED": "false",

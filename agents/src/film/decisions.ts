@@ -282,6 +282,20 @@ export function artDecisions(report: Json): DecisionDraft[] {
       data: { cost: usd(image.cost_micro_usd) },
     });
   }
+  // A key that may not generate images (Naive answers 403) stops nothing: the film goes on with
+  // the captured pictures and the code-built fallbacks.
+  const unavailable = text(report.generation_unavailable);
+  if (unavailable) {
+    const skipped = list(report.not_generated).map((each) => text(each.asset_id));
+    drafts.push({
+      agent: 'art_director',
+      kind: 'decision',
+      stage: 'art_direction',
+      message: 'Image generation unavailable: went on with the captured pictures',
+      why: `${unavailable.charAt(0).toUpperCase()}${unavailable.slice(1)}.${skipped.length ? ` Not generated: ${skipped.join(', ')}; ${skipped.length === 1 ? 'its scene keeps' : 'their scenes keep'} the captured pictures and the code-built fallbacks.` : ''}`,
+      data: { notGenerated: skipped },
+    });
+  }
   for (const back of list(report.sent_back)) {
     drafts.push({
       agent: 'art_director',
