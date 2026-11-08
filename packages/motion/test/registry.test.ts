@@ -10,10 +10,11 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw six of the scene types in the schema registry, under its names', () => {
+  it('draw seven of the scene types in the schema registry, under its names', () => {
     expect(IMPLEMENTED_SCENE_TYPES).toEqual([
       'word-slam',
       'site-hero',
+      'site-scroll',
       'proof-bars',
       'stat-counter',
       'feature-card',
@@ -68,6 +69,11 @@ describe('scene templates', () => {
           },
         ],
       },
+      'site-scroll': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [{ id: 'browser', entry: undefined, exit: { axis: 'x', sign: 1, v: 46 } }],
+      },
       'proof-bars': {
         kind: 'proof',
         ground: 'base plate',
@@ -113,9 +119,11 @@ describe('scene templates', () => {
   });
 
   it('give every template a component and a props schema that needs no props', () => {
-    for (const definition of Object.values(sceneImplementations)) {
+    // site-scroll's pages are capture data it cannot land page 2 without, so it needs them.
+    const needsProps = new Set(['site-scroll']);
+    for (const [type, definition] of Object.entries(sceneImplementations)) {
       expect(typeof definition.component).toBe('function');
-      expect(definition.props.safeParse({}).success).toBe(true);
+      expect(definition.props.safeParse({}).success).toBe(!needsProps.has(type));
     }
   });
 });

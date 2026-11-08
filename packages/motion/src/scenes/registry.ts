@@ -4,6 +4,7 @@ import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
 import { proofBars } from './proof-bars.tsx';
 import { siteHero } from './site-hero.tsx';
+import { siteScroll } from './site-scroll.tsx';
 import { statCounter } from './stat-counter.tsx';
 import { wordSlam } from './word-slam.tsx';
 
@@ -16,6 +17,7 @@ import { wordSlam } from './word-slam.tsx';
 export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> = {
   'word-slam': wordSlam,
   'site-hero': siteHero,
+  'site-scroll': siteScroll,
   'proof-bars': proofBars,
   'stat-counter': statCounter,
   'feature-card': featureCard,
