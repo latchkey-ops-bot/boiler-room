@@ -6,24 +6,24 @@ has a $0 budget, gets no cards, and has no cron.
 
 ## Agents
 
-| Agent | Purpose | Model | Started by, once active |
-| --- | --- | --- | --- |
-| `br-gtm-lead` | Plans each launch push, writes outreach, picks which leads get a sample film, and sends email through the app | `anthropic/claude-sonnet-5.5` | Board cards from the CEO: `GTM: <slug>`, and the deployment `br-gtm-inbox`: cron `0 * * * *`, `budget_micro_usd: 1_000_000`, to act on new inbox summaries |
-| `br-scout` | Finds and qualifies leads with Naive Data | `anthropic/claude-haiku-5.5` | Board cards from the GTM lead: `LEADS: <slug>` |
-| `br-social` | Posts and schedules on social networks, and reads post metrics | `anthropic/claude-haiku-5.5` | Board cards from the GTM lead: `POST: <slug>` |
-| `br-inbox-reader` | Reads one inbound email and returns fixed fields. It is not on the roster or the board. | `anthropic/claude-haiku-5.5` | A session started by the app when AgentMail reports a new message |
+| Agent             | Purpose                                                                                                       | Model                         | Started by, once active                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `br-gtm-lead`     | Plans each launch push, writes outreach, picks which leads get a sample film, and sends email through the app | `anthropic/claude-sonnet-5.5` | Board cards from the CEO: `GTM: <slug>`, and the deployment `br-gtm-inbox`: cron `0 * * * *`, `budget_micro_usd: 1_000_000`, to act on new inbox summaries |
+| `br-scout`        | Finds and qualifies leads with Naive Data                                                                     | `anthropic/claude-haiku-5.5`  | Board cards from the GTM lead: `LEADS: <slug>`                                                                                                             |
+| `br-social`       | Posts and schedules on social networks, and reads post metrics                                                | `anthropic/claude-haiku-5.5`  | Board cards from the GTM lead: `POST: <slug>`                                                                                                              |
+| `br-inbox-reader` | Reads one inbound email and returns fixed fields. It is not on the roster or the board.                       | `anthropic/claude-haiku-5.5`  | A session started by the app when AgentMail reports a new message                                                                                          |
 
 Haiku agents get the line "Never call two tools in the same step." in their system prompt. Haiku
 otherwise fires tool calls in parallel, which broke ordered steps in earlier probes.
 
 ## Budgets
 
-| Agent | Now | When active |
-| --- | --- | --- |
-| `br-gtm-lead` | $0 cap, $0 per task | $4 a day, $1.00 per task |
-| `br-scout` | $0, $0 | $5 a day, $1.00 per task |
-| `br-social` | $0, $0 | $2 a day, $1.00 per task |
-| `br-inbox-reader` | $0, $0 | $1 a day, $0.15 per message |
+| Agent             | Now                 | When active                 |
+| ----------------- | ------------------- | --------------------------- |
+| `br-gtm-lead`     | $0 cap, $0 per task | $4 a day, $1.00 per task    |
+| `br-scout`        | $0, $0              | $5 a day, $1.00 per task    |
+| `br-social`       | $0, $0              | $2 a day, $1.00 per task    |
+| `br-inbox-reader` | $0, $0              | $1 a day, $0.15 per message |
 
 Unit prices seen: Find Work Email $0.042 a call, Enrich Person $0.032, Search Google $0.00015. A
 social post costs $0.013, or $0.0325 when X is included, or $0.273 when X is included and the text
@@ -31,23 +31,23 @@ has a link.
 
 ## Tools
 
-| Tool | GTM lead | Scout | Social | Inbox reader |
-| --- | --- | --- | --- | --- |
-| `board_read`, `board_write` | allow | allow | allow | not seated |
-| `submit_output`, `session_spend` | allow | allow | allow | allow |
-| `br-app.send_email` (the app's own MCP tool) | allow | off | off | off |
-| `br-app.inbox_summaries`, `br-app.leads` (read) | allow | allow | off | off |
-| `br-app.leads_upsert`, `br-app.request_sample` | allow | `leads_upsert` only | off | off |
-| `data_search`, `data_describe` | allow | allow | off | off |
-| `data_run` | off | allow (it asks unless named) | off | off |
-| `social.accounts`, `social.post`, `social.status`, `social.post_metrics`, `social.cancel` | off | off | allow, each one named | off |
-| AgentMail MCP: `get_message` | off | off | off | allow |
-| AgentMail MCP: the other 53 tools, including every send, reply, forward, draft, delete, create, connect and authorize tool | off | off | off | off, each one named |
-| Every other app tool, such as `br-app.company_metrics` and `br-app.feedback_summaries` | off, each one named | off, each one named | off, each one named | off, each one named |
-| `apps` | off, with `config.allowed_apps: [<app id>]` | same | same | same |
-| `bash`, `read`, `write`, `edit`, `fetch_file`, `browser`, `web_fetch` | off | off | off | off |
-| Identity | GTM persona | none | GTM persona | none |
-| Vault | none | none | none | AgentMail key, `static_bearer` for `https://mcp.agentmail.to/mcp`, bound to this agent |
+| Tool                                                                                                                       | GTM lead                                    | Scout                        | Social                | Inbox reader                                                                           |
+| -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ---------------------------- | --------------------- | -------------------------------------------------------------------------------------- |
+| `board_read`, `board_write`                                                                                                | allow                                       | allow                        | allow                 | not seated                                                                             |
+| `submit_output`, `session_spend`                                                                                           | allow                                       | allow                        | allow                 | allow                                                                                  |
+| `br-app.send_email` (the app's own MCP tool)                                                                               | allow                                       | off                          | off                   | off                                                                                    |
+| `br-app.inbox_summaries`, `br-app.leads` (read)                                                                            | allow                                       | allow                        | off                   | off                                                                                    |
+| `br-app.leads_upsert`, `br-app.request_sample`                                                                             | allow                                       | `leads_upsert` only          | off                   | off                                                                                    |
+| `data_search`, `data_describe`                                                                                             | allow                                       | allow                        | off                   | off                                                                                    |
+| `data_run`                                                                                                                 | off                                         | allow (it asks unless named) | off                   | off                                                                                    |
+| `social.accounts`, `social.post`, `social.status`, `social.post_metrics`, `social.cancel`                                  | off                                         | off                          | allow, each one named | off                                                                                    |
+| AgentMail MCP: `get_message`                                                                                               | off                                         | off                          | off                   | allow                                                                                  |
+| AgentMail MCP: the other 53 tools, including every send, reply, forward, draft, delete, create, connect and authorize tool | off                                         | off                          | off                   | off, each one named                                                                    |
+| Every other app tool, such as `br-app.company_metrics` and `br-app.feedback_summaries`                                     | off, each one named                         | off, each one named          | off, each one named   | off, each one named                                                                    |
+| `apps`                                                                                                                     | off, with `config.allowed_apps: [<app id>]` | same                         | same                  | same                                                                                   |
+| `bash`, `read`, `write`, `edit`, `fetch_file`, `browser`, `web_fetch`                                                      | off                                         | off                          | off                   | off                                                                                    |
+| Identity                                                                                                                   | GTM persona                                 | none                         | GTM persona           | none                                                                                   |
+| Vault                                                                                                                      | none                                        | none                         | none                  | AgentMail key, `static_bearer` for `https://mcp.agentmail.to/mcp`, bound to this agent |
 
 The `apps` tool is turned off, but `allowed_apps` still names the app. That keeps the app's own
 tools on offer while removing deploy, secrets and database access (verified).
@@ -85,11 +85,11 @@ running `bash` and makes every later call wait for a human (verified). Naive ema
 
 ## Reports
 
-| What | To whom | How |
-| --- | --- | --- |
-| Leads found and qualified | The GTM lead, then the CEO | `LEADS` card note, and the digest |
-| Posts made and their metrics | The GTM lead, then the CEO | `POST` card note |
-| Outreach sent and replies | The CEO | `GTM` card note, and `br-app.company_metrics` |
+| What                         | To whom                    | How                                           |
+| ---------------------------- | -------------------------- | --------------------------------------------- |
+| Leads found and qualified    | The GTM lead, then the CEO | `LEADS` card note, and the digest             |
+| Posts made and their metrics | The GTM lead, then the CEO | `POST` card note                              |
+| Outreach sent and replies    | The CEO                    | `GTM` card note, and `br-app.company_metrics` |
 
 ## Activation checklist
 
