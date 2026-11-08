@@ -157,6 +157,10 @@
 .showcase-page {
   min-height: 60vh;
 }
+/* For a founder who opted in: where their own film is, above the wall. */
+.showcase-page .wall-mine {
+  margin-bottom: var(--br-space-5);
+}
 
 @media (max-width: 760px) {
   .format-wide {

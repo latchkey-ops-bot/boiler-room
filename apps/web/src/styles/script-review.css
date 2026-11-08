@@ -353,7 +353,19 @@
     box-shadow: 0 calc(var(--br-px) * -1) 0 0 var(--br-deep);
   }
   .decide.is-sticky p {
-    font-size: var(--br-text-sm);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+  /* Side by side, so the bar covers as little of the script as it can. */
+  .decide.is-sticky .decide-actions {
+    flex-wrap: nowrap;
+    gap: var(--br-space-2);
+  }
+  .decide.is-sticky .decide-actions .btn {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 8px;
+    font-size: 15px;
   }
 }
 @media (max-width: 640px) {

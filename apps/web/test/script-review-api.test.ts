@@ -92,7 +92,7 @@ describe('script review decisions', () => {
     expect(detail.film).toMatchObject({ status: 'working', stage: 'art_direction' });
     expect(detail.events.at(-1)).toMatchObject({
       agent: 'customer',
-      message: 'Approved version 1.',
+      message: 'Approved version 1, and confirmed "Plans start at $29 per seat".',
     });
     if (!detail.campaign) return;
     const model = review(detail);

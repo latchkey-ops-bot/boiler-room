@@ -36,6 +36,8 @@ export interface ScriptDecision {
   hookId: string | null;
   ctaId: string | null;
   formats: Format[];
+  /** Claims nobody had confirmed, which the customer confirmed when approving. */
+  confirmedClaimIds?: string[];
   at: Date;
 }
 
@@ -244,7 +246,7 @@ export function timeline(runId: string, run: SimulatedRun, pace = 1): TimedEvent
       readyAt = lastAt(base);
       continue;
     }
-    add(base, production(version, decision.formats));
+    add(base, production(version, decision.formats, decision.confirmedClaimIds ?? []));
     // A revision counts only on the version that was delivered, once it was delivered.
     const deliveredAt = lastAt(base);
     const revision = revisions.find(
@@ -454,9 +456,12 @@ function shorten(note: string): string {
   return note.length > 80 ? `${note.slice(0, 79)}…` : note;
 }
 
-function production(version: number, formats: Format[]): Planned[] {
+function production(version: number, formats: Format[], confirmed: string[]): Planned[] {
   const files = formats.length === 1 ? '1 file' : `${formats.length} files`;
   const shapes = formats.join(', ');
+  const vouched = SAMPLE_CAMPAIGN.claims
+    .filter((claim) => confirmed.includes(claim.id))
+    .map((claim) => `"${claim.text}"`);
   return [
     step(
       0,
@@ -464,7 +469,9 @@ function production(version: number, formats: Format[]): Planned[] {
       'decision',
       'art_direction',
       'working',
-      `Approved version ${version}.`,
+      vouched.length > 0
+        ? `Approved version ${version}, and confirmed ${vouched.join(' and ')}.`
+        : `Approved version ${version}.`,
       version,
     ),
     step(

@@ -51,6 +51,7 @@ export function d1Ledger(db: Db): SimulationLedger {
           hookId: row.chosenHook,
           ctaId: row.chosenCta,
           formats: parseFormats(row.formatsJson),
+          confirmedClaimIds: parseIdList(row.confirmedClaimsJson),
           at: row.decidedAt,
         })),
         revisions: asked.map((row) => ({
@@ -70,6 +71,16 @@ export function parseFormats(json: string | null): Format[] {
     return Array.isArray(value)
       ? value.filter((item): item is Format => FORMATS.includes(item as Format))
       : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseIdList(json: string | null): string[] {
+  if (!json) return [];
+  try {
+    const value: unknown = JSON.parse(json);
+    return Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string') : [];
   } catch {
     return [];
   }
