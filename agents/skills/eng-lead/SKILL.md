@@ -40,11 +40,18 @@ file.
    check it against the card's acceptance criteria and the rules in `CLAUDE.md`.
 2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_`,
    `ghp_` or `BEGIN OPENSSH PRIVATE KEY`.
-3. Merge each passing pull request into `dev`, squashed, with `curl --netrc -s -X PUT
-   https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>/merge` and the body
-   `{"merge_method":"squash"}`. Then run lint, typecheck and tests on the merged `dev`, in a script
-   run in the background, because a `bash` call is killed after about 30 seconds.
-4. Deploy staging, following `engineering-deploy`, "Deploy staging from a `SHIP: <slug>` card": in
+3. Check each one before you merge it, never after: a pull request merged to find out breaks
+   `dev` for everyone. In `~/boiler-room` (clone the repo there if it is missing), run
+   `git fetch origin pull/<n>/head:pr-<n> && git checkout --detach pr-<n>`, then run
+   `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test` in a script run in
+   the background, because a `bash` call is killed after about 30 seconds, and poll its log until it
+   prints its exit line. The engineer's note saying the checks pass is not a check. A pull request
+   whose checks fail has failed review: go to step 7, and do not merge it.
+4. Merge each pull request that passed review and its checks into `dev`, squashed, with
+   `curl --netrc -s -X PUT https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>/merge`
+   and the body `{"merge_method":"squash"}`. Then run the same checks on the merged `dev`, in a
+   background script.
+5. Deploy staging, following `engineering-deploy`, "Deploy staging from a `SHIP: <slug>` card": in
    a clean checkout of `origin/dev`, if any merged pull request added a file under
    `apps/web/drizzle/`, run `pnpm web:db:migrate:staging` first; then run
    `pnpm web:deploy:staging` in a background script. It deploys only the tip of `origin/dev`, and
@@ -52,9 +59,9 @@ file.
    `pnpm web:rollback:staging` and say so in the note. If a script stops because a key is missing
    from `~/.boiler-room.env`, move the card to `blocked` with the note `credential missing` and the
    key's name, which the script prints (never its value).
-5. Move `SHIP` to `done`. The note gives the merged pull requests, the `dev` commit, the Worker
+6. Move `SHIP` to `done`. The note gives the merged pull requests, the `dev` commit, the Worker
    version id and tag, the URL, the migrations you applied (or none), and the smoke result.
-6. If a pull request fails review, comment why on the pull request. Create
+7. If a pull request fails review or its checks, comment why on the pull request. Create
    `ENG: <slug> fix <n>` for its engineer, and `SHIP: <slug> r2` assigned to yourself and blocked by
    that fix card, because a card's `blocked_by` is fixed once it exists. Then move this card to
    `done` with a note saying it was sent back.

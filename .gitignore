@@ -3,3 +3,4 @@ out
 .playwright-mcp
 *.mp4
 .env*
+agents/evals/.state

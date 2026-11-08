@@ -116,14 +116,16 @@ edited once applied. A rollback never touches D1.
    the acceptance criteria and `CLAUDE.md`.
 2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_` or
    `BEGIN OPENSSH PRIVATE KEY`.
-3. Merge each passing PR into `dev`, squashed, through the REST API. Then run lint, typecheck and
-   tests on the merged `dev`.
-4. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
+3. Check out each PR's head and run lint, typecheck and tests on it, before any merge. A PR whose
+   checks fail has failed review (step 7). The engineer's note that they pass is not a check.
+4. Merge each PR that passed review and its checks, squashed, through the REST API. Then run the
+   same checks on the merged `dev`.
+5. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
    `pnpm web:deploy:staging`, which deploys only the tip of `origin/dev` and runs the smoke check,
    then do the skill's checks after every deploy.
-5. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the Worker version id and
+6. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the Worker version id and
    URL, and the smoke result.
-6. If a PR fails review, comment why on the PR. Create `ENG: <slug> fix <n>` for its engineer, and
+7. If a PR fails review or its checks, comment why on the PR. Create `ENG: <slug> fix <n>` for its engineer, and
    `SHIP: <slug> r2` blocked by that fix card. Then move this card to `done` with a note saying it
    was sent back.
 

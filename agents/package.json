@@ -20,7 +20,8 @@
     "gtm:report": "node src/cli/gtm-report.ts",
     "gtm:halt": "node src/cli/gtm-halt.ts",
     "gtm:schedule": "node src/cli/gtm-schedule.ts",
-    "gtm:flags": "node src/cli/gtm-flags.ts"
+    "gtm:flags": "node src/cli/gtm-flags.ts",
+    "evals": "node evals/cli.ts"
   },
   "dependencies": {
     "@boiler-room/schema": "workspace:*",
