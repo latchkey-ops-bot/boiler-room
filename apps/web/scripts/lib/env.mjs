@@ -76,8 +76,16 @@ export function valueFor(vars, name, env) {
   return value === '' ? null : value;
 }
 
-/** Clerk development-instance keys start with these. Production must never get one. */
+/** Clerk development-instance keys start with these. */
 const CLERK_TEST_PREFIXES = ['sk_test_', 'pk_test_'];
+
+/**
+ * The value of `CLERK_INSTANCE` in an environment's `vars` in `wrangler.jsonc` that lets it sign in
+ * with Clerk's development instance. By the founder's decision of 2026-11-08 ("development is fine
+ * for clerk") production does: a Clerk production instance needs a custom domain, and production
+ * is on workers.dev. The setting is in the repo, so changing it takes a pull request.
+ */
+export const CLERK_DEVELOPMENT = 'development';
 
 /**
  * Names of production values that are Clerk development keys. Only the prefix is read; the value
@@ -92,16 +100,32 @@ export function developmentKeysIn(values) {
     .map(([name]) => name);
 }
 
-/** Stops a production build or secret sync that would use a Clerk development key. */
-export function refuseDevelopmentKeys(env, values) {
-  if (env !== 'production') return;
+/**
+ * Why a production build or secret sync must not use these values, or null when it may. Production
+ * may use Clerk development keys only when `env.production.vars.CLERK_INSTANCE` in `wrangler.jsonc`
+ * is `"development"`; with any other value, or none, a development key is refused. Pure, so both
+ * ways are tested.
+ *
+ * @param {string | undefined} env
+ * @param {[string, string | null][]} values
+ * @param {unknown} clerkInstance `CLERK_INSTANCE` from the environment's vars
+ * @returns {string | null}
+ */
+export function developmentKeyRefusal(env, values, clerkInstance) {
+  if (env !== 'production') return null;
   const names = developmentKeysIn(values);
-  if (names.length > 0) {
-    fail(
-      `${names.map((name) => `PRODUCTION_${name}`).join(', ')} ${names.length === 1 ? 'is a' : 'are'} ` +
-        "Clerk development key (sk_test_ or pk_test_). Production needs the production instance's keys.",
-    );
-  }
+  if (names.length === 0 || clerkInstance === CLERK_DEVELOPMENT) return null;
+  return (
+    `${names.map((name) => `PRODUCTION_${name}`).join(', ')} ${names.length === 1 ? 'is a Clerk development key' : 'are Clerk development keys'} ` +
+    "(sk_test_ or pk_test_). Production needs the production instance's keys, " +
+    `unless env.production.vars.CLERK_INSTANCE in wrangler.jsonc is "${CLERK_DEVELOPMENT}".`
+  );
+}
+
+/** Stops a production build or secret sync whose Clerk keys `developmentKeyRefusal` refuses. */
+export function refuseDevelopmentKeys(env, values, clerkInstance) {
+  const refusal = developmentKeyRefusal(env, values, clerkInstance);
+  if (refusal) fail(refusal);
 }
 
 /** The Cloudflare token and account, or null when the founder has not added them yet. */

@@ -140,18 +140,19 @@ guard: only the flag does.
 6. `pnpm web:db:migrate:production --release-card <card id>`, if there are migrations.
 7. `pnpm web:deploy:production --release-card <card id>`, in a background script. It deploys only
    the tip of `origin/main`, runs the smoke check, and rolls back by itself if the check fails. If
-   it says production has no D1 database yet, or a `PRODUCTION_` key is missing, production has
-   not had its first release (below), which is the founder's: move the card to `blocked` with the
-   note `production not provisioned`.
+   it says production has no D1 database yet, or a `PRODUCTION_` key is missing, production's
+   one-time setup (below) is not done, which is the founder's or the main session's: move the card
+   to `blocked` with the note `production not provisioned` and the key's name.
 8. Do the rest of the checks in [After every deploy](#after-every-deploy) against production. If
    one fails, roll production back (below) and move the card to `blocked` with what failed.
 9. Move the `RELEASE` card to `done` with the pull request, the `main` commit, the version id and
    the smoke result.
 
-The first production release also needs `pnpm web:provision:production` and
-`pnpm web:secrets:sync:production`, and a Clerk production instance on a custom domain. Those are
-the founder's, at a terminal; `--release-card` does not reach them. See `docs/deploy.md`, "First
-production release".
+Before the first release, the founder or the main session runs `pnpm web:provision:production`,
+`pnpm web:secrets:sync:production` and `pnpm web:db:migrate:production` once, at a terminal;
+`--release-card` does not reach the first two. Production stays at `boiler-room-web-production` on
+workers.dev, with Clerk's development instance, so it needs no custom domain. After that, every
+release is yours, on a `RELEASE` card. See `docs/deploy.md`, "First production release".
 
 ## Roll back
 
@@ -215,8 +216,11 @@ to a moment. A restore on staging needs the founder's go; on production only the
 - `pnpm web:secrets:sync:<env>` copies the Worker secrets from the env file to Cloudflare, one
   `wrangler secret put` each, with the value on stdin. A value named `STAGING_<NAME>` wins for
   staging. Production reads only `PRODUCTION_<NAME>`, with no fallback to the unscoped keys, and
-  refuses a Clerk development key (`sk_test_`, `pk_test_`), so production can never land on the
-  development instance.
+  refuses a Clerk development key (`sk_test_`, `pk_test_`) unless `env.production.vars` in
+  `wrangler.jsonc` sets `CLERK_INSTANCE` to `"development"`. It does, by the founder's decision of
+  2026-11-08: production signs in with Clerk's development instance, because a production instance
+  needs a custom domain. Production lands on that instance only through the setting, which a pull
+  request changes.
 - Local development gets them from `apps/web/.dev.vars`, which `pnpm web:dev` writes. It is
   gitignored. Never commit it, and never write a secret into `wrangler.jsonc`, a `.env` file in the
   app (Next would bundle it into the Worker), a card, a commit, a log or a command line.

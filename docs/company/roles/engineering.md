@@ -54,7 +54,7 @@ No identity. No vault credentials.
 
 **Hosting.** The website and the app are one Next.js app, `apps/web`, on Cloudflare: a Worker per
 environment, D1 for the database and R2 for film files. Staging (`boiler-room-web-staging`) runs
-the tip of `origin/dev`; production (`boiler-room-web-production`, not deployed yet) runs the tip of
+the tip of `origin/dev`; production (`boiler-room-web-production` on workers.dev, provisioned, not deployed yet) runs the tip of
 `origin/main`. Engineering deploys only through the `pnpm web:*` scripts, following
 [`skills/engineering-deploy`](../../../skills/engineering-deploy/SKILL.md); people read the same
 procedures in [`docs/deploy.md`](../../deploy.md). There is no `apps` tool and no `br-app.*` tool:
@@ -68,7 +68,10 @@ the build and its card goes to `blocked` with `credential missing`.
 
 **Clerk.** Engineers never hold the Clerk keys. They are Worker secrets, which
 `pnpm web:secrets:sync:<env>` copies from the env file. Production takes only the
-`PRODUCTION_`-prefixed keys and refuses a development key. Engineers write the `@clerk/nextjs` code
+`PRODUCTION_`-prefixed keys, and refuses a development key unless `env.production.vars` in
+`wrangler.jsonc` sets `CLERK_INSTANCE` to `"development"`, which it does by the founder's decision of
+2026-11-08: production signs in with Clerk's development instance, since a production instance
+needs a custom domain. Engineers write the `@clerk/nextjs` code
 and the lead redeploys. If agents need Clerk admin actions, such as listing users, engineering adds
 them as tools on the app's own `/mcp` route. That route calls Clerk's Backend API with the secret
 on the server side. Clerk dashboard settings, such as sign-in providers and the production domain,
@@ -192,8 +195,9 @@ Then it releases:
 3. If a check fails, the deploy has rolled back; a later check that fails takes
    `pnpm web:rollback:production --release-card <card id>`. Either way, move the card to `blocked`
    with what failed.
-4. If production has not had its first release (no D1 database, no `PRODUCTION_` Clerk keys), move
-   the card to `blocked` with `production not provisioned`: that release is the founder's.
+4. If production's one-time setup is not done (no D1 database, or a `PRODUCTION_` key the scripts
+   need is missing), move the card to `blocked` with `production not provisioned`: that setup is
+   the founder's or the main session's (`docs/deploy.md`, "First production release").
 5. Move the card to `done` with the PR, the `main` commit, the Worker version id and the smoke
    result.
 

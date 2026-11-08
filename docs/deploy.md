@@ -58,9 +58,17 @@ go to wrangler through its environment or stdin, never on a command line, and ar
 
 Any of them can be set per environment with a prefix: `STAGING_CLERK_SECRET_KEY` wins over
 `CLERK_SECRET_KEY` for staging. Production reads only `PRODUCTION_CLERK_SECRET_KEY` and
-`PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, never the unscoped keys, and the build and secret
-sync stop if either is a development key (`sk_test_` or `pk_test_`). Today staging uses Clerk's
-development instance.
+`PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, never the unscoped keys. The build and secret sync
+stop if either is a development key (`sk_test_` or `pk_test_`), unless `env.production.vars` in
+`apps/web/wrangler.jsonc` sets `CLERK_INSTANCE` to `"development"`.
+
+It does, by the founder's decision of 2026-11-08 ("development is fine for clerk"). A Clerk
+production instance needs a custom domain, which the company does not have, and production stays at
+`boiler-room-web-production` on workers.dev. So staging and production both sign in with Clerk's
+development instance, which caps sign-ups at 100 users and shows a Development banner. Production
+gets its own `PRODUCTION_` copies of the development keys. Moving to a production instance later is
+a domain, the instance's keys under the same two names, and a pull request that removes
+`CLERK_INSTANCE`, after which development keys are refused again.
 
 The token in the env file today could create the staging D1 database and R2 bucket, apply
 migrations, set secrets, deploy, list versions and tail logs. A Cloudflare token reaches the whole
@@ -76,9 +84,14 @@ founder's, at a terminal. No environment variable skips the guard.
 **On the engineering lead's computer:** `pnpm company:sync` writes `~/.boiler-room.env` with mode
 600, holding `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and nothing else, through Naive's
 file write, like the GitHub token in `~/.netrc`. No other agent's computer gets it, and
-`pnpm company:verify` checks both. The Clerk keys are not placed: the build reads
-`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, so until it is added there the lead's deploy stops at the build
-and its card goes to `blocked` with `credential missing`.
+`pnpm company:verify` checks both. No Clerk key is placed there. The build inlines the publishable
+key, which is public by design: `STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` or
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for staging, `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` for
+production. Until the one an environment needs is on the lead's computer, the lead's deploy of that
+environment stops at the build, and its card goes to `blocked`: `credential missing` on a `SHIP`
+card, `production not provisioned` on a `RELEASE` card. Placing it is a change to what
+`company:sync` writes (`deployEnvFile` in `agents/src/company/cloudflare.ts`) and to what
+`company:verify` accepts (`judgeDeployKeys` in `agents/src/company/verify.ts`), with their tests.
 
 ## Working on it locally
 
@@ -148,18 +161,30 @@ failed before the fix, staging, then a release.
 
 ## First production release
 
-Once, before the first `pnpm web:deploy:production`:
+Production is `boiler-room-web-production` on workers.dev, signing in with Clerk's development
+instance (see "Credentials"). No custom domain and no Clerk production instance are needed.
 
-1. **Clerk production instance.** Create it in the Clerk dashboard. It needs a custom domain, so
-   pick the domain for production first. Add its keys to the env file as
-   `PRODUCTION_CLERK_SECRET_KEY` and `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
-2. **Domain.** Add the domain to Cloudflare and route it to `boiler-room-web-production` (a
-   `routes` entry in `env.production` of `wrangler.jsonc`, by pull request).
-3. `pnpm web:provision:production`, then commit the database id it writes into `wrangler.jsonc` by
-   pull request into `dev`, and release it.
-4. `pnpm web:secrets:sync:production`
-5. `pnpm web:db:migrate:production`
-6. `pnpm web:deploy:production`
+Once, the founder or the main session runs these three at a terminal, typing `production` when
+asked. None of them takes `--release-card`:
+
+1. **Keys.** In `~/.boiler-room.env`, set `PRODUCTION_CLERK_SECRET_KEY` and
+   `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to the development instance's keys, the same
+   values as the unscoped ones. Production reads only the `PRODUCTION_` names.
+2. `pnpm web:provision:production` creates D1 `boiler-room-production` and R2
+   `boiler-room-films-production` and writes the database id into `wrangler.jsonc`, which goes to
+   `dev` by pull request. Done on 2026-11-08 by the main session (pull request #33).
+3. `pnpm web:secrets:sync:production` sets the Worker's Clerk secrets. It takes the development
+   keys only because `env.production.vars.CLERK_INSTANCE` is `"development"`.
+4. `pnpm web:db:migrate:production` applies every migration to the empty production D1, from a
+   clean checkout of `origin/dev`.
+
+After that, releases are `br-eng-lead`'s, on the CEO's `RELEASE` cards, and nobody runs a
+production command by hand. The first `RELEASE` card merges `dev` into `main`, applies any
+migration added since step 4 with `--release-card`, and deploys production with
+`pnpm web:deploy:production --release-card <crd_ id>`, which smoke-checks the live URL and rolls
+back by itself on a failure. Its build needs `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` on the
+lead's computer (see "Credentials"); without it the card goes to `blocked` with
+`production not provisioned`, and the merge into `main` stands.
 
 ## Rolling back
 

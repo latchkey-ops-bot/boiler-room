@@ -238,9 +238,9 @@ Then release, following `engineering-deploy`, "Releases: the `RELEASE` card and 
    after the deploy fails, roll production back with
    `pnpm web:rollback:production [version id] --release-card <card id>`, then block.
 4. If the deploy says production has no D1 database yet, or that a `PRODUCTION_` key is missing,
-   production has not had its first release. That one is the founder's (`docs/deploy.md`, "First
-   production release"): move the card to `blocked` with the note `production not provisioned`.
-   The merge into `main` stands.
+   production's one-time setup is not done. That is the founder's or the main session's
+   (`docs/deploy.md`, "First production release"): move the card to `blocked` with the note
+   `production not provisioned` and the key's name. The merge into `main` stands.
 5. Move the card to `done` with the pull request, the `main` commit, the Worker version id and the
    smoke result, line by line.
 

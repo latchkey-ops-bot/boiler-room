@@ -2,7 +2,8 @@
 // pnpm web:secrets:sync:<env> — copies the Worker's secrets from the env file to Cloudflare.
 // Each value goes to `wrangler secret put` on stdin, never on the command line. For staging, a
 // value named STAGING_<NAME> wins over <NAME>. Production takes only PRODUCTION_<NAME>, and refuses
-// a Clerk development key.
+// a Clerk development key unless env.production.vars.CLERK_INSTANCE in wrangler.jsonc is
+// "development", as it is by the founder's decision of 2026-11-08.
 //
 // Staging also gets the real-film secrets (scripts/lib/runner-secrets.mjs), each from its STAGING_
 // name only. The website's Naive key is checked with Naive first: it must hold exactly
@@ -21,6 +22,7 @@ import {
   WORKER_SECRETS,
 } from './lib/env.mjs';
 import { checkRunnerKey, checkWebKey, runnerSecretsFor } from './lib/runner-secrets.mjs';
+import { environmentConfig } from './lib/wrangler-config.mjs';
 
 const env = environmentArg();
 const vars = readEnvFile();
@@ -31,7 +33,7 @@ if (missing.length > 0) {
   const names = env === 'production' ? missing.map((name) => `PRODUCTION_${name}`) : missing;
   fail(`${names.join(', ')} missing from ${ENV_FILE} for ${env}.`);
 }
-refuseDevelopmentKeys(env, values);
+refuseDevelopmentKeys(env, values, environmentConfig(env).vars.CLERK_INSTANCE);
 
 const runner = runnerSecretsFor(vars, env);
 if (runner.problems.length > 0) fail(`Real-film secrets: ${runner.problems.join(' ')}`);

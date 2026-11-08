@@ -86,7 +86,17 @@
       "name": "boiler-room-web-production",
       // Production makes no simulated films. Until the Naive pipeline is wired, starting a film
       // there answers 503.
-      "vars": { "APP_ENV": "production", "PIPELINE": "naive", "BR_HOUSE_ACCOUNT_ID": "" },
+      //
+      // CLERK_INSTANCE "development": production signs in with Clerk's development instance, by the
+      // founder's decision of 2026-11-08. A Clerk production instance needs a custom domain, and
+      // production is on workers.dev. With it, the build and the secret sync accept the
+      // development keys as PRODUCTION_ keys; without it they refuse them.
+      "vars": {
+        "APP_ENV": "production",
+        "PIPELINE": "naive",
+        "BR_HOUSE_ACCOUNT_ID": "",
+        "CLERK_INSTANCE": "development"
+      },
       "services": [{ "binding": "WORKER_SELF_REFERENCE", "service": "boiler-room-web-production" }],
       "d1_databases": [
         {

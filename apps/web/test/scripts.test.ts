@@ -1,9 +1,13 @@
-import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   CHILD_ENV_KEYS,
+  CLERK_DEVELOPMENT,
   childEnv,
+  developmentKeyRefusal,
   developmentKeysIn,
   parseEnvFile,
   run,
@@ -72,6 +76,95 @@ describe('env file', () => {
         ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_FAKE'],
       ]),
     ).toEqual([]);
+  });
+});
+
+describe('Clerk development keys in production', () => {
+  const dev: [string, string | null][] = [
+    ['CLERK_SECRET_KEY', 'sk_test_FAKE'],
+    ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_test_FAKE'],
+  ];
+  const live: [string, string | null][] = [
+    ['CLERK_SECRET_KEY', 'sk_live_FAKE'],
+    ['NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY', 'pk_live_FAKE'],
+  ];
+
+  it('are refused unless wrangler.jsonc sets CLERK_INSTANCE to "development"', () => {
+    for (const instance of [undefined, '', 'production', 'Development', true]) {
+      expect(developmentKeyRefusal('production', dev, instance), String(instance)).toBe(
+        'PRODUCTION_CLERK_SECRET_KEY, PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY are Clerk development keys (sk_test_ or pk_test_). Production needs the production instance\'s keys, unless env.production.vars.CLERK_INSTANCE in wrangler.jsonc is "development".',
+      );
+    }
+    expect(developmentKeyRefusal('production', [dev[1] as [string, string]], 'production')).toMatch(
+      /^PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is a Clerk development key/,
+    );
+  });
+
+  it('are allowed when it does, and production keys always are', () => {
+    expect(CLERK_DEVELOPMENT).toBe('development');
+    expect(developmentKeyRefusal('production', dev, 'development')).toBeNull();
+    expect(developmentKeyRefusal('production', live, undefined)).toBeNull();
+    expect(developmentKeyRefusal('production', live, 'development')).toBeNull();
+    // Staging and a local build never refuse: they use the development instance anyway.
+    expect(developmentKeyRefusal('staging', dev, undefined)).toBeNull();
+    expect(developmentKeyRefusal(undefined, dev, undefined)).toBeNull();
+  });
+
+  it("are what production is set to, by the founder's decision, and only production", () => {
+    const config = readWranglerConfig();
+    expect(config.env.production.vars.CLERK_INSTANCE).toBe('development');
+    expect(environmentConfig('production').vars.CLERK_INSTANCE).toBe(CLERK_DEVELOPMENT);
+    expect(config.env.staging.vars.CLERK_INSTANCE).toBeUndefined();
+    // Production stays on workers.dev, with no custom domain.
+    expect(config.env.production.name).toBe('boiler-room-web-production');
+    expect(config.env.production.routes).toBeUndefined();
+    expect(config.workers_dev).toBe(true);
+  });
+
+  it('get a production secret sync past the key check to the production guard, reading only PRODUCTION_ keys', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'br-clerk-'));
+    const file = join(dir, 'env');
+    try {
+      const sync = (lines: string[]) => {
+        writeFileSync(file, `${lines.join('\n')}\n`);
+        const result = spawnSync(process.execPath, ['scripts/secrets-sync.mjs', 'production'], {
+          cwd: new URL('..', import.meta.url),
+          encoding: 'utf8',
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { PATH: process.env.PATH ?? '', HOME: dir, BR_ENV_FILE: file } as Record<
+            string,
+            string
+          > as NodeJS.ProcessEnv,
+        });
+        return { status: result.status, out: `${result.stdout}${result.stderr}` };
+      };
+      const cloudflare = [
+        'CLOUDFLARE_API_TOKEN=cf_FAKE_TOKEN',
+        'CLOUDFLARE_ACCOUNT_ID=0'.padEnd(54, '0'),
+      ];
+      // Development keys as PRODUCTION_ keys pass the Clerk check, and the guard stops a run with
+      // no terminal before wrangler is ever called.
+      const allowed = sync([
+        ...cloudflare,
+        'PRODUCTION_CLERK_SECRET_KEY=sk_test_FAKE',
+        'PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_FAKE',
+      ]);
+      expect(allowed.status).toBe(1);
+      expect(allowed.out).toMatch(/no terminal and no card/);
+      expect(allowed.out).not.toMatch(/Clerk development key/);
+      // The unscoped keys are never read for production.
+      const unscoped = sync([
+        ...cloudflare,
+        'CLERK_SECRET_KEY=sk_test_FAKE',
+        'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_FAKE',
+      ]);
+      expect(unscoped.status).toBe(1);
+      expect(unscoped.out).toMatch(
+        /PRODUCTION_CLERK_SECRET_KEY, PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY missing/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

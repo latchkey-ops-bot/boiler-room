@@ -13,6 +13,7 @@ import {
   refuseDevelopmentKeys,
   valueFor,
 } from './lib/env.mjs';
+import { environmentConfig } from './lib/wrangler-config.mjs';
 
 export function buildWorker(env) {
   const vars = readEnvFile();
@@ -27,6 +28,7 @@ export function buildWorker(env) {
   refuseDevelopmentKeys(
     env,
     BUILD_VARS.map((name) => [name, buildEnv[name]]),
+    env ? environmentConfig(env).vars.CLERK_INSTANCE : undefined,
   );
   bin('wrangler', ['types', '--env-interface', 'CloudflareEnv', 'cloudflare-env.d.ts']);
   bin('opennextjs-cloudflare', ['build', ...(env ? ['--env', env] : [])], { env: buildEnv });
