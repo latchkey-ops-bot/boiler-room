@@ -296,6 +296,27 @@ describe('withoutFailures', () => {
     expect((await checkResearch(settled, pages)).failures).toEqual([]);
   });
 
+  it('lists the prices the claims quote when the brief left pricing out', async () => {
+    const out = output();
+    out.brief.pricing = null;
+    const first = await checkResearch(out, bundle());
+    expect(first.failures.map((failure) => failure.code)).toEqual(['PRICING_MISSING']);
+    const settled = withoutFailures(out, first.failures, bundle());
+    expect(settled.brief.pricing).toEqual({
+      summary: 'Pricing | Orbitly Team $24 per month, billed yearly',
+      free_trial: null,
+      plans: [
+        {
+          name: 'Pricing | Orbitly',
+          price: 'Team $24 per month, billed yearly',
+          claim_ids: ['team-price'],
+        },
+      ],
+      claim_ids: ['team-price'],
+    });
+    expect((await checkResearch(settled, bundle())).failures).toEqual([]);
+  });
+
   it('keeps every listed page under its stored title, character for character', () => {
     const pages = bundle();
     must(pages.pages[0]).title = 'Orbitly |\u00a0Social scheduling';

@@ -174,8 +174,9 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   only what its quote says (`CLAIM_TEXT_UNBACKED`), with words naming where the quote is allowed.
   Prices a page shows with a yearly billing control on as it loads (the capture records billing
   switches, tabs and radios and their state) must be called yearly in the pricing
-  (`PRICING_BILLING`); the control's label backs that word. A plan is backed by its own claims and
-  the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
+  (`PRICING_BILLING`); the control's label backs that word. Pricing may be null only when no claim
+  quotes a price (`PRICING_MISSING`: an amount alone, or per month, year, user or seat). A plan is
+  backed by its own claims and the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
@@ -184,7 +185,8 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   dropped and pricing, the free trial or the positioning note becomes null. A one-liner or
   what-it-is left uncited fails the schema, so the result is not accepted. Wording no quote backs
   is cut back to the quotes: a claim's text becomes its quote, a list item or the free trial goes,
-  the pricing summary becomes its plans' names and prices (citing their claims) with a yearly
+  pricing left out is listed from the price claims, each named by its page's title, the pricing
+  summary becomes its plans' names and prices (citing their claims) with a yearly
   billing switch's label added, the one-liner becomes its first cited quote and what-it-is its
   cited quotes. An accepted result keeps every page title exactly as stored.
 - Provenance: the gate downloads `pages.json` itself and requires its SHA-256 to match a digest the

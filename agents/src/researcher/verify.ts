@@ -65,6 +65,7 @@ export const FAILURE_CODES = [
   'WORDS_UNBACKED',
   'CLAIM_TEXT_UNBACKED',
   'PRICING_BILLING',
+  'PRICING_MISSING',
   'CTA_NOT_FOUND',
   'ASSET_UNKNOWN',
   'NEED_DUPLICATE',
@@ -525,6 +526,39 @@ function verifyBilling(output: ResearchOutput, pages: PageIndex): Failure[] {
 }
 
 /**
+ * A quote that is a price a customer pays: an amount alone, as a product page's buy box shows it
+ * ("$100"), or an amount per month, year, user or seat. "$3M raised" is no price.
+ */
+const PRICE =
+  /^[$€£¥]\s?\d[\d,]*(?:\.\d+)?$|[$€£¥]\s?\d[\d,]*(?:\.\d+)?\s*(?:\/|per)\s*(?:mo\b|month|yr\b|year|user|seat|member|editor)/i;
+
+/** The claims whose quotes state a price, on a line of their own or per period or user. */
+export function priceClaims(output: ResearchOutput): ResearchOutput['claims'] {
+  return output.claims.filter((claim) =>
+    claim.quote.split(/\n/).some((line) => PRICE.test(normaliseWhitespace(line))),
+  );
+}
+
+/**
+ * Pricing is null only for a site that publishes no price. A result whose claims quote prices
+ * must list them: a brief that drops them tells the writer the site has none.
+ */
+function verifyPricingPresent(output: ResearchOutput): Failure[] {
+  if (output.brief.pricing) return [];
+  const prices = priceClaims(output);
+  if (prices.length === 0) return [];
+  return [
+    {
+      code: 'PRICING_MISSING',
+      path: 'brief.pricing',
+      message: `brief.pricing is null, but ${prices.map((claim) => `"${claim.id}"`).join(', ')} quote${prices.length > 1 ? '' : 's'} a price. Null is only for a site that publishes no price.`,
+      fix: 'Fill in brief.pricing: one plan per price, named and priced in the words of its quote or the title of its page, citing its claim, and a summary in the same words citing them all.',
+      briefPath: 'brief.pricing.missing',
+    },
+  ];
+}
+
+/**
  * Each non-claim must name the captured page it is on, and every figure in it must be on that
  * page. A mockup figure attributed to the wrong page sends the writer to a page that does not have
  * it.
@@ -655,6 +689,7 @@ export function verifyResearch(output: ResearchOutput, bundle: PagesBundle): Fai
     ...verifyClaims(output, pages),
     ...verifyBrief(output, pages),
     ...verifyBilling(output, pages),
+    ...verifyPricingPresent(output),
     ...verifyNonClaims(output, pages),
     ...verifyPages(output, pages),
     ...verifyReferences(output),

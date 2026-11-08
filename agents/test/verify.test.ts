@@ -447,6 +447,28 @@ describe('verifyResearch', () => {
     expect(codes(out, pages)).toEqual([]);
   });
 
+  // allbirds.com: the product pages quote prices ("$100"), but the brief set pricing to null.
+  it('refuses null pricing when claims quote prices, but not for an amount raised', () => {
+    const out = output();
+    out.brief.pricing = null;
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.briefPath])).toEqual([
+      ['PRICING_MISSING', 'brief.pricing.missing'],
+    ]);
+    expect(failures[0]?.message).toContain('"team-price"');
+    const raised = output();
+    raised.brief.pricing = null;
+    raised.claims = raised.claims.filter((claim) => claim.id !== 'team-price');
+    raised.claims.push({
+      id: 'funding',
+      text: 'Orbitly raised $3M',
+      sourceUrl: 'https://api.vetta.sh/v1/files/fil_material1',
+      quote: 'Orbitly reached 99.9% uptime in 2025.',
+      status: 'extracted',
+    });
+    expect(codes(raised).filter((code) => code === 'PRICING_MISSING')).toEqual([]);
+  });
+
   it('requires calls to action to be verbatim on their page', () => {
     const out = output();
     out.brief.ctas.push({
