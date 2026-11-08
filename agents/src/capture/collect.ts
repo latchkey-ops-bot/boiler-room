@@ -306,7 +306,13 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   for (const el of ctaElements) {
     if (ctas.length >= 60) break;
     if (el.closest('[data-br-overlay]') || !visible(el)) continue;
-    const rect = el.getBoundingClientRect();
+    // An inline link around a drawn button measures only its line of text; the button is the box.
+    const only = el.children.length === 1 ? el.firstElementChild : null;
+    let rect = el.getBoundingClientRect();
+    if (only && styleOf(el).display === 'inline') {
+      const inner = only.getBoundingClientRect();
+      if (inner.width * inner.height > rect.width * rect.height) rect = inner;
+    }
     if (rect.width < 40 || rect.height < 20 || rect.height > 120) continue;
     const text = clip(
       // biome-ignore lint/performance/useDomNodeTextContent: the rendered text is what a reader sees, which is what is captured here
@@ -317,15 +323,27 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       60,
     );
     if (!text) continue;
-    const style = styleOf(el);
-    const background = toColor(style.backgroundColor);
     const parentPaint = painted(el.parentElement);
-    const filled = Boolean(
-      background && background.alpha >= 0.5 && background.hex !== parentPaint.hex,
-    );
-    const borderWidth = Number.parseFloat(style.borderTopWidth) || 0;
-    const border =
-      borderWidth >= 1 && style.borderTopStyle !== 'none' ? toColor(style.borderTopColor) : null;
+    const boxOf = (box: Element) => {
+      const style = styleOf(box);
+      const background = toColor(style.backgroundColor);
+      const filled = Boolean(
+        background && background.alpha >= 0.5 && background.hex !== parentPaint.hex,
+      );
+      const borderWidth = Number.parseFloat(style.borderTopWidth) || 0;
+      const border =
+        borderWidth >= 1 && style.borderTopStyle !== 'none' ? toColor(style.borderTopColor) : null;
+      return { style, background, filled, border };
+    };
+    // A link often wraps the element that is drawn as the button. The drawn box is what shows.
+    let box = boxOf(el);
+    if (!box.filled && !box.border && only) {
+      const innerRect = only.getBoundingClientRect();
+      const covers = innerRect.width * innerRect.height >= rect.width * rect.height * 0.8;
+      const drawn = boxOf(only);
+      if (covers && (drawn.filled || drawn.border)) box = drawn;
+    }
+    const { style, background, filled, border } = box;
     const padded = (Number.parseFloat(style.paddingLeft) || 0) >= 6;
     const named = /btn|button|cta/i.test(el.getAttribute('class') ?? '');
     if (!(filled || (border && padded) || named)) continue;
@@ -357,7 +375,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       href,
       placement,
       background: filled ? background : null,
-      color: toColor(style.color) ?? { hex: '#000000', alpha: 1 },
+      color: toColor(styleOf(el).color) ?? { hex: '#000000', alpha: 1 },
       border,
       radius,
       pill: radius >= rect.height / 2 - 1,
@@ -450,8 +468,17 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
 
     const texts = new Map<
       string,
-      { hex: string; alpha: number; weight: number; heading: boolean }
+      {
+        hex: string;
+        alpha: number;
+        weight: number;
+        heading: boolean;
+        link: boolean;
+        chrome: boolean;
+      }
     >();
+    const CHROME =
+      'nav, header, footer, [role="banner"], [role="navigation"], [role="contentinfo"]';
     const linkColors = new Map<string, { hex: string; alpha: number; weight: number }>();
     const cardRadii = new Map<number, number>();
     const all = Array.from(body.querySelectorAll('*')).slice(0, 6000);
@@ -486,8 +513,17 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       }
       if (chars > 0) {
         const heading = el.closest('h1, h2, h3') !== null;
-        const key = `${color.hex}|${color.alpha}|${heading}`;
-        const entry = texts.get(key) ?? { hex: color.hex, alpha: color.alpha, weight: 0, heading };
+        const link = el.closest('a, button, [role="button"]') !== null;
+        const chrome = el.closest(CHROME) !== null;
+        const key = `${color.hex}|${color.alpha}|${heading}|${link}|${chrome}`;
+        const entry = texts.get(key) ?? {
+          hex: color.hex,
+          alpha: color.alpha,
+          weight: 0,
+          heading,
+          link,
+          chrome,
+        };
         entry.weight += chars;
         texts.set(key, entry);
       }
@@ -496,6 +532,8 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     const colorVariables: RawStyles['colorVariables'] = [];
     const rootStyle = styleOf(document.documentElement);
     const names = new Set<string>();
+    // Names that declare a brand role are read first, so a large palette cannot crowd them out.
+    const BRAND_NAME = /primary|brand|accent|main/i;
     for (let index = 0; index < rootStyle.length; index++) {
       const name = rootStyle.item(index);
       if (name.startsWith('--')) names.add(name);
@@ -515,7 +553,10 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
         }
       }
     }
-    for (const name of names) {
+    const ordered = [...names].sort(
+      (a, b) => Number(BRAND_NAME.test(b)) - Number(BRAND_NAME.test(a)),
+    );
+    for (const name of ordered) {
       if (colorVariables.length >= 200) break;
       const value = rootStyle.getPropertyValue(name).trim();
       if (!/^(#|rgb|hsl|hwb|lab|lch|oklab|oklch|color\()/i.test(value)) continue;
@@ -531,7 +572,11 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       ctas,
       cardRadii: [...cardRadii].map(([px, weight]) => ({ px, weight })),
       colorVariables,
-      colorScheme: rootStyle.colorScheme || 'normal',
+      colorScheme:
+        rootStyle.colorScheme && rootStyle.colorScheme !== 'normal'
+          ? rootStyle.colorScheme
+          : (document.querySelector('meta[name="color-scheme"]')?.getAttribute('content') ??
+            'normal'),
     };
 
     const use = (selector: string, role: RawFonts['uses'][number]['role']) => {

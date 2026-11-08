@@ -45,6 +45,22 @@ const DARK_SITE = `<!doctype html><html><head><title>Nightjar</title><style>
 </style></head><body><div class="shell"><header><a class="nav-cta" href="/start">Start</a></header>
 <h1>Night <em>shift</em> analytics</h1><p>Read the numbers that matter while you sleep, every single night.</p><a class="cta" href="/tour">Take the tour</a></div></body></html>`;
 
+// A link list with browser-default links, wrapped buttons, a big palette and a declared scheme.
+const PALETTE = Array.from(
+  { length: 240 },
+  (_, index) => `--palette-${index}: #${(index * 4099).toString(16).padStart(6, '0').slice(0, 6)};`,
+).join(' ');
+const LINK_SITE = `<!doctype html><html><head><title>Notes</title><meta name="color-scheme" content="light dark"><style>
+  :root { ${PALETTE} --primary: #242424; }
+  body { margin: 0; background: #FFFFFF; color: #000000; }
+  .pill { display: inline-block; padding: 10px 18px; border-radius: 9999px; background: #242424; color: #FFFFFF; }
+  .toggle { display: inline-block; padding: 8px 12px; }
+</style></head><body>
+<header><a href="/" class="toggle-btn"><span class="toggle">Menu</span></a> <a href="/start"><span class="pill">Start now</span></a></header>
+<main><ul>${Array.from({ length: 40 }, (_, index) => `<li>2026-01-${String((index % 28) + 1).padStart(2, '0')} <a href="/post-${index}">A long essay about building reliable software, part ${index}</a></li>`).join('')}</ul>
+<p>Written over many years, these notes are kept as plain pages with no styling at all.</p></main>
+<footer>Footer text in the default colour.</footer></body></html>`;
+
 let browser: Browser | undefined;
 
 beforeAll(async () => {
@@ -146,6 +162,32 @@ describe('collectPage in Chromium', () => {
     expect(colors.cssVariables).toBe(true);
     expect(colors.primary).not.toBe('#FBFBFD');
     expect(colors.candidates[0]?.sources).toContain('nav button fill');
+    await page.close();
+  });
+
+  it('marks link and navigation text, so the body copy sets the text colour', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(LINK_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    const links = raw.styles.texts.filter((item) => item.link);
+    expect(links.length).toBeGreaterThan(0);
+    expect(raw.styles.texts.some((item) => item.chrome && !item.link)).toBe(true);
+    const colors = deriveColors(raw.styles);
+    expect(colors.foreground).toBe('#000000');
+    await page.close();
+  });
+
+  it('reads the drawn box inside a link, and keeps brand variables past a big palette', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(LINK_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    const start = raw.ctas.find((cta) => cta.text === 'Start now');
+    expect(start).toMatchObject({ pill: true, background: { hex: '#242424' } });
+    expect(raw.styles.colorVariables.length).toBe(200);
+    expect(raw.styles.colorVariables.map((item) => item.name)).toContain('--primary');
+    expect(raw.styles.colorScheme).toBe('light dark');
+    const colors = deriveColors(raw.styles);
+    expect(colors).toMatchObject({ primary: '#242424', radius: 999 });
     await page.close();
   });
 });

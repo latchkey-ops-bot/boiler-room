@@ -29,14 +29,19 @@ export interface RawStyles {
   root: string;
   /** The painted background at sample points across the first screens, weighted by count. */
   backgrounds: WeightedColor[];
-  /** Text colours weighted by the number of visible characters in that colour. */
-  texts: (WeightedColor & { heading: boolean })[];
+  /**
+   * Text colours weighted by the number of visible characters in that colour. `link` is text in a
+   * link or button, which takes the link or button colour; `chrome` is text in the navigation,
+   * header or footer. Neither is the colour of the body copy.
+   */
+  texts: (WeightedColor & { heading: boolean; link?: boolean; chrome?: boolean })[];
   links: WeightedColor[];
   ctas: RawCta[];
   /** Border radius in px of cards and panels, weighted by count. */
   cardRadii: { px: number; weight: number }[];
   /** Custom properties on the root element that resolve to a colour. */
   colorVariables: { name: string; hex: string; alpha: number }[];
+  /** The `color-scheme` the page declares, from CSS or its meta tag, such as `light dark`. */
   colorScheme: string;
 }
 

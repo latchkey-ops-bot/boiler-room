@@ -92,14 +92,149 @@ function textTotals(texts: WeightedColor[], background: string): { hex: string; 
   return totals.sort((a, b) => b.score - a.score);
 }
 
-/** Saturated colours the brand uses, scored by how prominently they appear. */
+/** Share of all text the body copy needs before it alone decides the text colours. */
+const COPY_SHARE = 0.15;
+/** Share of readable copy a colour needs to count as one of the site's main text colours. */
+const MAIN_SHARE = 0.1;
+
+/**
+ * The body copy: text that is not in a link or button (which take the link colour, the browser's
+ * blue on a site that sets none) and not in the navigation, header or footer. Falls back to all
+ * text that is not a link, then to all text, when the page has too little copy to judge.
+ */
+export function copyTexts(styles: RawStyles): RawStyles['texts'] {
+  const all = styles.texts;
+  const total = all.reduce((sum, item) => sum + item.weight, 0);
+  const share = (list: RawStyles['texts']) =>
+    list.reduce((sum, item) => sum + item.weight, 0) / (total || 1);
+  const copy = all.filter((item) => !item.link && !item.chrome);
+  if (copy.length && share(copy) >= COPY_SHARE) return copy;
+  const unlinked = all.filter((item) => !item.link);
+  if (unlinked.length && share(unlinked) >= COPY_SHARE) return unlinked;
+  return all;
+}
+
+/**
+ * The text colour: of the colours the body copy is set in that clear 4.5:1, the one with the most
+ * contrast among those carrying at least a tenth of the copy. Design systems rank text colours by
+ * emphasis, and the primary text colour is the strongest one; the most characters can be in a
+ * secondary grey (descriptions, captions), which would set every headline in the film dim.
+ */
+export function pickForeground(styles: RawStyles, background: string): string | undefined {
+  const readable = textTotals(copyTexts(styles), background).filter(
+    (item) => contrast(item.hex, background) >= MIN_TEXT,
+  );
+  const total = readable.reduce((sum, item) => sum + item.score, 0);
+  const main = readable.filter((item) => item.score >= total * MAIN_SHARE);
+  return main.sort((a, b) => contrast(b.hex, background) - contrast(a.hex, background))[0]?.hex;
+}
+
+/**
+ * Secondary text: the most used grey of the body copy that is clearly a different colour from the
+ * foreground, still clears 3:1, and has less contrast than the foreground. Muted is quieter than
+ * the text colour by definition, so it can never be the brighter of the two.
+ */
+export function pickMuted(
+  styles: RawStyles,
+  background: string,
+  foreground: string,
+): string | null {
+  const strongest = contrast(foreground, background);
+  return (
+    textTotals(copyTexts(styles), background).find(
+      (item) =>
+        distance(item.hex, foreground) >= 40 &&
+        chroma(item.hex) < MIN_BRAND_CHROMA &&
+        contrast(item.hex, background) >= MIN_PRIMARY &&
+        contrast(item.hex, background) < strongest,
+    )?.hex ?? null
+  );
+}
+
+/** Words that make a colour variable something other than the brand colour itself. */
+const NOT_THE_BRAND = new Set([
+  'text',
+  'fg',
+  'foreground',
+  'on',
+  'ink',
+  'border',
+  'line',
+  'outline',
+  'ring',
+  'shadow',
+  'overlay',
+  'hover',
+  'active',
+  'focus',
+  'pressed',
+  'disabled',
+  'muted',
+  'subtle',
+  'tint',
+  'soft',
+  'weak',
+  'light',
+  'dark',
+  'lighter',
+  'darker',
+  'sidebar',
+  'chart',
+  'link',
+  'placeholder',
+  'selection',
+  'scrollbar',
+  'input',
+  'inverse',
+  'contrast',
+]);
+/** Words that make a "primary" or "main" variable a page surface: `--bg-primary` is a background. */
+const SURFACE = new Set(['bg', 'background', 'surface', 'canvas', 'page', 'base', 'body']);
+
+export type VariableRole = { role: 'brand' | 'accent'; weight: number } | null;
+
+/**
+ * What a colour custom property declares, from its name. `--primary`, `--color-primary`,
+ * `--brand` and `--color-brand-bg` declare the brand colour; `--accent` declares an accent. A name
+ * qualified as text, a border, a state or a part of the page (`--color-text-primary`,
+ * `--primary-foreground`, `--color-accent-hover`, `--bg-primary`) does not. A palette shade such as
+ * `--primary-600` counts for less, since only one shade is the brand colour.
+ */
+export function variableRole(name: string): VariableRole {
+  const words = name.replace(/^--/, '').toLowerCase().split(/[-_]+/).filter(Boolean);
+  if (words.some((word) => NOT_THE_BRAND.has(word))) return null;
+  const shade = words.some((word) => /^\d+$/.test(word));
+  if (words.includes('brand')) return { role: 'brand', weight: shade ? 3 : 8 };
+  if (words.includes('primary') || words.includes('main')) {
+    if (words.some((word) => SURFACE.has(word))) return null;
+    return { role: 'brand', weight: shade ? 3 : 8 };
+  }
+  if (words.includes('accent')) return { role: 'accent', weight: shade ? 1 : 2 };
+  return null;
+}
+
+/**
+ * Colours the brand uses, scored by how prominently they appear. A grey or black only counts when
+ * the site both declares it as its primary or brand colour in a custom property and paints its
+ * buttons with it: a monochrome brand, whose buttons are its brand colour.
+ */
 export function brandCandidates(styles: RawStyles, background: string): Candidate[] {
   const list: Candidate[] = [];
+  const fills = styles.ctas
+    .filter((cta) => cta.placement !== 'footer' && cta.background && cta.background.alpha >= 0.5)
+    .map((cta) => opaque(cta.background as SeenColor, background));
+  const declaredNeutral = styles.colorVariables
+    .filter((variable) => variableRole(variable.name)?.role === 'brand' && variable.alpha >= 0.5)
+    .map((variable) => opaque(variable, background))
+    .filter(
+      (hex) => chroma(hex) < MIN_BRAND_CHROMA && fills.some((fill) => distance(fill, hex) < SAME),
+    );
   const add = (color: SeenColor | null, weight: number, source: string) => {
     if (!color || color.alpha < 0.5) return;
     const hex = opaque(color, background);
-    if (chroma(hex) < MIN_BRAND_CHROMA || distance(hex, background) < SAME) return;
-    if (BROWSER_DEFAULTS.has(hex)) return;
+    if (distance(hex, background) < SAME || BROWSER_DEFAULTS.has(hex)) return;
+    const neutralBrand = declaredNeutral.some((item) => distance(item, hex) < SAME);
+    if (chroma(hex) < MIN_BRAND_CHROMA && !neutralBrand) return;
     const item = tally(list, hex, weight, () => ({ hex, score: 0, sources: [] }));
     if (!item.sources.includes(source)) item.sources.push(source);
   };
@@ -124,17 +259,24 @@ export function brandCandidates(styles: RawStyles, background: string): Candidat
     );
   }
   for (const variable of styles.colorVariables) {
-    if (/primary|brand|accent|main/i.test(variable.name)) add(variable, 3, `var ${variable.name}`);
+    const role = variableRole(variable.name);
+    if (role) add(variable, role.weight, `var ${variable.name}`);
   }
   return list.sort((a, b) => b.score - a.score);
 }
 
-/** The radius of the brand's buttons, or of its cards when it has no buttons. 999 means pill. */
+/**
+ * The radius of the brand's buttons, or of its cards when it has no drawn buttons. 999 means pill.
+ * Only a button with a fill or a border shows its corners: a text link or a menu toggle styled as a
+ * button has a radius nobody sees, and a page full of them would otherwise read as square.
+ */
 export function pickRadius(styles: RawStyles): number | null {
   const counts = new Map<number, number>();
   for (const cta of styles.ctas) {
+    if (!cta.background && !cta.border) continue;
     const px = cta.pill ? 999 : Math.round(cta.radius);
-    counts.set(px, (counts.get(px) ?? 0) + 1);
+    const weight = cta.placement === 'nav' || cta.placement === 'hero' ? 2 : 1;
+    counts.set(px, (counts.get(px) ?? 0) + weight);
   }
   if (counts.size === 0) {
     for (const card of styles.cardRadii) {
@@ -169,8 +311,7 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   const candidates = brandCandidates(styles, background);
   let primary = candidates[0]?.hex;
 
-  const chooseForeground = (bg: string) =>
-    textTotals(styles.texts, bg).find((item) => contrast(item.hex, bg) >= MIN_TEXT)?.hex;
+  const chooseForeground = (bg: string) => pickForeground(styles, bg);
 
   if (primary && contrast(primary, background) < MIN_PRIMARY) {
     const measured = primary;
@@ -206,8 +347,16 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   }
   if (!primary) {
     primary = foreground;
-    if (candidates.length === 0)
-      notes.push('The site uses no saturated colour, so the text colour is primary.');
+    if (candidates.length === 0) {
+      const defaults = [...styles.links, ...styles.texts]
+        .map((item) => item.hex.toUpperCase())
+        .filter((hex, index, list) => BROWSER_DEFAULTS.has(hex) && list.indexOf(hex) === index);
+      notes.push(
+        defaults.length
+          ? `The site sets no brand colour of its own: its links use the browser's default ${defaults.join(' and ')}, so the text colour is primary.`
+          : 'The site uses no saturated colour, so the text colour is primary.',
+      );
+    }
   }
 
   const accents = candidates
@@ -218,13 +367,13 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   const accent =
     accents.find((hex) => hueDistance(hex, primary) >= 25 || distance(hex, primary) > 80) ?? null;
 
-  const muted =
-    textTotals(styles.texts, background).find(
-      (item) =>
-        distance(item.hex, foreground) >= 40 &&
-        chroma(item.hex) < MIN_BRAND_CHROMA &&
-        contrast(item.hex, background) >= MIN_PRIMARY,
-    )?.hex ?? null;
+  const muted = pickMuted(styles, background, foreground);
+  const mode = luminance(background) < 0.18 ? 'dark' : 'light';
+  const schemes = styles.colorScheme.toLowerCase().split(/\s+/);
+  if (schemes.includes('light') && schemes.includes('dark'))
+    notes.push(
+      `The page declares both light and dark colour schemes; these colours are its ${mode} scheme, the one it showed the capture.`,
+    );
 
   return {
     background,
@@ -233,7 +382,7 @@ export function deriveColors(styles: RawStyles): DerivedColors {
     accent,
     muted,
     accents,
-    mode: luminance(background) < 0.18 ? 'dark' : 'light',
+    mode,
     radius: pickRadius(styles),
     cssVariables: styles.colorVariables.length > 0,
     candidates: candidates.slice(0, 8),
