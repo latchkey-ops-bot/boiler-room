@@ -235,6 +235,10 @@ spare is refused at the limit and the run stops.
 - The payload and each chunk go through a 60 MiB upload link. A larger campaign is refused with a
   message; a larger chunk asks for more workers.
 - A failed chunk is rendered once more on a new computer. A second failure stops the run.
+- Naive sometimes ends a command's stream without its exit frame. Once the worker has reported
+  its chunk done, which it does only after the file is written and closed, the chunk is fetched
+  and checked against the size and SHA-256 measured on the computer, rather than rendered again.
+  A stream lost before that fails the try.
 - Selecting the film and `--verify-seams` need a browser here; `ensureBrowser()` fetches one.
 
 ## Commands

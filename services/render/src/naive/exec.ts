@@ -37,7 +37,11 @@ export class Aborted extends Error {
 export interface CommandResult {
   stdout: string;
   stderr: string;
+  /** -1 when the stream ended without an exit frame, so the command's status is not known. */
   exitCode: number;
+  /** False when the stream ended without an exit frame. */
+  exited: boolean;
+  timedOut: boolean;
   durationMs: number;
 }
 
@@ -102,22 +106,26 @@ export async function runCommand(
     if (signal?.aborted) void frames.return(undefined).catch(() => undefined);
   }
   if (onLine && pending) onLine(pending);
-  const result = {
+  const result: CommandResult = {
     stdout,
     stderr,
     exitCode: exit?.exit_code ?? -1,
+    exited: exit !== undefined,
+    timedOut: exit?.timed_out ?? false,
     durationMs: performance.now() - started,
   };
-  if (check && (result.exitCode !== 0 || exit?.timed_out)) {
-    throw new CommandFailed(
-      computerId,
-      result.exitCode,
-      exit?.timed_out ?? false,
-      `${stdout.slice(-4000)}\n${stderr.slice(-4000)}`.trim(),
-    );
-  }
+  if (check && (result.exitCode !== 0 || result.timedOut)) throw failure(computerId, result);
   return result;
 }
+
+/** The error for a command that did not exit 0, with the tail of what it printed. */
+export const failure = (computerId: string, result: CommandResult): CommandFailed =>
+  new CommandFailed(
+    computerId,
+    result.exitCode,
+    result.timedOut,
+    `${result.stdout.slice(-4000)}\n${result.stderr.slice(-4000)}`.trim(),
+  );
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 

@@ -14,7 +14,14 @@ import type { ChunkAttempt, ChunkRecord } from '../manifest.ts';
 import { type BaseRecord, checkReady, RENDER_DIR, setUp, snapshotBase } from './base.ts';
 import type { Naive } from './client.ts';
 import { scrub } from './client.ts';
-import { Aborted, MAX_COMMAND_MS, runCommand, withRetry } from './exec.ts';
+import {
+  Aborted,
+  type CommandResult,
+  failure,
+  MAX_COMMAND_MS,
+  runCommand,
+  withRetry,
+} from './exec.ts';
 import type { ComputerPool, ComputerRecord } from './pool.ts';
 import { fetchOntoComputer, sendFromComputer } from './transfer.ts';
 
@@ -177,28 +184,62 @@ async function attemptChunk(
 
     const rendering = performance.now();
     let sabotaged = false;
-    await runCommand(client, computer.id, `cd "$HOME/${JOB_DIR}" && node worker.ts job.json`, {
-      timeoutMs: MAX_COMMAND_MS,
-      signal,
-      onLine: (line) => {
-        const message = parseWorkerLine(line);
-        if (message?.type === 'done') record.renderSeconds = message.seconds;
-        if (message?.type !== 'progress') return;
-        log(
-          `${label}: ${message.renderedFrames}/${chunk.frames} frames rendered, ${message.encodedFrames} encoded`,
-        );
-        if (
-          !sabotaged &&
-          attempt === 1 &&
-          context.simulateFailure?.chunk === chunk.index &&
-          message.renderedFrames > 0
-        ) {
-          sabotaged = true;
-          log(`${label}: destroying ${computer.id} mid-render, as asked, to exercise the retry`);
-          void pool.destroy(computer.id);
-        }
-      },
-    });
+    // The bytes of the finished chunk, which the worker reports once its file is written and closed.
+    let finished: number | undefined;
+    let outcome: CommandResult | undefined;
+    try {
+      outcome = await runCommand(
+        client,
+        computer.id,
+        `cd "$HOME/${JOB_DIR}" && node worker.ts job.json`,
+        {
+          timeoutMs: MAX_COMMAND_MS,
+          signal,
+          check: false,
+          onLine: (line) => {
+            const message = parseWorkerLine(line);
+            if (message?.type === 'done') {
+              record.renderSeconds = message.seconds;
+              finished = message.bytes;
+            }
+            if (message?.type !== 'progress') return;
+            log(
+              `${label}: ${message.renderedFrames}/${chunk.frames} frames rendered, ${message.encodedFrames} encoded`,
+            );
+            if (
+              !sabotaged &&
+              attempt === 1 &&
+              context.simulateFailure?.chunk === chunk.index &&
+              message.renderedFrames > 0
+            ) {
+              sabotaged = true;
+              log(
+                `${label}: destroying ${computer.id} mid-render, as asked, to exercise the retry`,
+              );
+              void pool.destroy(computer.id);
+            }
+          },
+        },
+      );
+    } catch (error) {
+      // A stream that drops after the worker reported its chunk lost only the exit status.
+      if (signal.aborted || finished === undefined) throw error;
+      log(`${label}: the command stream broke after the chunk was done (${describe(error)})`);
+    }
+    if (outcome?.exited && (outcome.exitCode !== 0 || outcome.timedOut)) {
+      throw failure(computer.id, outcome);
+    }
+    if (!outcome?.exited) {
+      if (finished === undefined) {
+        throw outcome ? failure(computer.id, outcome) : new Error('The render command was lost.');
+      }
+      // Naive sometimes ends a stream without its exit frame. The worker reports `done` only once
+      // the chunk is written and closed, and the chunk is checked against the size and SHA-256
+      // measured on the computer as it comes back, so it is fetched rather than rendered again.
+      log(
+        `${label}: the stream ended without an exit status after the chunk was done; fetching it`,
+      );
+    }
     record.renderWallSeconds = seconds(rendering);
 
     const returning = performance.now();
@@ -212,6 +253,11 @@ async function attemptChunk(
       signal,
     );
     context.files.push(sent.fileId);
+    if (finished !== undefined && sent.bytes !== finished) {
+      throw new Error(
+        `Chunk ${chunk.index + 1} came back as ${sent.bytes} bytes, but the worker wrote ${finished}.`,
+      );
+    }
     const file = path.join(context.workDir, `chunk-${String(chunk.index).padStart(3, '0')}.ts`);
     await writeFile(file, sent.content);
     record.returnSeconds = seconds(returning);
