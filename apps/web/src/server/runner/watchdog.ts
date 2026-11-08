@@ -189,7 +189,7 @@ async function tripwire(deps: RunnerDeps, note: (line: string) => void): Promise
     return;
   }
   const fallen = control.balanceBaselineMicroUsd - balance;
-  if (control.halted || fallen <= deps.config.globalDailyCapMicroUsd) return;
+  if (control.halted || fallen <= deps.config.tripwireDailyFallMicroUsd) return;
   await deps.db
     .update(runnerControl)
     .set({

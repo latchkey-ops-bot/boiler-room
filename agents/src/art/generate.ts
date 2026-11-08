@@ -170,6 +170,21 @@ export interface GenerationResult {
   generated: GeneratedImage[];
   skipped: SkippedImage[];
   spentMicroUsd: number;
+  /** Set when Naive refused this key image generation: why, starting `image generation unavailable`. */
+  unavailable?: string;
+}
+
+/** How a skipped image's reason starts when Naive refuses the key image generation. */
+export const GENERATION_UNAVAILABLE = 'image generation unavailable';
+
+/**
+ * True when Naive refused the call for the key's scopes (403), so no other image can be generated
+ * with it either. Naive puts `POST /v1/media/images` under `agents:write`, which a film computer's
+ * key never holds.
+ */
+export function isForbidden(cause: unknown): boolean {
+  const error = cause as { status?: unknown; code?: unknown } | null;
+  return !!error && (error.status === 403 || error.code === 'forbidden');
 }
 
 const EXTENSIONS: Record<string, string> = {
@@ -182,6 +197,10 @@ const EXTENSIONS: Record<string, string> = {
  * Generates each need in order until the cap is reached. Before a call it checks that the image
  * count and the spend so far, plus the dearer of the estimate and the dearest image seen, stay
  * within the cap. A copy of each image is saved under `<outDir>/assets/generated/`.
+ *
+ * A failed call is recorded and the next need is tried. A 403 is different: the key may not
+ * generate images at all, so nothing more is asked for, every need left is skipped as
+ * `image generation unavailable`, and the film goes on with its captured pictures.
  */
 export async function generateImages(
   client: Pick<Naive, 'media' | 'files'>,
@@ -194,7 +213,12 @@ export async function generateImages(
   const skipped: SkippedImage[] = [];
   let spent = 0;
   let dearest = cap.estimateMicroUsd;
+  let unavailable: string | undefined;
   for (const need of needs) {
+    if (unavailable) {
+      skipped.push({ need, reason: unavailable });
+      continue;
+    }
     if (generated.length >= cap.maxImages) {
       skipped.push({ need, reason: `image cap of ${cap.maxImages} per film reached` });
       continue;
@@ -243,11 +267,14 @@ export async function generateImages(
         },
       });
     } catch (cause) {
-      skipped.push({
-        need,
-        reason: `generation failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
-      });
+      const detail = cause instanceof Error ? cause.message.slice(0, 200) : String(cause);
+      if (isForbidden(cause)) {
+        unavailable = `${GENERATION_UNAVAILABLE}: Naive refused this key image generation (${detail})`;
+        skipped.push({ need, reason: unavailable });
+        continue;
+      }
+      skipped.push({ need, reason: `generation failed: ${detail}` });
     }
   }
-  return { generated, skipped, spentMicroUsd: spent };
+  return { generated, skipped, spentMicroUsd: spent, ...(unavailable ? { unavailable } : {}) };
 }

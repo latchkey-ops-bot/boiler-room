@@ -2,7 +2,7 @@
  * `pnpm runner:snapshot`: builds the base snapshot every film computer is forked from, and prints
  * its id.
  *
- *   pnpm runner:snapshot [--film-ref feat/crew-agents | --film-commit <sha>]
+ *   pnpm runner:snapshot [--film-ref dev | --film-commit <sha>]
  *                        [--runner-commit <sha>] [--adapter auto|film|standin] [--no-fork-test]
  *
  * 1. A builder computer at the film size (4 vCPU, 8 GiB, 20 GB).
@@ -40,7 +40,7 @@ import { CLEAN_SCRIPT, LOCK_SUDO_SCRIPT, readyCheck, setupScript } from './recip
 
 const { values } = parseArgs({
   options: {
-    'film-ref': { type: 'string', default: 'feat/crew-agents' },
+    'film-ref': { type: 'string', default: 'dev' },
     'film-commit': { type: 'string' },
     'runner-commit': { type: 'string' },
     adapter: { type: 'string', default: 'auto' },

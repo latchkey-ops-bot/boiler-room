@@ -1,19 +1,25 @@
 #!/usr/bin/env node
-// pnpm web:runner:keys staging mint [--runner-key] [--gtm-token]
-// pnpm web:runner:keys staging probe
+// pnpm web:runner:keys:staging mint [--runner-key] [--gtm-token]
+// pnpm web:runner:keys:staging probe [--runner-key]
 //
 // mint: with the admin NAIVE_API_KEY in the env file, mints the website's own Naive key (exactly
 // computers:write and billing:read) into STAGING_NAIVE_WEB_KEY, and makes a signing secret in
-// STAGING_RUNNER_SIGNING_SECRET. With --runner-key, also the runner's key (sessions and agents
-// only) into STAGING_NAIVE_RUNNER_KEY. It never replaces a key that is already there, and prints
-// only key ids. With --gtm-token, also a GTM service token into STAGING_GTM_SERVICE_TOKEN (the
-// website's copy) and, when it is not set yet, the same value into GTM_SERVICE_TOKEN (the GTM
-// executor's copy), so the two always match.
+// STAGING_RUNNER_SIGNING_SECRET. With --runner-key, also the runner's key (exactly the seven
+// scopes of RUNNER_KEY_SCOPES in lib/runner-secrets.mjs) into STAGING_NAIVE_RUNNER_KEY. It never
+// replaces a key that is already there, and prints only key ids. With --gtm-token, also a GTM
+// service token into STAGING_GTM_SERVICE_TOKEN (the website's copy) and, when it is not set yet,
+// the same value into GTM_SERVICE_TOKEN (the GTM executor's copy), so the two always match.
 //
 // probe: runs every Naive call the website makes for a film (`HttpNaiveApi`, the real class) once
 // with STAGING_NAIVE_WEB_KEY, on a throwaway 1 vCPU computer, then destroys it and its snapshot.
 // Run it before `pnpm web:secrets:sync:staging`: a call the key cannot make is found here, not on
 // a founder's film. It costs one 10-minute block of the smallest computer, about $0.01.
+//
+// probe --runner-key: checks that STAGING_NAIVE_RUNNER_KEY holds exactly the seven scopes, then
+// makes every Naive call the film command makes on a film computer with it (lib/runner-probe.mjs):
+// the crew check, sessions, files, br-researcher's computer and the balance. It starts no session
+// and generates no image, and says whether Naive lets the key generate images. About $0.01, for
+// br-researcher's computer, resumed and paused again, and only while no session of it is live.
 //
 // Staging only. Production keys are the founder's to mint.
 import { chmodSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -28,7 +34,8 @@ import {
   upsertEnvLine,
   WEB_KEY_SCOPES,
 } from './lib/runner-keys.mjs';
-import { checkWebKey } from './lib/runner-secrets.mjs';
+import { probeRunnerKey, RUNNER_PROBE_CALLS } from './lib/runner-probe.mjs';
+import { checkRunnerKey, checkWebKey } from './lib/runner-secrets.mjs';
 
 const BASE_URL = 'https://api.vetta.sh';
 const [env, command] = process.argv.slice(2);
@@ -99,6 +106,43 @@ if (command === 'mint') {
       }
     }
   }
+  process.exit(0);
+}
+
+if (process.argv.includes('--runner-key')) {
+  const runnerKey = vars.get(MINTED.runner);
+  if (!runnerKey) fail(`${ENV_FILE} has no ${MINTED.runner}. The founder mints it.`);
+  const problem = await checkRunnerKey(runnerKey);
+  if (problem) fail(problem);
+  console.log(`${MINTED.runner} holds exactly ${RUNNER_KEY_SCOPES.join(', ')}.\n`);
+  const probed = await probeRunnerKey(runnerKey, { baseUrl: BASE_URL, log: console.log });
+  console.log('');
+  console.table(
+    probed.results.map(({ call, ok, how, detail }) => ({
+      call,
+      scope: RUNNER_PROBE_CALLS.find((each) => each.call === call)?.scope ?? '',
+      ok,
+      how,
+      detail: detail ?? '',
+    })),
+  );
+  const { images } = probed;
+  console.log(
+    images.available === false
+      ? `\nImage generation: unavailable (${images.detail}). The Art Director records "image generation unavailable" and goes on with captured pictures.`
+      : images.available
+        ? `\nImage generation: allowed (${images.detail}).`
+        : `\nImage generation: not known (${images.detail}).`,
+  );
+  if (probed.balanceDeltaMicroUsd !== null)
+    console.log(
+      `The organization's balance moved $${(probed.balanceDeltaMicroUsd / 1e6).toFixed(4)} meanwhile, other agents' spend included.`,
+    );
+  if (probed.left.length)
+    console.error(`Left changed on Naive, check by hand: ${probed.left.join('; ')}.`);
+  if (probed.missing.length > 0 || probed.left.length > 0)
+    fail(`${MINTED.runner} could not make: ${probed.missing.join(', ') || 'see above'}.`);
+  console.log(`\n${MINTED.runner} can make every call the film command makes on a film computer.`);
   process.exit(0);
 }
 

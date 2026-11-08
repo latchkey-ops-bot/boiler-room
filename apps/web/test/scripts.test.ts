@@ -9,6 +9,7 @@ import {
   upsertEnvLine,
   WEB_KEY_SCOPES,
 } from '../scripts/lib/runner-keys.mjs';
+import { IMAGE_CALL, probeRunnerKey, RUNNER_PROBE_CALLS } from '../scripts/lib/runner-probe.mjs';
 import {
   checkRunnerKey,
   checkWebKey,
@@ -109,6 +110,20 @@ describe('wrangler.jsonc', () => {
     );
     // Production has no real-film settings, so it keeps answering 503.
     expect(config.env.production.vars.RUNNER_SNAPSHOT_ID).toBeUndefined();
+  });
+
+  it('lets a founder make two real films a day on staging, and one more film run beside them', () => {
+    const vars = readWranglerConfig().env.staging.vars;
+    const film = Number(vars.FILM_CAP_USD);
+    const account = Number(vars.ACCOUNT_DAILY_CAP_USD);
+    const global = Number(vars.GLOBAL_DAILY_CAP_USD);
+    // A 16:9 film: about $1.30 for the script, $1.00 for the render, Opus rounds on top.
+    expect(film).toBeGreaterThanOrEqual(2.3 * 2);
+    expect(Number(vars.FILM_COMPUTE_RESERVE_USD)).toBeLessThan(film);
+    // A film at work counts at its whole cap (caps.ts): two fit the founder's day, three staging's.
+    expect(2 * film).toBeLessThanOrEqual(account);
+    expect(3 * film).toBeLessThanOrEqual(global);
+    expect(global).toBeGreaterThanOrEqual(account);
   });
 
   it('writes a database id into the right environment only', () => {
@@ -248,9 +263,19 @@ describe('minting the real-film keys', () => {
     expect(newSigningSecret()).not.toBe(secret);
   });
 
-  it('mints the website exactly the scopes the sync checks for, and the runner no computers', () => {
+  it('mints the website and the runner exactly the scopes the sync checks for', () => {
     expect(scopesMatch(WEB_KEY_SCOPES)).toBe(true);
-    expect(RUNNER_KEY_SCOPES).not.toContain('computers:write');
+    expect([...RUNNER_KEY_SCOPES].sort()).toEqual([
+      'agents:read',
+      'billing:read',
+      'computers:write',
+      'files:read',
+      'files:write',
+      'sessions:read',
+      'sessions:write',
+    ]);
+    expect(scopesMatch(RUNNER_KEY_SCOPES, RUNNER_KEY_SCOPES)).toBe(true);
+    // The film command runs --no-sync, and image generation needing agents:write is non-fatal.
     expect(RUNNER_KEY_SCOPES).not.toContain('agents:write');
     expect(RUNNER_KEY_SCOPES).not.toContain('admin');
   });
@@ -264,7 +289,7 @@ describe('minting the real-film keys', () => {
     expect([...PROBE_CALLS].sort()).toEqual(calls.sort());
   });
 
-  it('refuses a runner key that is the admin or the website key, or holds computers', async () => {
+  it('refuses a runner key that is the admin or the website key, or not exactly its scopes', async () => {
     const vars = parseEnvFile(
       [
         'NAIVE_API_KEY=admin',
@@ -281,9 +306,159 @@ describe('minting the real-film keys', () => {
     const answer = (scopes: string[]) => async () =>
       new Response(JSON.stringify({ scopes }), { status: 200 });
     expect(
-      await checkRunnerKey('k', { fetch: answer(['sessions:write', 'computers:write']) }),
-    ).toContain('computers:write');
-    expect(await checkRunnerKey('k', { fetch: answer(['sessions:write']) })).toBeNull();
+      await checkRunnerKey('k', { fetch: answer([...RUNNER_KEY_SCOPES].reverse()) }),
+    ).toBeNull();
+    // One more scope is refused, and so is one fewer: the film would stop part way.
+    expect(
+      await checkRunnerKey('k', { fetch: answer([...RUNNER_KEY_SCOPES, 'agents:write']) }),
+    ).toContain('also holds agents:write');
+    expect(
+      await checkRunnerKey('k', {
+        fetch: answer(RUNNER_KEY_SCOPES.filter((scope) => scope !== 'files:write')),
+      }),
+    ).toContain('lacks files:write');
+    expect(await checkRunnerKey('k', { fetch: answer(['admin']) })).toContain('exactly');
+  });
+});
+
+describe('the runner key probe', () => {
+  const RESEARCHER_COMPUTER = 'cmp_researcher';
+
+  /** Naive as the probe sees it: br-researcher with a paused computer, and a key's scopes. */
+  function fakeNaive({
+    live = [] as string[],
+    refuse = [] as string[],
+    pauseRefusals = 1,
+    images = 403,
+  } = {}) {
+    let computer = 'paused';
+    let uploaded = '';
+    let pauses = 0;
+    const calls: string[] = [];
+    const json = (body: unknown, status = 200) =>
+      new Response(JSON.stringify(body), {
+        status,
+        headers: { 'content-type': 'application/json' },
+      });
+    const notFound = () => json({ error: { type: 'not_found', message: 'no such thing' } }, 404);
+    const fetch = (async (input: string | URL, init: RequestInit = {}) => {
+      const url = new URL(String(input));
+      const method = init.method ?? 'GET';
+      const path = url.pathname;
+      const route = `${method} ${path}`;
+      calls.push(`${route}${url.search}`);
+      if (refuse.some((prefix) => route.startsWith(prefix)))
+        return json({ error: { type: 'permission', message: 'missing a scope' } }, 403);
+      if (route === 'GET /v1/me') return json({ scopes: [...RUNNER_KEY_SCOPES] });
+      if (route === 'GET /v1/credits/balance') return json({ balance_micro_usd: 5_000_000 });
+      if (route === 'GET /v1/agents')
+        return json({
+          data: [{ id: 'agt_r', name: 'br-researcher', skills: ['site-research@10'] }],
+        });
+      if (route === 'GET /v1/skills/site-research/versions') return json({ data: [] });
+      if (route === 'GET /v1/agents/agt_r/computer')
+        return json({ id: RESEARCHER_COMPUTER, status: computer });
+      if (route === 'GET /v1/agents/agt_r/spend') return json({ spent_micro_usd: 0 });
+      if (route === 'GET /v1/sessions') {
+        const status = url.searchParams.get('status');
+        if (status) return json({ data: status === 'running' ? live.map((id) => ({ id })) : [] });
+        return json({ data: [{ id: 'ses_last' }] });
+      }
+      if (route === 'GET /v1/sessions/ses_last') return json({ id: 'ses_last', last_seq: 9 });
+      if (route === 'GET /v1/sessions/ses_last/stream')
+        return new Response('data: {"seq":9,"type":"session.idle"}\n\n', {
+          headers: { 'content-type': 'text/event-stream' },
+        });
+      if (route === 'GET /v1/computers') return json({ data: [] });
+      if (route === `GET /v1/computers/${RESEARCHER_COMPUTER}`)
+        return json({ id: RESEARCHER_COMPUTER, status: computer });
+      if (route === 'GET /v1/files') return json({ data: [] });
+      if (route === 'POST /v1/files') {
+        uploaded = await ((init.body as FormData).get('file') as Blob).text();
+        return json({ id: 'fil_probe' });
+      }
+      if (route === 'GET /v1/files/fil_probe')
+        return url.searchParams.get('download')
+          ? new Response(uploaded)
+          : json({ id: 'fil_probe' });
+      if (route === 'DELETE /v1/files/fil_probe') return json({ deleted: true });
+      if (route === `POST /v1/computers/${RESEARCHER_COMPUTER}/resume`) {
+        computer = 'running';
+        return json({ status: computer });
+      }
+      if (route === `POST /v1/computers/${RESEARCHER_COMPUTER}/exec`)
+        return json({ stdout: 'keyprobe\n', stderr: '', exit_code: 0 });
+      if (route === `POST /v1/computers/${RESEARCHER_COMPUTER}/pause`) {
+        pauses += 1;
+        if (pauses <= pauseRefusals)
+          return json({ error: { message: 'try again when it rests' } }, 409);
+        computer = 'paused';
+        return json({ status: computer });
+      }
+      if (route === 'POST /v1/media/images')
+        return images === 403
+          ? json({ error: { type: 'permission', message: 'missing `agents:write`' } }, 403)
+          : json({ error: { message: 'no image model' } }, 400);
+      return notFound();
+    }) as unknown as typeof globalThis.fetch;
+    return { fetch, calls, computer: () => computer };
+  }
+
+  const probe = (naive: ReturnType<typeof fakeNaive>) =>
+    probeRunnerKey('k', { fetch: naive.fetch, sleep: async () => {} });
+
+  it('makes every call the film command makes, and leaves the computer paused', async () => {
+    const naive = fakeNaive();
+    const result = await probe(naive);
+    expect(result.missing).toEqual([]);
+    expect(result.left).toEqual([]);
+    expect(result.results.map((each) => each.call).sort()).toEqual(
+      RUNNER_PROBE_CALLS.map((each) => each.call).sort(),
+    );
+    expect(result.results.find((each) => each.call === 'computers.exec')?.how).toBe('real');
+    expect(naive.computer()).toBe('paused');
+    // Image generation refused: reported, not a failure.
+    expect(result.images).toMatchObject({ call: 'media.images', status: 403, available: false });
+    // Nothing that spends is made for real: no session, and the image model does not exist.
+    expect(naive.calls).toContain('POST /v1/sessions');
+    expect(result.results.find((each) => each.call === 'sessions.create')?.how).toBe('scope');
+  });
+
+  it('says when the key may generate images', async () => {
+    const result = await probe(fakeNaive({ images: 400 }));
+    expect(result.images).toMatchObject({ status: 400, available: true });
+  });
+
+  it('never touches the Researcher computer while one of its sessions is live', async () => {
+    const naive = fakeNaive({ live: ['ses_busy'] });
+    const result = await probe(naive);
+    expect(result.missing).toEqual([]);
+    expect(naive.calls.some((call) => call.includes(`/v1/computers/${RESEARCHER_COMPUTER}/`))).toBe(
+      false,
+    );
+    expect(result.results.find((each) => each.call === 'computers.resume')).toMatchObject({
+      ok: true,
+      how: 'scope',
+    });
+  });
+
+  it('names each call the key may not make', async () => {
+    const result = await probe(fakeNaive({ refuse: ['POST /v1/sessions', 'DELETE /v1/files'] }));
+    expect(result.missing).toEqual([
+      'sessions.create',
+      'sessions.send',
+      'sessions.interrupt',
+      'sessions.cancel',
+      'files.delete',
+    ]);
+    // The file it could not delete is named, to be deleted by hand.
+    expect(result.left).toEqual(['file fil_probe']);
+  });
+
+  it('covers every scope the runner key holds, and image generation needs one it does not', () => {
+    const scopes = new Set(RUNNER_PROBE_CALLS.map((each) => each.scope).filter(Boolean));
+    expect([...scopes].sort()).toEqual([...RUNNER_KEY_SCOPES].sort());
+    expect(RUNNER_KEY_SCOPES).not.toContain(IMAGE_CALL.scope);
   });
 });
 

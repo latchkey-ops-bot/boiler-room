@@ -202,12 +202,25 @@ requests cannot all pass, and a refused start never reaches Naive.
 
 | Cap                                                                                                                                   | Staging                                   | Var                                        |
 | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------ |
-| One film, crew and compute                                                                                                            | $2.50, of which $0.50 is kept for compute | `FILM_CAP_USD`, `FILM_COMPUTE_RESERVE_USD` |
+| One film, crew and compute                                                                                                            | $6.00, of which $0.50 is kept for compute | `FILM_CAP_USD`, `FILM_COMPUTE_RESERVE_USD` |
 | Real films at work per founder (a paused one waiting for approval does not count, and is checked again when it is approved)           | 1                                         | `MAX_REAL_PER_ACCOUNT`                     |
 | Real films holding the crew's one Researcher, across staging                                                                          | 1                                         | `MAX_REAL_GLOBAL`                          |
-| Per founder per rolling 24 hours, films at work at their full cap, a script waiting at what it spent (its approval reserves the rest) | $5.00                                     | `ACCOUNT_DAILY_CAP_USD`                    |
-| All of staging per rolling 24 hours                                                                                                   | $5.25                                     | `GLOBAL_DAILY_CAP_USD`                     |
-| The balance tripwire: the Naive balance down more than the staging cap in a day, from any source                                      | halts every real film                     | `runner_control` row in D1                 |
+| Per founder per rolling 24 hours, films at work at their full cap, a script waiting at what it spent (its approval reserves the rest) | $15.00                                    | `ACCOUNT_DAILY_CAP_USD`                    |
+| All of staging per rolling 24 hours                                                                                                   | $20.00                                    | `GLOBAL_DAILY_CAP_USD`                     |
+| The balance tripwire: the Naive balance down more than $80.00 in a day, from any source                                               | halts every real film                     | `TRIPWIRE_DAILY_FALL_USD`                  |
+
+A real 16:9 film costs about $1.30 for the research and the script, and about $1.00 for each
+format's art direction, render and Quality Check; Opus Director rounds can cost more. So a film may
+take up to $6.00, a founder can make at least two a day ($15.00 holds two at the full cap), and
+staging's $20.00 holds a third film beside them, such as a test. The compute reserve covers about
+nine 10-minute blocks of the 4 vCPU film computer at $0.055 each.
+
+The tripwire counts every spend in the Naive organization, the company's own agents and any build
+or test included, not only films, so it has its own threshold, `TRIPWIRE_DAILY_FALL_USD` ($80.00),
+above the company's normal spend of about $20 to $27 a day. It cannot tell the spends apart. Once
+tripped it halts real films until a person resets it in `runner_control` (staging D1), setting
+`halted` to 0 and `balance_baseline_micro_usd` and `baseline_at` to NULL. Setting only `halted`
+trips it again on the next tick, because the old baseline is kept for 24 hours.
 
 **Settings.**
 
@@ -215,8 +228,8 @@ requests cannot all pass, and a refused start never reaches Naive.
 | ----------------------------------------------------------- | ------ | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `NAIVE_WEB_KEY`                                             | secret | `STAGING_NAIVE_WEB_KEY` only         | A key with exactly `computers:write` and `billing:read`. The sync checks it with Naive, and refuses the admin key                                                                                            |
 | `RUNNER_SIGNING_SECRET`                                     | secret | `STAGING_RUNNER_SIGNING_SECRET` only | At least 32 random characters                                                                                                                                                                                |
-| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | Optional. The film command's key, sent in each launch's bootstrap; the snapshot holds none. Sessions and `agents:read` only; the sync refuses more, the admin key or the website's key                       |
-| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. Staging only, until the snapshot runs the real film command                                                       |
+| `NAIVE_RUNNER_KEY`                                          | secret | `STAGING_NAIVE_RUNNER_KEY` only      | The film command's key, sent in each launch's bootstrap; the snapshot holds none. Exactly the seven scopes below; the sync refuses any other set, the admin key or the website's key                         |
+| `RUNNER_ALLOW_STANDIN`                                      | var    | `wrangler.jsonc`                     | `true` lets a snapshot built with the stand-in make a film, labelled simulated everywhere. `false` on staging, whose snapshot runs the real film command                                                     |
 | `REAL_FILM_USERS`                                           | secret | `STAGING_REAL_FILM_USERS`            | Comma-separated Clerk user ids. A secret, so no id is committed to the public repo                                                                                                                           |
 | `RUNNER_SNAPSHOT_ID`, `RUNNER_COMMIT`, `RUNNER_FILM_COMMIT` | vars   | `wrangler.jsonc`                     | The base snapshot and the two commits it holds, committed by pull request after a build                                                                                                                      |
 | `RUNNER_PUBLIC_URL`                                         | var    | `wrangler.jsonc`                     | The callback base. The cron has no request to read it from                                                                                                                                                   |
@@ -226,17 +239,47 @@ requests cannot all pass, and a refused start never reaches Naive.
 Missing any of the three secrets or the snapshot id, nobody gets a real film. Production has none
 of them and keeps answering 503.
 
+**The runner's key.** The film command on a film computer runs `--phase script` or `--phase render`
+with `--render local` and `--no-sync`, and makes these Naive calls with `NAIVE_RUNNER_KEY`. Each
+scope is the one Naive's own 403 names for the route (`RUNNER_KEY_SCOPES` in
+`apps/web/scripts/lib/runner-secrets.mjs`):
+
+| Scope             | Why the film command needs it                                                                                 |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| `agents:read`     | `agents.list` and `skills.listVersions`: the `--no-sync` check that the crew on Naive is this snapshot's      |
+| `sessions:read`   | `sessions.list`, `get` and the event stream: whether the Researcher is free, and each stage's turns           |
+| `sessions:write`  | `sessions.create`, `send`, `interrupt` and `cancel`: the Researcher, Director, Art Director and Quality Check |
+| `files:read`      | `files.list`, `get` and downloads: the capture tool, the page evidence and the captured pictures              |
+| `files:write`     | `files.upload` and `delete`: the capture tool, and the frames Quality Check is shown and then deletes         |
+| `computers:write` | `computers.list`, `get`, `resume`, `exec` and `pause`: br-researcher's computer, paused when research is done |
+| `billing:read`    | `credits.show` and `agents.spend`: each stage's balance before and after, and the Researcher's spend          |
+
+Not `agents:write`: the command never changes an agent or pushes a skill. Naive also puts image
+generation (`POST /v1/media/images`) under `agents:write`, so with this key the Art Director gets a
+403, records "image generation unavailable" in `decisions.json`, and goes on with the captured
+pictures. The `colour-event` field it would generate is not drawn by motion yet. Rendering is local,
+so the key never creates a computer.
+
 **Turning it on.** In order; production is not touched by any step.
 
 1. `pnpm web:runner:keys:staging mint` mints the website's key (exactly `computers:write` and
    `billing:read`) into `STAGING_NAIVE_WEB_KEY` and a signing secret into
    `STAGING_RUNNER_SIGNING_SECRET`, with the admin key, printing only key ids. `--runner-key` also
-   mints the film command's key, once it is needed. Then `pnpm web:runner:keys:staging probe` runs
-   every Naive call the website makes for a film with the new key, on a throwaway 1 vCPU computer
-   it then destroys (about $0.01).
-2. Build the base snapshot with `pnpm --filter @boiler-room/film-runner snapshot --adapter standin`
-   (or `--adapter film` once the film command has the contract), then commit the snapshot id and
-   both commits into `env.staging.vars` by pull request.
+   mints the film command's key (the seven scopes above, as `br-runner-staging`) into
+   `STAGING_NAIVE_RUNNER_KEY`. Then `pnpm web:runner:keys:staging probe` runs every Naive call the
+   website makes for a film with the new key, on a throwaway 1 vCPU computer it then destroys
+   (about $0.01), and `pnpm web:runner:keys:staging probe --runner-key` checks the runner's key
+   holds exactly the seven scopes and makes every call the film command makes with it: it starts
+   no session and generates no image (those calls go to an id that does not exist, and Naive
+   checks the scope first), uploads, reads and deletes one small file, and resumes, runs `echo` on
+   and pauses br-researcher's computer while none of its sessions is live (about $0.01). It also
+   says whether Naive lets the key generate images.
+2. Run `pnpm agents:sync` at the commit the snapshot will hold, then build the base snapshot with
+   `pnpm runner:snapshot --adapter film --film-commit <sha> --runner-commit <sha>`. The film command
+   runs `--no-sync`, so a deployed agent that is not that commit's stops every film with
+   `agent_drift` before anything is spent. The build's fork runs the runner's self-test and the
+   film command's `--help`. Commit the snapshot id and both commits into `env.staging.vars` by pull
+   request.
 3. `pnpm web:db:migrate:staging`, `pnpm web:secrets:sync:staging`, then
    `pnpm web:deploy:staging --any-commit` to test a branch, or plain once it is on `dev`. The deploy
    refuses a `contract.ts` that differs from the one at `RUNNER_COMMIT`: such a runner would be
@@ -256,8 +299,11 @@ the same value as `GTM_SERVICE_TOKEN` for the executor; set `BR_HOUSE_ACCOUNT_ID
 staging URL in the env file as `GTM_APP_URL`.
 
 Naive keys have no resource binding: the website's `computers:write` reaches every computer and
-snapshot in the organization, the company's agent computers included. Keep no secret on any of
-them. Moving film computers to an organization of their own would narrow that.
+snapshot in the organization, the company's agent computers included, and so does the runner's,
+which every film computer holds while its film command runs. A film computer handles content from
+customers' sites, so a compromise there would reach every other computer in the organization. Keep
+no secret on any of them. Moving film computers and the crew to an organization of their own would
+narrow that.
 
 A real film shows no "Simulated" label, and your screens show no banner. A film whose computer ran
 the stand-in (its hello says `adapter: standin`) keeps the label and stays off the showcase. A
