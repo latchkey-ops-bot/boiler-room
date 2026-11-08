@@ -111,11 +111,11 @@ export function namesIn(text: string, known: readonly string[] = []): string[] {
     );
 }
 
-const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escapeRegExp = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /** True when `text` holds `name` as a whole word, ignoring case. */
 export function mentions(text: string, name: string): boolean {
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escape(name)}(?![\\p{L}\\p{N}])`, 'iu').test(
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(name)}(?![\\p{L}\\p{N}])`, 'iu').test(
     text.normalize('NFKC'),
   );
 }
