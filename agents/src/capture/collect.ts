@@ -140,7 +140,11 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     blockCache.set(start, el);
     return el;
   };
-  const walkText = (root: Element, exclude?: (el: Element) => boolean): string => {
+  const walkText = (
+    root: Element,
+    exclude?: (el: Element) => boolean,
+    keep?: (parent: Element) => boolean,
+  ): string => {
     const parts: string[] = [];
     let lastBlock: Element | null = null;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT, {
@@ -157,6 +161,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       const text = (node as Text).data;
       if (!text) continue;
       const parent = node.parentElement;
+      if (keep && (!parent || !keep(parent))) continue;
       const block = parent ? blockOf(parent) : null;
       if (parts.length > 0 && block !== lastBlock) parts.push(' ');
       parts.push(text);
@@ -193,10 +198,122 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     return false;
   };
 
-  // biome-ignore lint/performance/useDomNodeTextContent: the rendered text is what a reader sees, which is what is captured here
-  const rendered = (body as HTMLElement).innerText ?? '';
+  // Text styled so nobody sees it: the colour of what is behind it, a font too small to read, or a
+  // box too small to show it. A page can hide instructions or figures this way. It is kept apart
+  // from the visible text, so it is never read as the page's copy and never quoted as a claim.
+  const luminance = (hex: string) => {
+    const value = Number.parseInt(hex.slice(1), 16);
+    const channel = (part: number) => {
+      const srgb = part / 255;
+      return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    };
+    return (
+      0.2126 * channel((value >> 16) & 255) +
+      0.7152 * channel((value >> 8) & 255) +
+      0.0722 * channel(value & 255)
+    );
+  };
+  const ratio = (first: string, second: string) => {
+    const a = luminance(first);
+    const b = luminance(second);
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  };
+  const over = (color: SeenColor, under: string) => {
+    if (color.alpha >= 1) return color.hex;
+    const top = Number.parseInt(color.hex.slice(1), 16);
+    const bottom = Number.parseInt(under.slice(1), 16);
+    const mix = (shift: number) =>
+      Math.round(
+        ((top >> shift) & 255) * color.alpha + ((bottom >> shift) & 255) * (1 - color.alpha),
+      );
+    return `#${[16, 8, 0].map((shift) => mix(shift).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
+  };
+  const INVISIBLE = 1.3;
+  const concealed = new Set<Element>();
+  const suspects: Element[] = [];
+  for (const el of Array.from(body.querySelectorAll('*')).slice(0, 8000)) {
+    if (SKIP.has(el.tagName)) continue;
+    let chars = 0;
+    for (const node of Array.from(el.childNodes))
+      if (node.nodeType === Node.TEXT_NODE) chars += (node.textContent ?? '').trim().length;
+    if (chars === 0 || !visible(el)) continue;
+    const style = styleOf(el);
+    const rect = el.getBoundingClientRect();
+    if ((Number.parseFloat(style.fontSize) || 16) < 3 || (rect.width <= 2 && rect.height <= 2)) {
+      concealed.add(el);
+      continue;
+    }
+    const color = toColor(style.color);
+    if (!color || color.alpha < 0.1) {
+      concealed.add(el);
+      continue;
+    }
+    if (ratio(over(color, painted(el).hex), painted(el).hex) < INVISIBLE) suspects.push(el);
+  }
+  // A suspect may sit on a picture, a video or a gradient that the colours above cannot see, as a
+  // white headline on a hero photo does. What is really behind it is read at its position, with
+  // every element made hit-testable for the moment, and only a plain matching colour conceals it.
+  if (suspects.length > 0) {
+    const probe = document.createElement('style');
+    probe.textContent = '* { pointer-events: auto !important; }';
+    document.head.appendChild(probe);
+    const MEDIA = /^(img|video|canvas|picture|iframe|svg|object|embed)$/i;
+    for (const el of suspects.slice(0, 60)) {
+      const first = el.getBoundingClientRect();
+      window.scrollTo(0, Math.max(0, first.top + window.scrollY - vh / 3));
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + Math.min(rect.width / 2, 24);
+      const y = rect.top + Math.min(rect.height / 2, 12);
+      if (x < 0 || y < 0 || x >= vw || y >= vh) continue;
+      const stack = document.elementsFromPoint(x, y);
+      const start = stack.indexOf(el);
+      let backdrop: string | null = null;
+      let onMedia = false;
+      for (const below of stack.slice(start + 1)) {
+        const style = styleOf(below);
+        if (
+          MEDIA.test(below.tagName) ||
+          (style.backgroundImage && style.backgroundImage !== 'none')
+        ) {
+          onMedia = true;
+          break;
+        }
+        const fill = toColor(style.backgroundColor);
+        if (fill && fill.alpha >= 0.5) {
+          backdrop = fill.hex;
+          break;
+        }
+      }
+      const own = styleOf(el).backgroundImage;
+      if (onMedia || (own && own !== 'none')) continue;
+      const color = toColor(styleOf(el).color);
+      const behind = backdrop ?? '#FFFFFF';
+      if (color && ratio(over(color, behind), behind) < INVISIBLE) concealed.add(el);
+    }
+    probe.remove();
+    window.scrollTo(0, 0);
+  }
+  for (const el of concealed) el.setAttribute('data-br-concealed', '1');
+  const concealedText = concealed.size
+    ? walkText(body, undefined, (parent) => concealed.has(parent))
+    : '';
+
+  // What a visitor sees: innerText with the concealed text taken out, which keeps the layout.
+  let rendered = '';
+  {
+    const hide = document.createElement('style');
+    hide.textContent = '[data-br-concealed] { visibility: hidden !important; }';
+    if (concealed.size) document.head.appendChild(hide);
+    // biome-ignore lint/performance/useDomNodeTextContent: the rendered text is what a reader sees, which is what is captured here
+    rendered = (body as HTMLElement).innerText ?? '';
+    hide.remove();
+  }
   const dom = walkText(body);
-  const clean = walkText(body, (el) => illustrative.has(el));
+  const clean = walkText(
+    body,
+    (el) => illustrative.has(el),
+    (parent) => !concealed.has(parent),
+  );
   const illustrativeText = [...illustrative].map((el) => walkText(el)).join('\n');
 
   const meta: Record<string, string> = {};
@@ -885,7 +1002,14 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     url: location.href,
     title: document.title,
     lang: document.documentElement.lang || '',
-    text: { rendered, dom, meta: metaText, clean, illustrative: illustrativeText },
+    text: {
+      rendered,
+      dom,
+      meta: metaText,
+      clean,
+      illustrative: illustrativeText,
+      concealed: concealedText,
+    },
     headings,
     links,
     external,

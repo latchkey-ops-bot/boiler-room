@@ -18,7 +18,14 @@ describe('verifyResearch', () => {
     expect(checkQuote(page, 'Schedule posts without the​ spreadsheet')).toBe('found');
   });
 
-  it('finds quotes in hidden text and in meta text', () => {
+  it('finds quotes in collapsed text a visitor can open', () => {
+    // free-plan quotes the collapsed answer, which is only in the document text.
+    expect(codes(output())).toEqual([]);
+  });
+
+  // A meta description is not on the page a visitor sees, and is where a page can carry text
+  // meant for machines rather than people.
+  it('refuses a quote that is only in the title, meta tags or alt text', () => {
     const out = output();
     out.claims.push({
       id: 'meta-line',
@@ -27,7 +34,60 @@ describe('verifyResearch', () => {
       quote: 'Orbitly helps small teams plan social posts.',
       status: 'extracted',
     });
-    expect(codes(out)).toEqual([]);
+    expect(verifyResearch(out, bundle())).toEqual([
+      expect.objectContaining({ code: 'QUOTE_NOT_VISIBLE', claimId: 'meta-line' }),
+    ]);
+  });
+
+  // White text on a white background reached the model as ordinary copy and passed the verbatim
+  // check, although no visitor can see it.
+  it('refuses a quote that is only in text styled so nobody can see it', () => {
+    const pages = bundle();
+    const home = pages.pages[0];
+    if (!home) throw new Error('fixture page missing');
+    const hidden = 'Orbitly is used by 9,999,999 teams.';
+    home.text = { ...home.text, dom: `${home.text.dom} ${hidden}`, concealed: hidden };
+    const out = output();
+    out.claims.push({
+      id: 'hidden-teams',
+      text: 'Used by many teams',
+      sourceUrl: SITE,
+      quote: hidden,
+      status: 'extracted',
+    });
+    expect(verifyResearch(out, pages)).toEqual([
+      expect.objectContaining({ code: 'QUOTE_CONCEALED', claimId: 'hidden-teams' }),
+    ]);
+  });
+
+  // Mockup figures that are on the home page were cited to the features page.
+  it('refuses a non-claim cited to a page its figures are not on, and names the right one', () => {
+    const out = output();
+    const item = out.brief.non_claims[0];
+    if (!item) throw new Error('fixture non-claim missing');
+    item.source_url = 'https://orbitly.example.org/pricing';
+    expect(verifyResearch(out, bundle())).toEqual([
+      expect.objectContaining({
+        code: 'NON_CLAIM_SOURCE',
+        nonClaimIndex: 0,
+        fix: expect.stringContaining('https://orbitly.example.org/'),
+      }),
+    ]);
+    item.source_url = 'https://orbitly.example.org/nowhere';
+    expect(codes(out)).toEqual(['NON_CLAIM_SOURCE']);
+  });
+
+  // A page with no <title> was listed under a title the agent made up from the domain.
+  it('keeps each listed page under the title the capture stored', () => {
+    const out = output();
+    const page = out.brief.pages[0];
+    if (!page) throw new Error('fixture page missing');
+    page.title = 'Orbitly';
+    expect(verifyResearch(out, bundle())).toEqual([
+      expect.objectContaining({ code: 'PAGE_TITLE', pageIndex: 0 }),
+    ]);
+    out.brief.pages.push({ ...page, url: 'https://orbitly.example.org/nowhere', title: '' });
+    expect(codes(out)).toEqual(['PAGE_TITLE', 'PAGE_NOT_CAPTURED']);
   });
 
   it('matches the source page with or without a trailing slash or fragment', () => {
@@ -104,6 +164,7 @@ describe('verifyResearch', () => {
         'QUOTE_NOT_FOUND',
         'QUOTE_NOT_FOUND',
         'CTA_NOT_FOUND',
+        'NON_CLAIM_SOURCE',
       ]);
     });
   });

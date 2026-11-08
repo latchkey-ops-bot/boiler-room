@@ -15,7 +15,13 @@ import { researcher } from '../definitions/researcher.ts';
 import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { syncAgents } from '../sync.ts';
 import { bundleTool, type ToolBundle } from './bundle.ts';
-import { checkProvenance, checkResearch, type GateFailure, withoutClaims } from './gate.ts';
+import {
+  checkProvenance,
+  checkResearch,
+  type GateFailure,
+  prunable,
+  withoutFailures,
+} from './gate.ts';
 import { fileIdOf, type ResearchOutput, siteUrlProblem } from './output.ts';
 import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
 import { siteHost, slugify } from './text.ts';
@@ -695,13 +701,14 @@ export async function research(options: ResearchOptions): Promise<number> {
     report.published_files = Object.fromEntries(tracker.published);
 
     if (!accepted && verdict?.output && verdict.bundle) {
-      // Out of repair rounds: drop the claims that still fail, and accept the rest only if nothing
-      // else fails. An unverified claim never reaches the output.
+      // Out of repair rounds: drop the claims and non-claims that still fail and correct the page
+      // list, and accept the rest only if nothing else fails. An unverified claim never reaches
+      // the output.
       const rejected = new Set(
         verdict.failures.flatMap((failure) => (failure.claimId ? [failure.claimId] : [])),
       );
-      if (rejected.size > 0) {
-        const trimmed = withoutClaims(verdict.output, rejected);
+      if (verdict.failures.some(prunable)) {
+        const trimmed = withoutFailures(verdict.output, verdict.failures, verdict.bundle);
         const again = await checkResearch(trimmed, verdict.bundle, {});
         const sha = createHash('sha256')
           .update(verdict.bundleText ?? '')
@@ -720,7 +727,9 @@ export async function research(options: ResearchOptions): Promise<number> {
         report.rejected_claims = verdict.output.claims.filter((claim) => rejected.has(claim.id));
         if (left.length === 0 && again.output) {
           accepted = again.output;
-          say(`accepted after dropping ${rejected.size} claim(s) that could not be verified`);
+          say(
+            `accepted after the gate settled ${verdict.failures.filter(prunable).length} problem(s) itself, dropping ${rejected.size} claim(s) that could not be verified`,
+          );
         } else verdict = { ...verdict, failures: left };
       }
     }

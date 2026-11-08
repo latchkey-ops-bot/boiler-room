@@ -4,8 +4,10 @@ import {
   checkProvenance,
   checkResearch,
   type Evidence,
+  prunable,
   unfinished,
   withoutClaims,
+  withoutFailures,
 } from '../src/researcher/gate.ts';
 import { bundle, output } from './fixtures.ts';
 
@@ -156,5 +158,34 @@ describe('withoutClaims', () => {
     expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
       ['NUMBER_UNBACKED', 'brief.features[0]'],
     ]);
+  });
+});
+
+// Out of repair rounds, a non-claim cited to the wrong page or a made-up page title must not fail
+// a result whose claims are all verified.
+describe('withoutFailures', () => {
+  it('drops failing non-claims and uncaptured pages and resets titles, and then passes', async () => {
+    const out = output();
+    const nonClaim = out.brief.non_claims[0];
+    const page = out.brief.pages[0];
+    if (!nonClaim || !page) throw new Error('fixture missing');
+    nonClaim.source_url = 'https://orbitly.example.org/nowhere';
+    page.title = 'Orbitly';
+    out.brief.pages.push({ ...page, url: 'https://orbitly.example.org/nowhere' });
+    const first = await checkResearch(out, bundle());
+    expect(first.failures.map((failure) => failure.code)).toEqual([
+      'NON_CLAIM_SOURCE',
+      'PAGE_TITLE',
+      'PAGE_NOT_CAPTURED',
+    ]);
+    expect(first.failures.every(prunable)).toBe(true);
+    const settled = withoutFailures(out, first.failures, bundle());
+    expect(settled.brief.non_claims).toEqual([]);
+    expect(settled.brief.pages).toEqual([{ ...page, title: 'Orbitly | Social scheduling' }]);
+    expect((await checkResearch(settled, bundle())).failures).toEqual([]);
+  });
+
+  it('cannot settle a failure that does not belong to a claim, a non-claim or a page', () => {
+    expect(prunable({ code: 'SCHEMA_INVALID', path: '$', message: '', fix: '' })).toBe(false);
   });
 });

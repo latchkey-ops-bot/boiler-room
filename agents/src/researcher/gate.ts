@@ -1,7 +1,7 @@
 import { validateResearchParts } from '@boiler-room/schema';
 import type { z } from 'zod';
 import { fileIdOf, type ResearchOutput, researchOutputSchema } from './output.ts';
-import { type Failure, type PagesBundle, verifyResearch } from './verify.ts';
+import { type Failure, PageIndex, type PagesBundle, verifyResearch } from './verify.ts';
 
 /** A reason the result cannot be accepted, in the form the agent is sent to repair it. */
 export interface GateFailure {
@@ -10,6 +10,10 @@ export interface GateFailure {
   message: string;
   fix: string;
   claimId?: string;
+  /** The `brief.non_claims` item the failure belongs to, which can be dropped. */
+  nonClaimIndex?: number;
+  /** The `brief.pages` item the failure belongs to, which can be corrected or dropped. */
+  pageIndex?: number;
 }
 
 export const PLACEHOLDER_MARK = 'PUBLISH:';
@@ -233,6 +237,50 @@ export function withoutClaims(output: ResearchOutput, ids: ReadonlySet<string>):
         brief.headline_claim_id && ids.has(brief.headline_claim_id)
           ? null
           : brief.headline_claim_id,
+    },
+  };
+}
+
+/** Whether the gate can settle a failure itself when repair rounds run out. */
+export function prunable(failure: GateFailure): boolean {
+  return (
+    failure.claimId !== undefined ||
+    failure.nonClaimIndex !== undefined ||
+    failure.pageIndex !== undefined
+  );
+}
+
+/**
+ * The result with every failure the gate can settle itself settled: failing claims dropped with
+ * every reference to them, failing non-claims dropped, pages that were not captured dropped from
+ * the brief, and each listed page's title set to the one the capture stored. Used when repair
+ * rounds run out, so a wrong note never fails a result whose claims are verified, and an
+ * unverified claim never reaches the output.
+ */
+export function withoutFailures(
+  output: ResearchOutput,
+  failures: readonly GateFailure[],
+  bundle: PagesBundle,
+): ResearchOutput {
+  const claims = new Set(failures.flatMap((failure) => (failure.claimId ? [failure.claimId] : [])));
+  const nonClaims = new Set(failures.flatMap((failure) => failure.nonClaimIndex ?? []));
+  const uncaptured = new Set(
+    failures.flatMap((failure) =>
+      failure.code === 'PAGE_NOT_CAPTURED' && failure.pageIndex !== undefined
+        ? [failure.pageIndex]
+        : [],
+    ),
+  );
+  const pages = new PageIndex(bundle);
+  const trimmed = withoutClaims(output, claims);
+  return {
+    ...trimmed,
+    brief: {
+      ...trimmed.brief,
+      non_claims: trimmed.brief.non_claims.filter((_, index) => !nonClaims.has(index)),
+      pages: trimmed.brief.pages
+        .filter((_, index) => !uncaptured.has(index))
+        .map((page) => ({ ...page, title: pages.find(page.url)?.page.title ?? page.title })),
     },
   };
 }

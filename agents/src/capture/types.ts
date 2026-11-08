@@ -119,7 +119,19 @@ export interface RawPage {
   url: string;
   title: string;
   lang: string;
-  text: { rendered: string; dom: string; meta: string; clean: string; illustrative: string };
+  /**
+   * `rendered` is what a visitor sees, `dom` all text, `clean` the text outside mockups and outside
+   * concealed text, `illustrative` the mockup text, and `concealed` text styled so nobody can see
+   * it: the colour of what is behind it, too small, or in a box too small to show it.
+   */
+  text: {
+    rendered: string;
+    dom: string;
+    meta: string;
+    clean: string;
+    illustrative: string;
+    concealed: string;
+  };
   headings: { level: number; text: string }[];
   links: RawLink[];
   external: RawLink[];
