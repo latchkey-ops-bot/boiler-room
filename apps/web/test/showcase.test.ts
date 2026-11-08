@@ -122,6 +122,29 @@ describe('the launch wall', () => {
     expect((await showcaseFilms(db()))[0]?.id).toBe(newest);
   });
 
+  it('dates a film by when the crew delivered it, not when its founder opted in', async () => {
+    const id = await film({ url: 'https://orbit.com/', deliveredAt: '2026-11-05T09:00:00.000Z' });
+    await db()
+      .insert(filmEvents)
+      .values({
+        id: `evt_${id}`,
+        filmId: id,
+        pipelineEventId: 'run:9',
+        seq: 9,
+        at: new Date('2026-11-02T16:30:00.000Z'),
+        agent: 'account_manager',
+        kind: 'delivered',
+        stage: 'delivery',
+        status: 'done',
+        message: 'Delivered your files.',
+      });
+    const silent = await film({ url: 'https://pebble.app/', deliveredAt: '2026-11-01' });
+    const wall = await showcaseFilms(db());
+    expect(wall.find((item) => item.id === id)?.deliveredAt).toBe('2026-11-02T16:30:00.000Z');
+    // No delivered event: the film's last change stands in.
+    expect(wall.find((item) => item.id === silent)?.deliveredAt).toBe('2026-11-01T00:00:00.000Z');
+  });
+
   it('only offers to play a film that has a stored file', async () => {
     const playable = await film({ url: 'https://orbit.com/', deliveredAt: '2026-11-02' });
     const silent = await film({ url: 'https://pebble.app/', deliveredAt: '2026-11-01' });

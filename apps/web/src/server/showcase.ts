@@ -1,6 +1,6 @@
-import { and, desc, eq, inArray, isNotNull, like, ne, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNotNull, like, max, ne, or } from 'drizzle-orm';
 import type { Db } from '../db/client.ts';
-import { deliverables, films } from '../db/schema.ts';
+import { deliverables, filmEvents, films } from '../db/schema.ts';
 import { displayHost, type Format } from '../lib/film.ts';
 import { parseCampaign } from './api/films.ts';
 
@@ -64,24 +64,26 @@ export async function showcaseFilms(
   const rows = [...house, ...newest.filter((film) => film.id !== house[0]?.id)].slice(0, limit);
   if (rows.length === 0) return [];
 
-  const files = await db
-    .select({ filmId: deliverables.filmId, format: deliverables.format })
-    .from(deliverables)
-    .where(
-      and(
-        inArray(
-          deliverables.filmId,
-          rows.map((film) => film.id),
-        ),
-        isNotNull(deliverables.r2Key),
-      ),
-    );
+  const ids = rows.map((film) => film.id);
+  const [files, deliveries] = await Promise.all([
+    db
+      .select({ filmId: deliverables.filmId })
+      .from(deliverables)
+      .where(and(inArray(deliverables.filmId, ids), isNotNull(deliverables.r2Key))),
+    // When the crew delivered it. `updatedAt` also moves when the founder opts in, later.
+    db
+      .select({ filmId: filmEvents.filmId, at: max(filmEvents.at) })
+      .from(filmEvents)
+      .where(and(inArray(filmEvents.filmId, ids), eq(filmEvents.kind, 'delivered')))
+      .groupBy(filmEvents.filmId),
+  ]);
 
   return rows.map((film) => {
     const campaign = parseCampaign(film.campaignJson);
     const headline =
       campaign?.scenes[0]?.text.find((item) => item.role === 'headline')?.value ?? null;
     const playable = files.some((file) => file.filmId === film.id);
+    const delivered = deliveries.find((row) => row.filmId === film.id)?.at ?? film.updatedAt;
     return {
       id: film.id,
       host: displayHost(film.url),
@@ -89,7 +91,7 @@ export async function showcaseFilms(
       headline,
       background: campaign?.brand.colors.background ?? '#0B2E40',
       foreground: campaign?.brand.colors.foreground ?? '#FFFFFF',
-      deliveredAt: film.updatedAt.toISOString(),
+      deliveredAt: delivered.toISOString(),
       house: film.id === house[0]?.id,
       videoPath: playable ? `/api/showcase/${film.id}/video` : null,
     };
