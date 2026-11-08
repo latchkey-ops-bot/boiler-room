@@ -5,7 +5,6 @@
  * its box, never larger.
  */
 import { measureText } from '@remotion/layout-utils';
-import { useMemo } from 'react';
 import { useBrand } from '../brand/brand-context.tsx';
 import { type FitResult, fitBlock, type TextMeasure } from '../layout/fit.ts';
 import type { Stage } from '../layout/stage.ts';
@@ -89,7 +88,48 @@ function measurer(fontFamily: string, weight: number, letterSpacing: string): Te
   };
 }
 
-/** Fits copy at its cap height into a box, on at most `maxLines` lines. */
+const fitCache = new Map<string, SpecFit>();
+
+/**
+ * Fits copy at its cap height into a box, on at most `maxLines` lines. It is a pure function of
+ * its arguments once the font is loaded, memoised in a module `Map` keyed by everything it reads,
+ * so an anchor's `box` can call it on any frame, in any tab, in any order.
+ */
+export function specFit(
+  text: string,
+  style: SpecTypeStyle,
+  stage: Pick<Stage, 'width' | 'height'>,
+  box: { width: number; maxLines: number },
+  fonts: { display: string; body: string },
+): SpecFit {
+  const fontFamily = fonts[style.font];
+  const lineHeight = style.lineHeight ?? specType.lineHeight;
+  const letterSpacing = style.letterSpacing ?? specType.tracking;
+  const { weight, cap } = style;
+  const key = [text, fontFamily, weight, cap, lineHeight, letterSpacing, stage.width, stage.height]
+    .concat([box.width, box.maxLines])
+    .join('|');
+  const known = fitCache.get(key);
+  if (known) return known;
+  const metrics = fontMetrics(fontFamily, weight);
+  const targetSize = specPx(stage, cap) / metrics.cap;
+  const fit = fitBlock(
+    {
+      text,
+      maxWidth: box.width,
+      maxHeight: Number.POSITIVE_INFINITY,
+      maxSize: targetSize,
+      maxLines: box.maxLines,
+      lineHeight,
+    },
+    measurer(fontFamily, weight, letterSpacing),
+  );
+  const result = { ...fit, fontFamily, weight, lineHeight, letterSpacing, metrics, targetSize };
+  fitCache.set(key, result);
+  return result;
+}
+
+/** `specFit` with the brand's fonts, as a hook. */
 export function useSpecFit(
   text: string,
   style: SpecTypeStyle,
@@ -97,26 +137,7 @@ export function useSpecFit(
   box: { width: number; maxLines: number },
 ): SpecFit {
   const { fonts } = useBrand();
-  const fontFamily = fonts[style.font];
-  const lineHeight = style.lineHeight ?? specType.lineHeight;
-  const letterSpacing = style.letterSpacing ?? specType.tracking;
-  const { weight, cap } = style;
-  return useMemo(() => {
-    const metrics = fontMetrics(fontFamily, weight);
-    const targetSize = specPx(stage, cap) / metrics.cap;
-    const fit = fitBlock(
-      {
-        text,
-        maxWidth: box.width,
-        maxHeight: Number.POSITIVE_INFINITY,
-        maxSize: targetSize,
-        maxLines: box.maxLines,
-        lineHeight,
-      },
-      measurer(fontFamily, weight, letterSpacing),
-    );
-    return { ...fit, fontFamily, weight, lineHeight, letterSpacing, metrics, targetSize };
-  }, [text, fontFamily, weight, cap, lineHeight, letterSpacing, stage, box.width, box.maxLines]);
+  return specFit(text, style, stage, box, fonts);
 }
 
 /** The width of a run of copy in a fitted face, at a size of its own. */

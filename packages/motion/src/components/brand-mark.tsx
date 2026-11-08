@@ -30,7 +30,7 @@ const useWordmark = ({ box }: MarkPlacement, unit: number) => {
 };
 
 /** A logo fitted to its box, and no larger than a raster logo's own pixels, at the same centre. */
-function logoRect(
+export function logoRect(
   logo: Extract<ResolvedLogo, { kind: 'image' }>,
   { box, align }: MarkPlacement,
 ): Rect {

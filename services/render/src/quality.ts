@@ -26,10 +26,14 @@ export interface TransitionStill {
 
 export interface TransitionPlan {
   index: number;
+  /** The catalog id the resolver plays on this boundary. */
   name: string;
   /** The first frame of the incoming scene. */
   boundary: number;
-  /** The overlay covers `from` up to but not including `to`. */
+  /**
+   * The transition moves frames `from` up to but not including `to`, from its first QC frame in
+   * `docs/motion/transitions.md` to its last, so `before` and `after` are those QC frames.
+   */
   from: number;
   to: number;
   stills: TransitionStill[];
@@ -53,7 +57,7 @@ const clampFrame = (frame: number, durationInFrames: number) =>
 
 /** Which frames to pull, worked out from the cut alone, with frame numbers from `sceneFrames`. */
 export function planQuality(
-  cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds'>,
+  cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds' | 'brand'>,
 ): QualityPlan {
   const { fps, durationInFrames, scenes } = sceneFrames(cut);
   const sceneAt = (frame: number) =>

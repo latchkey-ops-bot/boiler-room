@@ -1,15 +1,24 @@
 import { useMemo } from 'react';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
-import { cornerMark, SceneBase, SceneMark } from '../components/scene-base.tsx';
-import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
-import { lineBox, type SpecFit, useSpecFit, widthAt, wordWidths } from '../components/type.tsx';
-import { arrive, arriveN, specFrame, typeDrift } from '../core/curves.ts';
-import { presence } from '../core/presence.ts';
+import { cornerMark, SceneMark } from '../components/scene-base.tsx';
+import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
+import {
+  lineBox,
+  type SpecFit,
+  type SpecTypeStyle,
+  specFit,
+  useSpecFit,
+  widthAt,
+  wordWidths,
+} from '../components/type.tsx';
+import { arriveN, secondLinePush, typeDrift } from '../core/curves.ts';
 import { bezier } from '../core/time.ts';
 import { textDirection } from '../layout/bidi.ts';
+import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
 import { slam, specType, type as typography } from '../tokens.ts';
+import { SeamLayer } from '../transitions/seam-layer.tsx';
 import { type Accent, accentSchema, isAccented } from './accent.ts';
 import { defineScene } from './definition.ts';
 
@@ -76,13 +85,25 @@ interface SlamLayout {
   displayWidth: number;
 }
 
+const sentenceStyle: SpecTypeStyle = {
+  font: 'display',
+  weight: typography.weight.display,
+  cap: specType.capS,
+};
+
+/**
+ * The headline anchor's box: the whole sentence at rest, centred on the frame, as it drifts. The
+ * slam and the collapse happen inside this box's centre, so nothing carried across a seam moves it.
+ */
+export function sentenceBox(fit: SpecFit, stage: Stage, f: number): Rect {
+  const scale = typeDrift(Math.max(0, f - slam.appendAt));
+  const width = fit.width * scale;
+  const height = fit.lines.length * fit.fontSize * fit.lineHeight * scale;
+  return { x: (stage.width - width) / 2, y: (stage.height - height) / 2, width, height };
+}
+
 function useSlamLayout(text: string, stage: Stage): SlamLayout {
-  const fit = useSpecFit(
-    text,
-    { font: 'display', weight: typography.weight.display, cap: specType.capS },
-    stage,
-    { width: lineBox(stage), maxLines: 2 },
-  );
+  const fit = useSpecFit(text, sentenceStyle, stage, { width: lineBox(stage), maxLines: 2 });
   return useMemo(() => {
     let first = 0;
     let space = 0;
@@ -143,17 +164,16 @@ const Word = ({
 );
 
 const WordSlam = ({ scene, props }: SceneProps<WordSlamProps>) => {
-  const { frame, fps, stage, timing } = useScene();
+  const { stage } = useScene();
+  const { f } = useSceneClock();
   const { colors, fonts } = useBrand();
   const headline = scene.text.find(({ role }) => role === 'headline');
   if (!headline) throw new Error(`Scene "${scene.id}" has no headline. validateFilm checks this.`);
   const layout = useSlamLayout(headline.value, stage);
-  const f = specFrame(frame - timing.entryAt, fps);
   const { fit, lines, space, displaySize, displayWidth } = layout;
   const rtl = textDirection(headline.value) === 'rtl';
   const centreX = stage.width / 2;
   const centreY = stage.height / 2;
-  const opacity = 1 - presence(frame, timing.text).exit;
   const accent: Accent | undefined = props.accent;
   const colorOf = (n: number) =>
     isAccented(accent, headline.id, n) ? colors.accent : colors.foreground;
@@ -164,8 +184,6 @@ const WordSlam = ({ scene, props }: SceneProps<WordSlamProps>) => {
     letterSpacing: fit.letterSpacing,
   };
   const slamWord = lines[0]?.words[0] ?? '';
-
-  if (f < 0) return <SceneBase seed={scene.id} />;
 
   const content =
     f < slam.appendAt ? (
@@ -207,7 +225,7 @@ const WordSlam = ({ scene, props }: SceneProps<WordSlamProps>) => {
             lines.length === 1 || f < secondStart
               ? centreY
               : lineIndex === 0
-                ? centreY - travel * arrive(f - secondStart + 1, slam.push)
+                ? centreY - secondLinePush(f, secondStart, travel)
                 : centreY + travel;
           if (lineIndex > 0 && f < secondStart) return null;
           const start = lineStart(f, line, space, centreX);
@@ -234,10 +252,10 @@ const WordSlam = ({ scene, props }: SceneProps<WordSlamProps>) => {
     );
 
   return (
-    <SceneBase seed={scene.id}>
+    <>
       <SceneMark placement={cornerMark(stage)} />
-      <div style={{ inset: 0, opacity, position: 'absolute' }}>{content}</div>
-    </SceneBase>
+      <SeamLayer anchor="headline">{content}</SeamLayer>
+    </>
   );
 };
 
@@ -248,4 +266,23 @@ export const wordSlam = defineScene<WordSlamProps>({
   image: 'none',
   maxImages: 0,
   markAnchor: (stage) => cornerMark(stage),
+  kind: 'type',
+  ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
+  // The sentence block, with no exit velocity: the hook leaves by a dead stop.
+  anchors: [
+    {
+      id: 'headline',
+      box: (f, { stage, text, theme }) => {
+        const value = text.find(({ role }) => role === 'headline')?.value ?? '';
+        const fit = specFit(
+          value,
+          sentenceStyle,
+          stage,
+          { width: lineBox(stage), maxLines: 2 },
+          theme.fonts,
+        );
+        return sentenceBox(fit, stage, f);
+      },
+    },
+  ],
 });

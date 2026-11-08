@@ -1,27 +1,50 @@
 import { type Campaign, sceneFrames } from '@boiler-room/schema';
-import { interpolate } from 'remotion';
-import { framesFor } from '../core/time.ts';
-import { transition as lengths } from '../tokens.ts';
+import { filmFrames, type Seam } from '../core/curves.ts';
+import { filmSeams } from '../film/seams.ts';
+import {
+  isCatalogId,
+  mountReach,
+  qcFrames,
+  reach,
+  TRANSITIONS,
+  type TransitionName,
+} from './catalog.ts';
+import type { SeamReason } from './resolve.ts';
 
-export const TRANSITIONS = ['push', 'carry'] as const;
-export type TransitionName = (typeof TRANSITIONS)[number];
+export { isTransition, TRANSITIONS, type TransitionName } from './catalog.ts';
 
-export const isTransition = (name: string): name is TransitionName =>
-  (TRANSITIONS as readonly string[]).includes(name);
-
-/** A transition straddling a scene boundary, from `from` up to but not including `to`. */
+/**
+ * A transition on a scene boundary. Transitions take no timeline time: `boundary` is the incoming
+ * scene's first frame, as `sceneFrames` gives it, and `from` up to but not including `to` is the
+ * stretch around it where the transition moves anything, which is what Quality Check looks at. It
+ * does not widen either scene's mount: each built transition is drawn inside the two scenes' own
+ * frames.
+ */
 export interface TransitionWindow {
+  /** The seam's index: it joins scene `index` and scene `index + 1`. */
+  index: number;
   name: TransitionName;
-  /** The first frame of the incoming scene. Unchanged by the transition. */
   boundary: number;
   from: number;
   to: number;
+  /** The `transitionOut` the campaign wrote, and why `name` was chosen. */
+  written: string | undefined;
+  reason: SeamReason;
+  note: string | undefined;
+  /** T1: the seam both scenes move on. */
+  seam: Seam | undefined;
+  /** T1: the anchor the incoming scene carries from the outgoing one. */
+  carry: string | undefined;
+  /** T5: spec frames of ground only at the start of the incoming scene. */
+  blank: number;
+  /** The film frames the spec's QC list names for this transition, in order. */
+  qc: number[];
 }
 
 /**
  * A scene on the timeline. `from` and `durationInFrames` are the campaign's own times. The scene is
- * mounted for a little longer on either side of them, which is how two scenes share a boundary
- * without either one starting early or the film losing any time.
+ * mounted for its own frames plus any a transition reaches past the seam into it, which for every
+ * built transition is none.
  */
 export interface SceneSpan {
   id: string;
@@ -45,46 +68,52 @@ export interface Timeline {
   windows: TransitionWindow[];
 }
 
-/** Half a transition, cut to fit: no scene gives more than half of itself to either boundary. */
-function halfLength(name: TransitionName, fps: number, before: number, after: number): number {
-  return Math.min(
-    Math.floor(framesFor(lengths[name], fps) / 2),
-    Math.floor(before / 2),
-    Math.floor(after / 2),
-  );
-}
-
 /**
- * Lays scenes out with their transitions overlaid on the boundaries. Nothing here moves a boundary,
- * so the film stays exactly as long as `sceneFrames` says. A boundary between scenes too short to
- * share frames is a cut. The names are checked before a film is planned, so an unknown one is
- * an error here too.
+ * Lays scenes out with the transition the resolver chose on each boundary. Nothing here moves a
+ * boundary, so the film stays exactly as long as `sceneFrames` says. A `transitionOut` outside
+ * the catalog is refused by the render gate before a film is planned, so it is an error here too.
  */
-export function buildTimeline(cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds'>): Timeline {
-  const { fps, durationInFrames, scenes } = sceneFrames(cut);
-  const windows = new Map<number, TransitionWindow>();
-
-  for (const [index, scene] of scenes.entries()) {
-    const name = cut.scenes[index]?.transitionOut;
-    const next = scenes[index + 1];
-    if (name === undefined || !next) continue;
-    if (!isTransition(name)) throw new Error(`Unknown transition "${name}".`);
-    const half = halfLength(name, fps, scene.durationInFrames, next.durationInFrames);
-    if (half > 0) {
-      windows.set(index, {
-        name,
-        boundary: next.from,
-        from: next.from - half,
-        to: next.from + half,
-      });
+export function buildTimeline(
+  cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSeconds' | 'brand'>,
+): Timeline {
+  for (const scene of cut.scenes) {
+    const name = scene.transitionOut;
+    if (name !== undefined && !isCatalogId(name)) {
+      throw new Error(
+        `Unknown transition "${name}". Use a catalog id: ${TRANSITIONS.join(', ')} are built.`,
+      );
     }
   }
+  const { fps, durationInFrames, scenes } = sceneFrames(cut);
+  const clamp = (frame: number) => Math.min(durationInFrames, Math.max(0, frame));
+
+  const windows = filmSeams(cut).map((seam): TransitionWindow => {
+    const boundary = (scenes[seam.index + 1] as { from: number }).from;
+    const extent = reach(seam.used, seam.blank);
+    const qc = qcFrames(seam.used, seam.blank).map((offset) =>
+      clamp(boundary + Math.sign(offset) * filmFrames(Math.abs(offset), fps)),
+    );
+    return {
+      index: seam.index,
+      name: seam.used,
+      boundary,
+      from: clamp(boundary - filmFrames(extent.before, fps)),
+      to: clamp(boundary + filmFrames(extent.after, fps)),
+      written: seam.written,
+      reason: seam.reason,
+      note: seam.note,
+      seam: seam.seam,
+      carry: seam.carry,
+      blank: seam.blank,
+      qc: [...new Set(qc.filter((frame) => frame < durationInFrames))],
+    };
+  });
 
   const spans = scenes.map(({ id, from, durationInFrames: length }, index): SceneSpan => {
-    const incoming = windows.get(index - 1);
-    const outgoing = windows.get(index);
-    const preRoll = incoming ? from - incoming.from : 0;
-    const postRoll = outgoing ? outgoing.to - (from + length) : 0;
+    const incoming = windows[index - 1];
+    const outgoing = windows[index];
+    const preRoll = incoming ? mountReach(incoming.name).pre : 0;
+    const postRoll = outgoing ? mountReach(outgoing.name).post : 0;
     return {
       id,
       index,
@@ -99,12 +128,5 @@ export function buildTimeline(cut: Pick<Campaign, 'scenes' | 'fps' | 'durationSe
     };
   });
 
-  return { fps, durationInFrames, spans, windows: [...windows.values()] };
+  return { fps, durationInFrames, spans, windows };
 }
-
-/** 0 before a window and 1 after it. Every frame inside it falls strictly between the two. */
-export const windowProgress = (frame: number, { from, to }: TransitionWindow): number =>
-  interpolate(frame, [from - 1, to], [0, 1], {
-    extrapolateLeft: 'clamp',
-    extrapolateRight: 'clamp',
-  });

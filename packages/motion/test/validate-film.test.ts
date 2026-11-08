@@ -107,9 +107,59 @@ describe('validateFilm', () => {
 
   it('warns about a transition on the last scene', () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 3).transitionOut = 'push';
+    at(campaign.scenes, 3).transitionOut = 't3';
     expect(validateFilm(campaign, '16:9')).toEqual([
       expect.objectContaining({ code: 'TRANSITION_UNUSED', severity: 'warning' }),
+    ]);
+  });
+
+  it('rejects the retired push and carry, and a fade, which are not catalog ids', () => {
+    for (const name of ['push', 'carry', 'fade', 'slide']) {
+      const campaign = novaCopy();
+      at(campaign.scenes, 0).transitionOut = name;
+      const [issue] = validateFilm(campaign, '16:9');
+      expect(issue).toMatchObject({ code: 'TRANSITION_UNKNOWN', severity: 'error' });
+      expect(issue?.fix).toContain('t1, t3, t5');
+    }
+  });
+
+  it('warns where the resolver plays another id, naming both scenes and both ids', () => {
+    const campaign = novaCopy();
+    // feature-card leaves on x and site-hero enters on y, so a matched-velocity seam cannot join them.
+    at(campaign.scenes, 1).transitionOut = 't1';
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      {
+        code: 'TRANSITION_RESOLVED',
+        severity: 'warning',
+        path: 'scenes[1].transitionOut',
+        message:
+          'Between "speed" and "adoption", "t1" was written and t3 plays: t1 needs feature-card\'s exit and site-hero\'s entry to move on one axis with one sign, within 1.5x of each other.',
+        fix: 'Write t3 at scenes[1].transitionOut, so the film plays as written.',
+      },
+    ]);
+  });
+
+  it('reports a catalog id with no build yet as unbuilt, and plays the fallback', () => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 0).transitionOut = 't4';
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({
+        code: 'TRANSITION_UNBUILT',
+        severity: 'warning',
+        path: 'scenes[0].transitionOut',
+        message: 'Between "open" and "speed", "t4" was written and t3 plays: t4 is not built yet.',
+      }),
+    ]);
+  });
+
+  it('fills a missing transitionOut and says so', () => {
+    const campaign = novaCopy();
+    delete at(campaign.scenes, 2).transitionOut;
+    expect(validateFilm(campaign, '16:9')).toEqual([
+      expect.objectContaining({
+        code: 'TRANSITION_RESOLVED',
+        message: 'Between "adoption" and "close" no transitionOut was written, so t3 plays.',
+      }),
     ]);
   });
 

@@ -4,6 +4,7 @@ import { type FontProbe, type FontRole, fontUrl, probeFont } from '../brand/font
 import { resolveLogo } from '../brand/logo.ts';
 import { probeImage } from '../brand/probe.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
+import { ImageUnfit, type ImageView } from '../scenes/definition.ts';
 import { definitionOf } from '../scenes/registry.ts';
 import { type CutSelection, resolveCut } from './cut.ts';
 import { type ImageSize, screenImageIds } from './media.ts';
@@ -74,7 +75,9 @@ const MAX_ASPECT = 4;
 
 /**
  * Each scene image against how it is shown in this format: an image of a shape a browser frame
- * shows as a strip, or one enlarged past what stays sharp, is refused with what to supply instead.
+ * shows as a strip, one enlarged past what stays sharp, or one the template cannot show here, such
+ * as a page too short to scroll, is refused with what to supply instead. Every image is checked,
+ * so one refusal names every capture to replace.
  */
 function checkImageFit(
   campaign: Campaign,
@@ -95,6 +98,20 @@ function checkImageFit(
       const path = `assets.${id}.src`;
       const aspect = size.width / size.height;
       const dimensions = `${size.width}×${size.height}`;
+      if (aspect < MIN_ASPECT && definition.scrollsImages) {
+        // A scrolled page is shown through a window, never whole, so it is a long capture: cut
+        // from the top, its capture boxes still hold, and it is never cut to one screen.
+        const lands = index > 0 ? ', keeping the CTA it lands on inside the crop' : '';
+        issues.set(id, {
+          code: 'IMAGE_WRONG_SHAPE',
+          severity: 'error',
+          path,
+          message: `Image "${id}" is ${dimensions}, more than three times as tall as it is wide, the longest page a ${scene.type} scene scrolls.`,
+          fix: `Crop it from the top of the page to at most ${Math.round(size.width / MIN_ASPECT)} px tall${lands}, so its ctaBox and targetY still hold, and point ${path} at the cropped file. Never crop it to one screen: the scroll needs more of the page than the frame shows.`,
+          upscale: Number.POSITIVE_INFINITY,
+        });
+        continue;
+      }
       if (aspect < MIN_ASPECT || aspect > MAX_ASPECT) {
         issues.set(id, {
           code: 'IMAGE_WRONG_SHAPE',
@@ -106,14 +123,33 @@ function checkImageFit(
         });
         continue;
       }
-      const view = definition.imageView({
-        props: definition.props.parse(scene.props),
-        stage,
-        image: { ...size, aspect },
-        index,
-        durationInFrames,
-        fps,
-      });
+      let view: ImageView;
+      try {
+        view = definition.imageView({
+          props: definition.props.parse(scene.props),
+          stage,
+          image: { ...size, aspect },
+          index,
+          durationInFrames,
+          fps,
+        });
+      } catch (error) {
+        if (!(error instanceof ImageUnfit)) throw error;
+        // Issues are keyed by image, so one image gets one; a props issue is keyed by its path.
+        const inProps = error.code === 'PROPS_INVALID';
+        const where = inProps
+          ? `scenes[${sceneIndex}].props${error.propsPath ? `.${error.propsPath}` : ''}`
+          : path;
+        issues.set(inProps ? where : id, {
+          code: error.code,
+          severity: 'error',
+          path: where,
+          message: error.message,
+          fix: error.fix,
+          upscale: Number.POSITIVE_INFINITY,
+        });
+        continue;
+      }
       const upscale = (view.width * view.zoom) / size.width;
       if (upscale <= MAX_UPSCALE || upscale <= (issues.get(id)?.upscale ?? 0)) continue;
       issues.set(id, {

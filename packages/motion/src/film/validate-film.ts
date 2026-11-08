@@ -7,9 +7,10 @@ import {
 } from '@boiler-room/schema';
 import type { Format } from '../layout/stage.ts';
 import { definitionOf } from '../scenes/registry.ts';
-import { isTransition, TRANSITIONS } from '../transitions/timeline.ts';
+import { isCatalogId, isTransition, TRANSITIONS } from '../transitions/catalog.ts';
 import type { CutSelection } from './cut.ts';
 import { screenImageId } from './media.ts';
+import { filmSeams, propsRefused } from './seams.ts';
 
 export const FILM_ISSUE_CODES = [
   'SCENE_TYPE_UNBUILT',
@@ -23,6 +24,8 @@ export const FILM_ISSUE_CODES = [
   'IMAGE_WRONG_SHAPE',
   'FONT_UNAVAILABLE',
   'TRANSITION_UNKNOWN',
+  'TRANSITION_UNBUILT',
+  'TRANSITION_RESOLVED',
   'TRANSITION_UNUSED',
   'FORMAT_UNLISTED',
   'VARIANT_UNKNOWN',
@@ -155,13 +158,13 @@ function checkImage(scene: Scene, path: string, campaign: Campaign): FilmIssue[]
 function checkTransition(scene: Scene, path: string, isLast: boolean): FilmIssue[] {
   const name = scene.transitionOut;
   if (name === undefined) return [];
-  if (!isTransition(name)) {
+  if (!isCatalogId(name)) {
     return [
       error(
         'TRANSITION_UNKNOWN',
         `${path}.transitionOut`,
-        `Transition "${name}" does not exist.`,
-        `Change ${path}.transitionOut to one of: ${TRANSITIONS.join(', ')}, or remove it for a cut.`,
+        `Transition "${name}" is not in the catalog: transitionOut is an id from t1 to t17.`,
+        `Change ${path}.transitionOut to a catalog id. Motion draws ${TRANSITIONS.join(', ')}.`,
       ),
     ];
   }
@@ -174,6 +177,46 @@ function checkTransition(scene: Scene, path: string, isLast: boolean): FilmIssue
       `Remove ${path}.transitionOut.`,
     ),
   ];
+}
+
+/**
+ * Every boundary where the resolver plays something other than what was written, with both scene
+ * ids, the id written and the id used. A catalog id with no build yet is reported as unbuilt. These
+ * are warnings: the resolver's choice always renders.
+ *
+ * A boundary beside a scene whose props its template refuses is not reported. Its velocities and
+ * ground come from those props, so what it would play is not known until they parse, and the
+ * `PROPS_INVALID` error already stops the render.
+ */
+function checkSeams(campaign: Campaign): FilmIssue[] {
+  if (campaign.scenes.some(({ transitionOut }) => transitionOut && !isCatalogId(transitionOut))) {
+    return [];
+  }
+  const refused = campaign.scenes.map(propsRefused);
+  return filmSeams(campaign).flatMap((seam) => {
+    if (seam.reason === 'written' || (seam.reason === 'pinned' && seam.note === undefined)) {
+      return [];
+    }
+    if (refused[seam.index] || refused[seam.index + 1]) return [];
+    const path = `scenes[${seam.index}].transitionOut`;
+    const between = `Between "${seam.from}" and "${seam.to}"`;
+    const message =
+      seam.written === undefined
+        ? `${between} no transitionOut was written, so ${seam.used} plays.`
+        : `${between}, "${seam.written}" was written and ${seam.used} plays: ${seam.note}.`;
+    const unbuilt =
+      seam.written !== undefined && isCatalogId(seam.written) && !isTransition(seam.written);
+    return [
+      warning(
+        unbuilt ? 'TRANSITION_UNBUILT' : 'TRANSITION_RESOLVED',
+        path,
+        message,
+        unbuilt
+          ? `Write ${seam.used} at ${path}, or keep ${seam.written} and render it once it is built.`
+          : `Write ${seam.used} at ${path}, so the film plays as written.`,
+      ),
+    ];
+  });
 }
 
 function checkSelection(campaign: Campaign, format: Format, selection: CutSelection): FilmIssue[] {
@@ -226,7 +269,8 @@ function checkSelection(campaign: Campaign, format: Format, selection: CutSelect
 
 /**
  * The rules that only the templates know: props each template accepts, copy each one sets, the
- * images it needs, and transitions that exist. Run it on a campaign `validateCampaign` passed.
+ * images it needs, transitions that are catalog ids, and what the seam resolver plays on each
+ * boundary. Run it on a campaign `validateCampaign` passed.
  */
 export function validateFilm(
   campaign: Campaign,
@@ -244,6 +288,7 @@ export function validateFilm(
         path.startsWith('scenes[') && scene === campaign.scenes.at(-1),
       ),
     ]),
+    ...checkSeams(campaign),
     ...checkSelection(campaign, format, selection),
   ];
 }

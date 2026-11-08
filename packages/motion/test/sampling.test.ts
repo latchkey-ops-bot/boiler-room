@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { framesWorthSeeing, pixelDifference, sampleFrames, shuffled } from '../scripts/sampling.ts';
+import {
+  framesWorthSeeing,
+  pixelDifference,
+  sampleFrames,
+  shuffled,
+  withinRasterVariance,
+} from '../scripts/sampling.ts';
 
 describe('render script helpers', () => {
   it('shuffles the same way for the same seed, and keeps every item', () => {
@@ -17,20 +23,31 @@ describe('render script helpers', () => {
     expect(frames.length).toBe(14);
   });
 
-  it('picks a settled frame for each scene and its boundary', () => {
+  it("picks a settled frame for each scene and every QC frame of each boundary's transition", () => {
     const frames = framesWorthSeeing({
       durationInFrames: 200,
       scenes: [
         { span: { id: 'a', from: 0, durationInFrames: 100 } },
         { span: { id: 'b', from: 100, durationInFrames: 100 } },
       ],
+      transitions: [{ index: 0, name: 't3', boundary: 100, qc: [99, 100, 113] }],
     });
     expect(frames).toEqual([
       { label: 'a-settled', frame: 62 },
-      { label: 'b-boundary', frame: 100 },
+      { label: 'seam1-t3-S-1', frame: 99 },
+      { label: 'seam1-t3-S', frame: 100 },
+      { label: 'seam1-t3-S+13', frame: 113 },
       { label: 'b-settled', frame: 162 },
       { label: 'last', frame: 199 },
     ]);
+  });
+
+  it('tolerates at most a 1-level difference on at most 32 pixels, and nothing more', () => {
+    expect(withinRasterVariance({ pixels: 0, maxDelta: 0 })).toBe(true);
+    expect(withinRasterVariance({ pixels: 32, maxDelta: 1 })).toBe(true);
+    expect(withinRasterVariance({ pixels: 33, maxDelta: 1 })).toBe(false);
+    expect(withinRasterVariance({ pixels: 1, maxDelta: 2 })).toBe(false);
+    expect(withinRasterVariance({ pixels: Number.POSITIVE_INFINITY, maxDelta: 255 })).toBe(false);
   });
 
   it('counts the pixels two images differ in, and by how much', () => {
