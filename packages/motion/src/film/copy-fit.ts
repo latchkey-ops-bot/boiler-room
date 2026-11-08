@@ -1,18 +1,20 @@
 /**
  * Copy a template refuses to set. motion never sets type smaller to make copy fit, so a type-card
- * line, or a stat-counter number and label, that does not fit at its cap height stops the render
- * with `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`. Neither `validateCampaign` nor `validateFilm` measures
- * type, because measuring needs the brand fonts loaded in a browser.
+ * line, a feature-card headline, or a stat-counter number and label, that does not fit at its cap
+ * height stops the render with `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`. Neither `validateCampaign`
+ * nor `validateFilm` measures type, because measuring needs the brand fonts loaded in a browser.
  *
  * `copyFitIssues` measures every such scene of the cut in the page where `calculateMetadata` runs,
  * which the render service opens on its own machine before any computer exists, so one refusal
  * names every scene to shorten and costs no render. `layoutRefusals` reads the same refusals out of
  * the text of a render that failed, for the cases that still reach a computer.
  */
-import type { Campaign } from '@boiler-room/schema';
+import { type Campaign, sceneFrames } from '@boiler-room/schema';
 import { loadBrandFonts } from '../brand/fonts.ts';
 import { themeFonts } from '../brand/theme.ts';
+import { specFrame } from '../core/curves.ts';
 import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
+import { fitCardHeadline, headlineProblem, headlineWidth } from '../scenes/feature-card.tsx';
 import { definitionOf } from '../scenes/registry.ts';
 import {
   accentProblem,
@@ -61,6 +63,7 @@ export async function copyFitIssues(campaign: Campaign, format: Format): Promise
   const { width, height } = FORMAT_SIZES[format];
   const stage = stageFor(width, height);
   const fonts = themeFonts(campaign.brand);
+  const { fps, scenes: frames } = sceneFrames(campaign);
   const issues: FilmIssue[] = [];
   for (const [index, scene] of campaign.scenes.entries()) {
     const path = `scenes[${index}]`;
@@ -82,6 +85,23 @@ export async function copyFitIssues(campaign: Campaign, format: Format): Promise
           fix: `Shorten ${where}.`,
         });
       }
+    }
+    if (scene.type === 'feature-card') {
+      // The same fit the scene makes on its first frame, at the drift its last frame reaches.
+      const at = scene.text.findIndex(({ role }) => role === 'headline');
+      const headline = scene.text[at];
+      // A feature-card without a headline is validateFilm's TEXT_MISSING.
+      if (!headline) continue;
+      const dur = specFrame(frames[index]?.durationInFrames ?? 0, fps);
+      if (fitCardHeadline(headline.value, stage, dur, fonts).fits) continue;
+      const where = `${path}.text[${at}].value`;
+      issues.push({
+        code: 'LAYOUT_UNFIT',
+        severity: 'error',
+        path: where,
+        message: `LAYOUT_UNFIT: ${headlineProblem(scene.id, headline, stage, headlineWidth(stage, dur))}`,
+        fix: `Shorten ${where}.`,
+      });
     }
     if (scene.type === 'stat-counter') {
       const headline = scene.text.find(({ role }) => role === 'headline');

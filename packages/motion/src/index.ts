@@ -40,8 +40,15 @@ export type { Phase, Presence, PresenceWindow, SceneExit, SceneTiming } from './
 export { presence, sceneTiming, springAt } from './core/presence.ts';
 export { staggerDelays } from './core/stagger.ts';
 export { bezier, framesFor } from './core/time.ts';
-export type { CampaignFilmProps } from './film/campaign-film.tsx';
-export { CampaignFilm, calculateCampaignFilm, campaignFilmSchema } from './film/campaign-film.tsx';
+export type { CampaignFilmProps, CopyFitProps } from './film/campaign-film.tsx';
+export {
+  CampaignFilm,
+  CopyFit,
+  calculateCampaignFilm,
+  calculateCopyFit,
+  campaignFilmSchema,
+  copyFitSchema,
+} from './film/campaign-film.tsx';
 export { copyFitIssues, layoutRefusals } from './film/copy-fit.ts';
 export type { CutSelection } from './film/cut.ts';
 export { resolveCut } from './film/cut.ts';
@@ -49,7 +56,7 @@ export type { ImageSize } from './film/media.ts';
 export type { FilmPlan, ScenePlan } from './film/plan.ts';
 export { planFilm } from './film/plan.ts';
 export type { FilmRequest, MediaProbe } from './film/prepare.ts';
-export { checkImageFit, FilmRejected, prepareFilm } from './film/prepare.ts';
+export { checkImageFit, FilmRejected, prepareCopy, prepareFilm } from './film/prepare.ts';
 export { filmSeams, seamScene } from './film/seams.ts';
 export { groundAt, groundClock, Stage as FilmStage } from './film/stage.tsx';
 export type { FilmIssue, FilmIssueCode } from './film/validate-film.ts';

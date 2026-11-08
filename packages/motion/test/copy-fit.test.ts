@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { layoutRefusals } from '../src/film/copy-fit.ts';
-import { FilmRejected, prepareFilm } from '../src/film/prepare.ts';
+import { FilmRejected, prepareCopy, prepareFilm } from '../src/film/prepare.ts';
 import type { FilmIssue } from '../src/film/validate-film.ts';
 import { exampleProbe, novaCopy } from './fixtures.ts';
 
@@ -75,5 +75,66 @@ describe('prepareFilm copy check', () => {
     ];
     expect(format).toBe('9:16');
     expect(campaign.scenes[0]?.id).toBe('open-question');
+  });
+});
+
+describe('prepareCopy', () => {
+  const unfit: FilmIssue = {
+    code: 'TYPE_CARD_LAYOUT',
+    severity: 'error',
+    path: 'scenes[2].text[1].value',
+    message: NAME,
+    fix: 'Shorten scenes[2].text[1].value.',
+  };
+  const noImages = () => {
+    throw new Error('prepareCopy loaded a picture');
+  };
+
+  it('measures the copy of the cut without loading a picture', async () => {
+    const copy = vi.fn(async () => []);
+    const font = vi.fn(async () => ({ loaded: true as const }));
+    await prepareCopy(
+      { campaign: novaCopy(), format: '1:1', hookId: 'open-question' },
+      { image: noImages, font, copy },
+    );
+    expect(font).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveBeenCalledTimes(1);
+    const [campaign, format] = copy.mock.calls[0] as unknown as [
+      { scenes: { id: string }[] },
+      string,
+    ];
+    expect(format).toBe('1:1');
+    expect(campaign.scenes[0]?.id).toBe('open-question');
+  });
+
+  it('refuses copy that does not fit with the refusal a render would give', async () => {
+    const rejection = prepareCopy(
+      { campaign: novaCopy(), format: '16:9' },
+      { image: noImages, font: async () => ({ loaded: true }), copy: async () => [unfit] },
+    );
+    await expect(rejection).rejects.toThrow(/laying out the copy found 1 error\(s\)/);
+    const error = (await rejection.catch((cause) => cause)) as FilmRejected;
+    expect(layoutRefusals(error.message)).toEqual([`${NAME} Shorten scenes[2].text[1].value.`]);
+  });
+
+  it('stops at a font that does not load, before measuring anything', async () => {
+    const copy = vi.fn(async () => []);
+    const rejection = prepareCopy(
+      { campaign: novaCopy(), format: '16:9' },
+      { image: noImages, font: async () => ({ loaded: false, reason: 'HTTP 404' }), copy },
+    );
+    await expect(rejection).rejects.toThrow(/loading the brand fonts/);
+    expect(copy).not.toHaveBeenCalled();
+  });
+
+  it('refuses a campaign the validator refuses', async () => {
+    const campaign = novaCopy();
+    campaign.scenes = [];
+    await expect(
+      prepareCopy(
+        { campaign, format: '16:9' },
+        { image: noImages, font: async () => ({ loaded: true }) },
+      ),
+    ).rejects.toThrow(/validateCampaign/);
   });
 });

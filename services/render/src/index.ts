@@ -2,6 +2,8 @@ export type { Chunk, ChunkPlan, FrameRange, Seam } from './chunks.ts';
 export { interiorPair, seamsOf, splitFrames } from './chunks.ts';
 export type { Difference } from './compare.ts';
 export { compareFrames } from './compare.ts';
+export type { CopyFitOptions, CopyFitResult } from './copy-fit.ts';
+export { checkCopyFit } from './copy-fit.ts';
 export type { BaseState, ComputerSize, CostEstimate, EstimateInput, TimeModel } from './cost.ts';
 export {
   BLOCK_MS,

@@ -257,3 +257,33 @@ export async function prepareFilm(
 
   return planFilm({ campaign, format, logo, imageSizes });
 }
+
+/**
+ * The copy check of `prepareFilm` on its own, for a script nobody has approved yet: the campaign
+ * and the cut are validated as `prepareFilm` validates them, the brand fonts are loaded, and the
+ * copy every template would refuse to set is measured in them, in one refusal that names every
+ * scene. Pictures are neither loaded nor sized, so a script whose pictures are not chosen yet can
+ * be measured. It needs a browser: the `CopyFit` composition runs it in `calculateMetadata`.
+ */
+export async function prepareCopy(
+  { campaign: input, format, hookId, ctaId }: FilmRequest,
+  probe: MediaProbe = browserProbe,
+): Promise<void> {
+  const written = await validateForRender(input);
+  if (!written.ok) throw new FilmRejected('validateCampaign', written.issues);
+
+  const selection = { hookId, ctaId };
+  const filmIssues = validateFilm(written.campaign, format, selection);
+  if (filmIssues.some(({ severity }) => severity === 'error')) {
+    throw new FilmRejected('validateFilm', filmIssues);
+  }
+
+  const cut = await validateForRender(resolveCut(written.campaign, selection));
+  if (!cut.ok) throw new FilmRejected('validateCampaign on the selected cut', cut.issues);
+
+  const fontIssues = await checkFonts(cut.campaign, probe);
+  if (fontIssues.length > 0) throw new FilmRejected('loading the brand fonts', fontIssues);
+
+  const unfit = (await probe.copy?.(cut.campaign, format)) ?? [];
+  if (unfit.length > 0) throw new FilmRejected('laying out the copy', unfit);
+}
