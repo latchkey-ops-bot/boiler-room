@@ -7,6 +7,7 @@
  *   GET  /api/gtm/v1/films/{id}            → FilmOrderStatus
  *   POST /api/gtm/v1/films/{id}/share      → {page_url, share_id}
  *   GET  /api/gtm/v1/films/{id}/file       → FilmFile, a link that works for 10 minutes
+ *   GET  /api/gtm/v1/films/{id}/decisions  → FilmDecisions: the film's decisions feed
  *   POST /api/gtm/v1/films/{id}/withdraw   {reason} → {withdrawn: true}
  *   GET  /api/gtm/v1/requests?after=       → {data, cursor}: removals made on film pages
  *   GET  /api/gtm/v1/files/{id}?exp=&sig=  the signed MP4 link (no bearer: the signature is the key)
@@ -36,6 +37,7 @@ import {
   orderSample,
   removeByPage,
   SHARE_ID,
+  sampleDecisions,
   sampleFile,
   sampleStatus,
   sharedSample,
@@ -55,7 +57,7 @@ export interface GtmEnv extends RunnerEnv {
 }
 
 const FILM_PAGE = /^\/f\/([0-9a-z]{20})(?:\/(video|download|remove))?$/;
-const FILM = /^\/films\/(flm_[0-9a-z]{20})(?:\/(share|file|withdraw))?$/;
+const FILM = /^\/films\/(flm_[0-9a-z]{20})(?:\/(share|file|decisions|withdraw))?$/;
 const FILE_LINK = /^\/files\/(flm_[0-9a-z]{20})$/;
 
 /** The largest JSON body a GTM route takes. */
@@ -179,6 +181,9 @@ async function api(request: Request, deps: GtmDeps, rest: string, url: URL): Pro
     case 'file':
       if (method !== 'GET') return answer(405, 'method_not_allowed', 'GET the file link.');
       return json(await sampleFile(deps, id, origin));
+    case 'decisions':
+      if (method !== 'GET') return answer(405, 'method_not_allowed', 'GET the decisions.');
+      return json(await sampleDecisions(deps, id));
     case 'withdraw': {
       if (method !== 'POST') return answer(405, 'method_not_allowed', 'POST to withdraw.');
       const { reason } = parsed(withdrawInput, await readBody(request));

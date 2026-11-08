@@ -274,6 +274,16 @@ describe('a delivered sample', () => {
       share_id: string;
     };
     expect(shared.page_url).toBe(`${BASE}/f/${shared.share_id}`);
+    const decisions = (await body(await call('GET', `/api/gtm/v1/films/${id}/decisions`))) as {
+      orderId: string;
+      simulated: boolean;
+      decisions: { id: string; agent: string; kind: string; round: number }[];
+    };
+    expect(decisions).toMatchObject({ orderId: id, simulated: false });
+    expect(
+      decisions.decisions.some((item) => item.agent === 'quality_check' && item.kind === 'passed'),
+    ).toBe(true);
+    expect(decisions.decisions[0]).toMatchObject({ id: 'd-0', round: 1 });
     expect(await body(await call('POST', `/api/gtm/v1/films/${id}/share`))).toEqual(shared);
 
     // The page: unindexed, labelled a free sample, and says the startup did not ask for it.

@@ -13,7 +13,7 @@ import { sniff } from '../capture/logo.ts';
 import type { AgentDefinition } from '../define.ts';
 import { researcher } from '../definitions/researcher.ts';
 import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
-import { syncAgents } from '../sync.ts';
+import { type AgentSync, ensureAgents } from '../sync.ts';
 import { bundleTool, type ToolBundle } from './bundle.ts';
 import {
   checkProvenance,
@@ -40,6 +40,8 @@ export interface ResearchOptions {
   /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
   drillRepair: boolean;
   outRoot: string;
+  /** Where the result goes. Defaults to `<outRoot>/research/<host>/`; `pnpm film` uses the film's folder. */
+  outDir?: string;
   definition?: AgentDefinition;
   /** Extra Naive file ids fetched alongside the capture tool (the injection test's server). */
   extraFileIds?: readonly string[];
@@ -64,6 +66,15 @@ export interface ResearchOptions {
     /** This run's folder on the agent's computer, relative to its home. */
     runDir: string;
   }) => Promise<void>;
+  /** `verify` never creates or changes the agent: it checks the deployed one matches. */
+  agentSync?: AgentSync;
+  /**
+   * False leaves SIGINT and SIGTERM to the caller, which must then call the `stop` it is handed
+   * through `onStop`: `pnpm film` owns its signals and exits with its own code. Default true.
+   */
+  ownSignals?: boolean;
+  /** Receives the run's clean-up (stop the session, pause the computer, write the report). */
+  onStop?: (stop: () => Promise<void>) => void;
 }
 
 /** Stop reasons after which the agent can simply be asked to carry on. */
@@ -270,7 +281,10 @@ export function isNotFound(cause: unknown): boolean {
   );
 }
 
-function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
+export function describe(event: {
+  type: string;
+  data: Record<string, unknown>;
+}): string | undefined {
   const data = event.data ?? {};
   switch (event.type) {
     case 'tool.started': {
@@ -641,7 +655,7 @@ export async function research(options: ResearchOptions): Promise<number> {
   const runId = runSuffix();
   const runDir = runDirFor(runId);
   const client = naiveClient();
-  const outDir = join(options.outRoot, 'research', host);
+  const outDir = options.outDir ?? join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
   // Files an earlier run of this host left behind would read as this run's results.
   for (const name of readdirSync(outDir)) {
@@ -676,7 +690,12 @@ export async function research(options: ResearchOptions): Promise<number> {
   const agentSpend = (id: string) =>
     client.agents.spend(id, { by: 'component' }).catch((cause) => ({ error: String(cause) }));
 
-  const cleanup = async () => {
+  let cleaning: Promise<void> | undefined;
+  const cleanup = () => {
+    cleaning ??= clean();
+    return cleaning;
+  };
+  const clean = async () => {
     if (cleaned) return;
     cleaned = true;
     if (sessionId) {
@@ -731,8 +750,12 @@ export async function research(options: ResearchOptions): Promise<number> {
     say('interrupted; cleaning up');
     cleanup().finally(() => process.exit(130));
   };
-  process.once('SIGINT', onSignal);
-  process.once('SIGTERM', onSignal);
+  const ownSignals = options.ownSignals ?? true;
+  if (ownSignals) {
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+  }
+  options.onStop?.(cleanup);
 
   try {
     const tool = await bundleTool({ allowPrivateHosts: options.allowPrivateHosts });
@@ -741,7 +764,7 @@ export async function research(options: ResearchOptions): Promise<number> {
     const { refs, manifestId } = await uploadMaterial(client, options.material, host);
     const materialIds = new Set(refs.map((ref) => ref.file_id));
 
-    const [synced] = await syncAgents(client, [definition]);
+    const [synced] = await ensureAgents(client, [definition], options.agentSync);
     if (!synced) throw new Error('Agent sync returned nothing.');
     agentId = synced.id;
     say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action})`);
@@ -958,8 +981,10 @@ export async function research(options: ResearchOptions): Promise<number> {
     say(`error: ${report.error}`);
   } finally {
     await cleanup();
-    process.removeListener('SIGINT', onSignal);
-    process.removeListener('SIGTERM', onSignal);
+    if (ownSignals) {
+      process.removeListener('SIGINT', onSignal);
+      process.removeListener('SIGTERM', onSignal);
+    }
   }
   return exitCode;
 }

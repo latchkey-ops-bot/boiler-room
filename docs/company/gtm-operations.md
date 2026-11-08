@@ -353,22 +353,29 @@ every live lane.
 ## 8. Ordering films: the GTM account and `FilmOrder`
 
 GTM orders films the way a customer does: an account in the Boiler Room app asks for a film of a
-URL, the pipeline makes it, Quality Check must pass it, and the account gets a page and a file. There
-is no URL-to-film command yet, so GTM is written against this interface (`agents/src/gtm/ports.ts`),
-with `DryRunFilmOrder` and an `AppFilmOrder` against the routes below.
+URL, the pipeline makes it, Quality Check must pass it, and the account gets a page and a file. The
+URL-to-film command is `pnpm film`, and the interface is shared by GTM, the web app and that command
+in `agents/src/film/order.ts` (`@boiler-room/agents/film-order`, with no `node:` import);
+`agents/src/gtm/ports.ts` re-exports it. GTM uses `DryRunFilmOrder` and an `AppFilmOrder` against
+the routes below. `LocalFilmOrder` runs `pnpm film` on this machine; it has no page to share, so
+GTM never treats it as live.
 
 ```ts
 export interface FilmOrder {
-  readonly kind: 'dry-run' | 'app';
+  readonly kind: 'dry-run' | 'app' | 'local';
   order(input: {
     url: string;
     idempotencyKey: string;
     budgetMicroUsd: number;
     leadRef: string;
+    sample?: boolean; // default true: an outreach sample, Short
+    length?: 'short' | 'standard';
+    format?: '16:9' | '9:16' | '1:1';
   }): Promise<{ orderId: string }>;
   status(orderId: string): Promise<FilmOrderStatus>;
   share(orderId: string): Promise<{ pageUrl: string; shareId: string }>;
   file(orderId: string): Promise<FilmFile>;
+  decisions(orderId: string): Promise<FilmDecisions>; // who decided what, and why
   withdraw(orderId: string, reason: 'removal' | 'opt_out' | 'failed' | 'manual'): Promise<void>;
 }
 export interface FilmOrderStatus {
@@ -409,6 +416,7 @@ answer 503.
 | `GET /api/gtm/v1/films/{id}`                                                  | `FilmOrderStatus`: `ready` once delivered; `qc` from the runner's last 16:9 Quality Check verdict; `simulated` for a stand-in film; `costMicroUsd` (crew and computer) once the run has ended; `script` once ready                                                                                                                                                                     | built     |
 | `POST /api/gtm/v1/films/{id}/share`                                           | Publishes `/f/<share_id>` for a delivered film with a 16:9 file: unlisted, `noindex`, labelled "Free sample", "Made by Boiler Room from <host>'s public website. <host> did not ask for it and is not affiliated with Boiler Room.", the film with a download button, a link to the startup's site, "Make one for your launch", and "Remove this film". Answers `{page_url, share_id}` | built     |
 | `GET /api/gtm/v1/films/{id}/file`                                             | `FilmFile`, with a link signed by the token that works for 10 minutes (`/api/gtm/v1/files/{id}?exp=&sig=`)                                                                                                                                                                                                                                                                             | built     |
+| `GET /api/gtm/v1/films/{id}/decisions`                                        | `FilmDecisions` (`agents/src/film/order.ts`): the film's decisions feed, each with its agent, kind, stage, status and message. The runner's feed carries no reason or round, so `why` is empty and `round` is 1                                                                                                                                                                        | built     |
 | `POST /api/gtm/v1/films/{id}/withdraw` `{reason}`                             | Stops a run still at work, deletes every file of the film from R2, and the film page answers 410 from then on. The order row stays as a tombstone                                                                                                                                                                                                                                      | built     |
 | `POST /f/<share_id>/remove`                                                   | "Remove this film" on the page: no sign-in, any request honoured. The film comes down at once and the request is queued                                                                                                                                                                                                                                                                | built     |
 | `GET /api/gtm/v1/requests?after=<cursor>`                                     | `{data: [{id, kind, channel, token_hash, domain, share_id, at}], cursor}`: the film-page removals since the cursor                                                                                                                                                                                                                                                                     | built     |

@@ -1,4 +1,4 @@
-import type { ResearchOutput } from '../src/researcher/output.ts';
+import type { MeasuredColor, ResearchOutput } from '../src/researcher/output.ts';
 import type { PagesBundle, StoredPage } from '../src/researcher/verify.ts';
 
 /** A made-up product, so no test depends on a real company. */
@@ -43,6 +43,53 @@ const HOME_RENDERED = [
   'Can I pay monthly?',
 ].join('\n');
 
+/** The colours the capture measured on the home page, each where it was read. */
+export function measured(): MeasuredColor[] {
+  const at = (x: number, y: number, element: string) => ({ page_url: SITE, x, y, element });
+  return [
+    {
+      hex: '#FFFFFF',
+      property: 'background-color',
+      seen_as: 'surface',
+      ...at(60, 30, 'body'),
+      share: 0.82,
+      tokens: ['background'],
+    },
+    {
+      hex: '#F3F4F6',
+      property: 'background-color',
+      seen_as: 'surface',
+      ...at(960, 700, 'section.band'),
+      share: 0.18,
+      tokens: [],
+    },
+    {
+      hex: '#111827',
+      property: 'color',
+      seen_as: 'text',
+      ...at(400, 320, 'p.lede'),
+      share: null,
+      tokens: ['foreground'],
+    },
+    {
+      hex: '#4F46E5',
+      property: 'background-color',
+      seen_as: 'button',
+      ...at(520, 410, 'a.btn'),
+      share: null,
+      tokens: ['primary'],
+    },
+    {
+      hex: '#F59E0B',
+      property: 'color',
+      seen_as: 'link',
+      ...at(300, 36, 'a.hl'),
+      share: null,
+      tokens: ['accent', 'accents'],
+    },
+  ];
+}
+
 /** A collapsed FAQ answer: in the document, not shown until the question is opened. */
 export const HIDDEN_ANSWER = 'Yes, Team is $30 per month when billed monthly.';
 
@@ -80,6 +127,7 @@ export function bundle(): PagesBundle {
         title: 'm01-onepager.pdf',
       },
     ],
+    measured_colors: measured(),
   };
 }
 
@@ -166,6 +214,7 @@ export function output(): ResearchOutput {
       ],
       radius_px: 8,
       css_variables: true,
+      measured: measured(),
       notes: [],
     },
     brief: {
@@ -241,7 +290,13 @@ export function output(): ResearchOutput {
     evidence: {
       pages_file_id: 'fil_pages1',
       capture_file_id: 'fil_capture1',
-      logo: { asset_id: 'logo', source: 'svg', url: 'https://orbitly.example.org/logo.svg' },
+      logo: {
+        asset_id: 'logo',
+        source: 'svg',
+        found_in: 'header-home-link',
+        aspect: 4.2,
+        url: 'https://orbitly.example.org/logo.svg',
+      },
       material: [],
     },
   };

@@ -2,10 +2,12 @@
  * Renders each chunk on its own Naive computer. A worker is a fork of the base snapshot when there
  * is one, or a clean computer that sets itself up. It fetches the payload, renders its frames,
  * sends the chunk back and is destroyed at once, so it bills no longer than its chunk takes. A chunk
- * that fails is rendered again, once, on a new computer.
+ * that fails is rendered again, once, on a new computer, unless motion refused to draw it: copy that
+ * does not fit is refused the same way on every computer, so it is never tried twice.
  */
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { layoutRefusals } from '@boiler-room/motion';
 import type { Chunk } from '../chunks.ts';
 import type { ComputerSize } from '../cost.ts';
 import { CostLimitExceeded } from '../cost.ts';
@@ -19,6 +21,7 @@ import {
   type CommandResult,
   failure,
   MAX_COMMAND_MS,
+  outputOf,
   runCommand,
   withRetry,
 } from './exec.ts';
@@ -55,11 +58,41 @@ function describe(error: unknown): string {
   return scrub(error instanceof Error ? error.message : String(error)).slice(0, 2000);
 }
 
+/**
+ * motion refused to draw a chunk: its copy does not fit at its cap height. Every computer refuses
+ * it the same way, so it is not tried again, and the run does not stop the other chunks for it, so
+ * one failure names every scene to shorten. `refusals` are the refusal lines, read from the whole
+ * output of the render, not from its clipped tail.
+ */
+export class MotionRefused extends Error {
+  readonly refusals: string[];
+
+  constructor(refusals: readonly string[], context = '') {
+    super(
+      `motion refused to draw the film (${refusals.length} refusal(s))${context ? `; ${context}` : ''}:\n${refusals.join('\n')}`,
+    );
+    this.name = 'MotionRefused';
+    this.refusals = [...refusals];
+  }
+}
+
+/** The refusals in a failed render command's output, or a refusal it passed through. */
+export function refusalsIn(error: unknown): string[] {
+  if (error instanceof MotionRefused) return error.refusals;
+  return layoutRefusals(error instanceof Error ? error.message : String(error));
+}
+
 async function attemptChunk(
   context: WorkerContext,
   chunk: Chunk,
   attempt: number,
-): Promise<{ attempt: ChunkAttempt; file?: string; bytes?: number; sha256?: string }> {
+): Promise<{
+  attempt: ChunkAttempt;
+  file?: string;
+  bytes?: number;
+  sha256?: string;
+  refused?: MotionRefused;
+}> {
   const { client, pool, log, signal } = context;
   const label = `chunk ${chunk.index + 1} (frames ${chunk.frameRange[0]}-${chunk.frameRange[1]})`;
   const started = performance.now();
@@ -222,17 +255,27 @@ async function attemptChunk(
         },
       );
     } catch (error) {
+      if (signal.aborted) throw error;
+      if (finished === undefined) {
+        const printed = outputOf(error);
+        const refusals = printed ? layoutRefusals(`${printed.stderr}\n${printed.stdout}`) : [];
+        if (refusals.length > 0) throw new MotionRefused(refusals, `${label} on ${computer.id}`);
+        throw error;
+      }
       // A stream that drops after the worker reported its chunk lost only the exit status.
-      if (signal.aborted || finished === undefined) throw error;
       log(`${label}: the command stream broke after the chunk was done (${describe(error)})`);
     }
-    if (outcome?.exited && (outcome.exitCode !== 0 || outcome.timedOut)) {
+    const failed = outcome?.exited
+      ? outcome.exitCode !== 0 || outcome.timedOut
+      : finished === undefined;
+    if (failed && outcome) {
+      // Read from all the output the stream kept, since the error's text is cut to its tail.
+      const refusals = layoutRefusals(`${outcome.stderr}\n${outcome.stdout}`);
+      if (refusals.length > 0) throw new MotionRefused(refusals, `${label} on ${computer.id}`);
       throw failure(computer.id, outcome);
     }
     if (!outcome?.exited) {
-      if (finished === undefined) {
-        throw outcome ? failure(computer.id, outcome) : new Error('The render command was lost.');
-      }
+      if (finished === undefined) throw new Error('The render command was lost.');
       // Naive sometimes ends a stream without its exit frame. The worker reports `done` only once
       // the chunk is written and closed, and the chunk is checked against the size and SHA-256
       // measured on the computer as it comes back, so it is fetched rather than rendered again.
@@ -267,7 +310,7 @@ async function attemptChunk(
     record.error = describe(error);
     if (error instanceof Aborted || error instanceof CostLimitExceeded || signal.aborted)
       throw error;
-    return { attempt: record };
+    return { attempt: record, ...(error instanceof MotionRefused ? { refused: error } : {}) };
   } finally {
     record.totalSeconds = seconds(started);
     if (computerId) await pool.destroy(computerId);
@@ -278,10 +321,28 @@ export interface RenderedChunk extends ChunkRecord {
   file: string;
 }
 
-/** Renders one chunk, and once more on a new computer if the first try fails. */
+/**
+ * The error for a chunk that failed on every computer it was given. It names what each try met,
+ * since the first try's cause, such as a refusal, is often the one that matters, and a later try
+ * can fail on something else, such as a dropped stream.
+ */
+export function chunkFailed(chunk: Pick<Chunk, 'index'>, attempts: readonly ChunkAttempt[]): Error {
+  const errors = attempts.map(
+    ({ attempt, error }) => `try ${attempt}: ${error ?? 'no error recorded'}`,
+  );
+  return new Error(
+    `Chunk ${chunk.index + 1} failed on ${attempts.length} computer(s): ${errors.join('\n')}`,
+  );
+}
+
+/**
+ * Renders one chunk, and once more on a new computer if the first try fails for any reason but a
+ * refusal. `attempt` is the one try, which a test replaces.
+ */
 export async function renderChunkOnNaive(
   context: WorkerContext,
   chunk: Chunk,
+  attempt: typeof attemptChunk = attemptChunk,
 ): Promise<RenderedChunk> {
   const record: ChunkRecord = {
     index: chunk.index,
@@ -291,12 +352,12 @@ export async function renderChunkOnNaive(
     sha256: null,
     attempts: [],
   };
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    const result = await attemptChunk(context, chunk, attempt);
+  for (let tries = 1; tries <= MAX_ATTEMPTS; tries += 1) {
+    const result = await attempt(context, chunk, tries);
     record.attempts.push(result.attempt);
     if (result.file) {
       context.log(
-        `chunk ${chunk.index + 1}: done on try ${attempt} in ${result.attempt.totalSeconds.toFixed(1)} s` +
+        `chunk ${chunk.index + 1}: done on try ${tries} in ${result.attempt.totalSeconds.toFixed(1)} s` +
           ` (render ${result.attempt.renderSeconds?.toFixed(1) ?? '?'} s)`,
       );
       return {
@@ -306,9 +367,44 @@ export async function renderChunkOnNaive(
         file: result.file,
       };
     }
-    context.log(`chunk ${chunk.index + 1}: try ${attempt} failed: ${result.attempt.error}`);
+    context.log(`chunk ${chunk.index + 1}: try ${tries} failed: ${result.attempt.error}`);
+    if (result.refused) {
+      context.log(`chunk ${chunk.index + 1}: not tried again: motion refuses this copy everywhere`);
+      throw result.refused;
+    }
   }
-  throw new Error(
-    `Chunk ${chunk.index + 1} failed on ${MAX_ATTEMPTS} computers: ${record.attempts.at(-1)?.error}`,
+  throw chunkFailed(chunk, record.attempts);
+}
+
+/**
+ * The one error for a set of chunks of which some failed. A refusal from any chunk wins over
+ * every other failure but a stop and the cost limit: the refused copy must be shortened before any
+ * render can pass, and the other failures are named in it. Every chunk's refusals are in it, so one
+ * route-back to the Director can shorten every scene. `stopped` is why the run was stopped, if it
+ * was. Returns undefined when every chunk was rendered.
+ */
+export function chunksFailure(
+  settled: readonly PromiseSettledResult<unknown>[],
+  stopped: unknown,
+): Error | undefined {
+  const reasons = settled.flatMap((result) =>
+    result.status === 'rejected' ? [result.reason] : [],
+  );
+  if (reasons.length === 0) return undefined;
+  const asError = (reason: unknown) =>
+    reason instanceof Error ? reason : new Error(String(reason));
+  if (stopped instanceof Aborted || stopped instanceof CostLimitExceeded) return stopped;
+  const refusals = [...new Set(reasons.flatMap(refusalsIn))];
+  if (refusals.length === 0) return asError(stopped ?? reasons[0]);
+  const others = [
+    ...new Set(
+      reasons
+        .filter((reason) => !(reason instanceof MotionRefused) && !(reason instanceof Aborted))
+        .map((reason) => describe(reason).split('\n')[0] ?? ''),
+    ),
+  ].filter(Boolean);
+  return new MotionRefused(
+    refusals,
+    others.length > 0 ? `the run also failed on: ${others.join('; ')}` : '',
   );
 }

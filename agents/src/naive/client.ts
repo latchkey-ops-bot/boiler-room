@@ -57,3 +57,48 @@ export async function listAll<T>(
     after = result.next_cursor;
   }
 }
+
+const pause = (ms: number) => new Promise<void>((done) => setTimeout(done, ms));
+
+export interface StreamRetry {
+  /** Reconnects after the SDK's own have failed. */
+  retries?: number;
+  /** The wait before the first reconnect, doubled for each one after it. */
+  delayMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+}
+
+/**
+ * A session's events after `afterSeq`. The SDK's stream reconnects five times with no wait and
+ * then throws, and throws at once on a 4xx other than 429. This reconnects from the last
+ * event seen, after a wait that doubles, up to `retries` more times without a new event, then
+ * throws. A caller that catches
+ * it must stop the session and still count what the session spent.
+ */
+export async function* sessionEvents<E extends { seq: number }>(
+  client: { stream: (sessionId: string, options?: { afterSeq?: number }) => AsyncIterable<E> },
+  sessionId: string,
+  afterSeq: number,
+  { retries = 3, delayMs = 1000, sleep = pause }: StreamRetry = {},
+): AsyncGenerator<E> {
+  let seq = afterSeq;
+  let failures = 0;
+  for (;;) {
+    try {
+      for await (const event of client.stream(sessionId, { afterSeq: seq })) {
+        // Only a new event is progress: a connection that replays what was seen and drops again
+        // still counts as a failure.
+        if (event.seq > seq) {
+          seq = event.seq;
+          failures = 0;
+        }
+        yield event;
+      }
+      return;
+    } catch (cause) {
+      failures += 1;
+      if (failures > retries) throw cause;
+      await sleep(delayMs * 2 ** (failures - 1));
+    }
+  }
+}

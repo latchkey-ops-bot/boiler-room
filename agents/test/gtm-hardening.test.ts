@@ -102,6 +102,9 @@ function liveFilm() {
     async share(orderId) {
       return { pageUrl: `https://app.example/f/sh${orderId}`, shareId: `sh${orderId}` };
     },
+    async decisions(orderId) {
+      return { orderId, simulated: false, decisions: [] };
+    },
     async file(orderId) {
       return {
         url: `https://app.example/file/${orderId}.mp4`,

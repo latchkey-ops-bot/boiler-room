@@ -159,7 +159,8 @@ export function seamBetween(
 
 /**
  * The T1 word-gap variant on axis x: word `i` of a line takes `seamIn(f) * gain(i)`, where `d` is
- * the word's distance in words from the line's middle word, positive towards the trailing side.
+ * the word's distance in words from the line's middle word, positive towards the trailing side: the
+ * side the seam moves away from, so the gaps start stretched and close up.
  */
 export const wordGapGain = (d: number): number => Math.min(1.4, Math.max(0.6, 1 + 0.2 * d));
 

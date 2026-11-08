@@ -75,8 +75,35 @@ export const MIN_CONTRAST = { foreground: 4.5, primary: 3 } as const;
 
 const TIME_TOLERANCE_SECONDS = 1e-6;
 
-const SUPERLATIVE =
-  /(?<![\p{L}\p{N}])(?:fastest|quickest|best|leading|top-rated|#1|no\.\s?1|number[\s-]one|cheapest|largest|biggest|greatest|highest|lowest|smartest|strongest|safest|easiest|unmatched|unrivall?ed|unbeatable)(?![\p{L}\p{N}])/iu;
+/** The superlatives copy may not state without a claim, as one regular expression alternation. */
+export const SUPERLATIVE_WORDS =
+  'fastest|quickest|best|leading|top-rated|#1|no\\.\\s?1|number[\\s-]one|cheapest|largest|biggest|greatest|highest|lowest|smartest|strongest|safest|easiest|unmatched|unrivall?ed|unbeatable';
+
+const SUPERLATIVE = new RegExp(
+  `(?<![\\p{L}\\p{N}])(?:${SUPERLATIVE_WORDS})(?![\\p{L}\\p{N}])`,
+  'iu',
+);
+
+/**
+ * The superlatives a text uses, lower case, each with the words hyphenated to it: "fastest" in
+ * "Fastest scheduling", "fastest-growing" in "the fastest-growing companies", "best-seller" in "our
+ * best-seller". A compound says something else than the word alone, so copy that says "fastest"
+ * is not backed by a quote that only says "fastest-growing". `words` adds alternatives to
+ * `SUPERLATIVE_WORDS`, as a regular expression alternation.
+ */
+export function superlativeForms(text: string, words?: string): string[] {
+  const alternation = words ? `${SUPERLATIVE_WORDS}|${words}` : SUPERLATIVE_WORDS;
+  const pattern = new RegExp(
+    `(?<![\\p{L}\\p{N}-])(?:[\\p{L}\\p{N}]+-)*(?:${alternation})(?:-[\\p{L}\\p{N}]+)*(?![\\p{L}\\p{N}])`,
+    'giu',
+  );
+  return [...text.normalize('NFKC').matchAll(pattern)].map((match) =>
+    match[0]
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/no\.\s?1|number[\s-]one/g, '#1'),
+  );
+}
 
 /**
  * A URL or a path to a file, which can hold digits such as `2x` without being copy. The extension

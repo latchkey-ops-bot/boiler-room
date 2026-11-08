@@ -7,7 +7,55 @@ import {
   productUiNote,
 } from '../src/capture/manifest.ts';
 import { checkResearch } from '../src/researcher/gate.ts';
+import type { MeasuredColor } from '../src/researcher/output.ts';
 import { bundle, SITE } from './fixtures.ts';
+
+const MEASURED: MeasuredColor[] = [
+  {
+    hex: '#FFFFFF',
+    property: 'background-color',
+    seen_as: 'surface',
+    element: 'body',
+    page_url: SITE,
+    x: 60,
+    y: 30,
+    share: 1,
+    tokens: ['background'],
+  },
+  {
+    hex: '#111827',
+    property: 'color',
+    seen_as: 'text',
+    element: 'p',
+    page_url: SITE,
+    x: 400,
+    y: 320,
+    share: null,
+    tokens: ['foreground'],
+  },
+  {
+    hex: '#4F46E5',
+    property: 'background-color',
+    seen_as: 'button',
+    element: 'a.btn',
+    page_url: SITE,
+    x: 520,
+    y: 410,
+    share: null,
+    tokens: ['primary'],
+  },
+  {
+    hex: '#6B7280',
+    property: 'color',
+    seen_as: 'text',
+    element: 'p.small',
+    page_url: SITE,
+    x: 400,
+    y: 600,
+    share: null,
+    tokens: ['muted'],
+  },
+];
 
 function manifest(overrides: Partial<CaptureManifest> = {}): CaptureManifest {
   return {
@@ -105,6 +153,7 @@ function manifest(overrides: Partial<CaptureManifest> = {}): CaptureManifest {
         radius: 8,
         cssVariables: false,
         candidates: [],
+        measured: MEASURED,
         notes: [],
       },
       fonts: [
@@ -127,11 +176,14 @@ function manifest(overrides: Partial<CaptureManifest> = {}): CaptureManifest {
       ],
       logo: {
         source: 'generated',
+        found_in: 'generated',
+        why: 'no picture of a logo could be downloaded',
         file: 'logo.svg',
         url: null,
         kind: 'svg',
         width: 300,
         height: 96,
+        aspect: 3.125,
       },
     },
     login_links: [{ url: 'https://app.orbitly.example.org/login', text: 'Log in', where: 'nav' }],
@@ -174,8 +226,54 @@ describe('buildTemplate', () => {
     });
     expect(template.evidence).toMatchObject({
       pages_file_id: 'PUBLISH:pages.json',
-      logo: { source: 'generated', url: null },
+      logo: { source: 'generated', found_in: 'generated', aspect: 3.125, url: null },
     });
+  });
+
+  it('copies the measured colours, each with the point it was read at', () => {
+    expect(template.brand_details.measured).toEqual(MEASURED);
+    const background = template.brand_details.measured.find((item) =>
+      item.tokens.includes('background'),
+    );
+    expect(background).toMatchObject({ hex: template.brand.colors.background, seen_as: 'surface' });
+  });
+
+  it('asks for the real logo when the capture only found an icon or the social image', () => {
+    for (const found_in of ['apple-touch-icon', 'og-image'] as const) {
+      const iconOnly = manifest();
+      iconOnly.brand.logo = {
+        source: found_in === 'og-image' ? 'png' : 'favicon',
+        found_in,
+        file: 'logo.png',
+        url: `${SITE}icon.png`,
+        kind: 'image',
+        width: 512,
+        height: 512,
+        aspect: 1,
+      };
+      const need = buildTemplate(iconOnly).needs_upload.find((item) => item.id === 'logo');
+      expect(need).toMatchObject({ kind: 'logo', blocking: false });
+    }
+    const header = manifest();
+    header.brand.logo = {
+      ...header.brand.logo,
+      source: 'inline-svg',
+      found_in: 'header-home-link',
+    };
+    expect(buildTemplate(header).needs_upload.some((item) => item.id === 'logo')).toBe(false);
+  });
+
+  it('records where an older capture found its logo when the manifest does not say', () => {
+    const older = manifest();
+    older.brand.logo = {
+      source: 'svg',
+      file: 'logo.svg',
+      url: 'https://orbitly.example.org/logo.svg',
+      kind: 'svg',
+      width: 120,
+      height: 30,
+    };
+    expect(buildTemplate(older).evidence.logo).toMatchObject({ found_in: 'header', aspect: 4 });
   });
 
   it('keeps each call to action once, verbatim, and leaves out the footer', () => {
@@ -338,7 +436,8 @@ describe('buildTemplate', () => {
         status: 'extracted',
       },
     ];
-    const { failures } = await checkResearch(filled, bundle());
+    // The capture writes the same measured colours into the bundle it publishes.
+    const { failures } = await checkResearch(filled, { ...bundle(), measured_colors: MEASURED });
     expect(failures).toEqual([]);
   });
 });

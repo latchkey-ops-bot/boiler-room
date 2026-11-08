@@ -6,11 +6,13 @@ import {
   type Evidence,
   prunable,
   unfinished,
+  withMeasuredColors,
   withoutClaims,
   withoutFailures,
   withStoredTitles,
 } from '../src/researcher/gate.ts';
-import { bundle, output } from './fixtures.ts';
+import { unmeasuredColors } from '../src/researcher/verify.ts';
+import { bundle, measured, output } from './fixtures.ts';
 
 /** A fixture part the test needs, which the fixture always has. */
 const must = <T>(value: T | null | undefined): T => {
@@ -51,6 +53,7 @@ describe('checkResearch', () => {
     const { failures } = await checkResearch(out, bundle());
     expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
       ['CONTRAST_LOW', 'brand.colors.primary'],
+      ['COLOR_UNMEASURED', 'brand.colors.primary'],
     ]);
 
     const missing = output();
@@ -326,5 +329,105 @@ describe('withoutFailures', () => {
 
   it('cannot settle a failure that does not belong to a claim, a non-claim or a page', () => {
     expect(prunable({ code: 'SCHEMA_INVALID', path: '$', message: '', fix: '' })).toBe(false);
+  });
+});
+
+describe('measured colours', () => {
+  const codes = async (out: ReturnType<typeof output>, pages = bundle()) =>
+    (await checkResearch(out, pages)).failures.map((failure) => [failure.code, failure.path]);
+
+  // The first real film's research measured #D3DAC6 and the film was given #F7F7F7, which
+  // nothing on the site paints.
+  it('refuses a background the capture did not measure as a page surface', async () => {
+    const out = output();
+    out.brand.colors.background = '#F7F7F7';
+    const { failures } = await checkResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ['COLOR_UNMEASURED', 'brand.colors.background'],
+    ]);
+    expect(failures[0]?.message).toContain('Measured surfaces: #FFFFFF, #F3F4F6');
+    expect(failures[0]?.fix).toContain('Set brand.colors.background to #FFFFFF');
+  });
+
+  it('accepts another measured surface, and refuses a measured text colour as the background', async () => {
+    const surface = output();
+    surface.brand.colors.background = '#F3F4F6';
+    expect(await codes(surface)).toEqual([]);
+
+    const text = output();
+    text.brand.colors.background = '#111827';
+    text.brand.colors.foreground = '#FFFFFF';
+    expect(await codes(text)).toContainEqual(['COLOR_UNMEASURED', 'brand.colors.background']);
+  });
+
+  it('lets the foreground be black or white, which the capture picks when no text reads well', async () => {
+    const out = output();
+    out.brand.colors.foreground = '#000000';
+    expect(await codes(out)).toEqual([]);
+    out.brand.colors.foreground = '#1F2937';
+    expect(await codes(out)).toEqual([['COLOR_UNMEASURED', 'brand.colors.foreground']]);
+  });
+
+  it('refuses accents that were not measured', async () => {
+    const out = output();
+    out.brand_details.accents = ['#F59E0B', '#22C55E'];
+    expect(await codes(out)).toEqual([['COLOR_UNMEASURED', 'brand_details.accents[1]']]);
+  });
+
+  it('refuses a measured list that differs from the one the capture stored', async () => {
+    const out = output();
+    const moved = must(out.brand_details.measured[0]);
+    moved.y = 900;
+    expect(await codes(out)).toEqual([['MEASURED_CHANGED', 'brand_details.measured']]);
+
+    const invented = output();
+    invented.brand_details.measured.push({
+      ...must(invented.brand_details.measured[0]),
+      hex: '#F7F7F7',
+      tokens: [],
+    });
+    invented.brand.colors.background = '#F7F7F7';
+    expect(await codes(invented)).toEqual([
+      ['MEASURED_CHANGED', 'brand_details.measured'],
+      ['COLOR_UNMEASURED', 'brand.colors.background'],
+    ]);
+  });
+
+  it('cannot vouch for any colour with a bundle from before colours carried points', async () => {
+    const { measured_colors: _gone, ...older } = bundle();
+    expect(await codes(output(), older)).toEqual([['COLORS_UNMEASURED', 'brand_details.measured']]);
+  });
+
+  it('sets unmeasured colours back to the capture’s when repair rounds run out, and then passes', async () => {
+    const out = output();
+    out.brand.colors.background = '#F7F7F7';
+    out.brand.colors.accent = '#22C55E';
+    out.brand_details.accents = ['#22C55E', '#F59E0B'];
+    must(out.brand_details.measured[1]).share = 0.5;
+    const first = await checkResearch(out, bundle());
+    expect(first.failures.every(prunable)).toBe(true);
+    const settled = withoutFailures(out, first.failures, bundle());
+    expect(settled.brand.colors).toMatchObject({ background: '#FFFFFF', accent: '#F59E0B' });
+    expect(settled.brand_details.accents).toEqual(['#F59E0B']);
+    expect(settled.brand_details.measured).toEqual(measured());
+    expect((await checkResearch(settled, bundle())).failures).toEqual([]);
+  });
+
+  it('drops an unmeasured muted colour the capture had none for', () => {
+    const out = output();
+    out.brand.colors.muted = '#9CA3AF';
+    expect(withMeasuredColors(out, bundle()).brand.colors.muted).toBeUndefined();
+  });
+
+  it('names every colour a downstream agent made up', () => {
+    const list = measured();
+    expect(
+      unmeasuredColors(
+        { background: '#F7F7F7', foreground: '#111827', primary: '#4F46E5', accent: '#F59E0B' },
+        list,
+        ['#F59E0B'],
+      ),
+    ).toEqual([{ path: 'brand.colors.background', token: 'background', hex: '#F7F7F7' }]);
+    expect(unmeasuredColors({ background: '#ffffff', primary: '#4f46e5' }, list)).toEqual([]);
   });
 });

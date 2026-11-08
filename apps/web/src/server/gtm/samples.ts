@@ -23,6 +23,7 @@ import {
   accounts,
   deliverables,
   type Film,
+  filmEvents,
   films,
   type GtmOrder,
   gtmOrders,
@@ -313,6 +314,58 @@ export async function sampleStatus(deps: GtmDeps, id: string): Promise<SampleSta
     costMicroUsd: run && finished ? run.costCrewMicroUsd + run.costComputeMicroUsd : null,
     failure: state === 'failed' ? (run?.failureCode ?? 'failed') : null,
     script: state === 'ready' ? scriptText(film.campaignJson) : null,
+  };
+}
+
+// ---------- Decisions ----------
+
+/** What `GET /api/gtm/v1/films/{id}/decisions` answers: `FilmDecisions` in agents/src/film/order.ts. */
+export interface SampleDecisions {
+  orderId: string;
+  simulated: boolean;
+  decisions: {
+    id: string;
+    seq: number;
+    at: string;
+    agent: string;
+    kind: string;
+    stage: string;
+    status: string;
+    round: number;
+    message: string;
+    why: string;
+  }[];
+}
+
+/**
+ * The film's decisions feed, in the web app's words. The runner's feed carries no reason and no
+ * round, so `why` is empty and `round` is 1.
+ */
+export async function sampleDecisions(deps: GtmDeps, id: string): Promise<SampleDecisions> {
+  const ctx = houseContext(deps, await houseAccount(deps));
+  const { order, film: stored } = await sampleOf(ctx, id);
+  const film = order.withdrawnAt ? stored : await syncFilm(ctx, stored);
+  const rows = await ctx.db
+    .select()
+    .from(filmEvents)
+    .where(eq(filmEvents.filmId, film.id))
+    .orderBy(asc(filmEvents.seq))
+    .limit(500);
+  return {
+    orderId: film.id,
+    simulated: film.pipeline === 'simulated' || film.standIn,
+    decisions: rows.map((row) => ({
+      id: `d-${row.seq}`,
+      seq: row.seq,
+      at: row.at.toISOString(),
+      agent: row.agent,
+      kind: row.kind,
+      stage: row.stage,
+      status: row.status,
+      round: 1,
+      message: row.message,
+      why: '',
+    })),
   };
 }
 
