@@ -50,8 +50,10 @@ Input is a URL and, optionally, customer material. The run needs no approval at 
    saved under `out/research/<host>/`.
 6. Nothing is left running. The session is interrupted if it is still working, the run's
    processes on the computer are stopped (a capture job, Chromium, the injection test's server),
-   so none comes back when it resumes, and the computer is paused, which bills nothing; the run
-   polls it until it reads paused. The agent is kept for the next run. A computer another session
+   so none comes back when it resumes, and the computer is paused, which bills nothing. The
+   platform refuses a pause until the computer has rested after the session's last turn (a few
+   minutes in a live run), so the run keeps asking for up to 8 minutes, then polls it until it
+   reads paused. The agent is kept for the next run. A computer another session
    of the agent is using is left running, and other agents' computers are listed in the report and
    never touched. `--keep-computer` leaves the computer running to inspect it.
 

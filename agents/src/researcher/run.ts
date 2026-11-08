@@ -409,10 +409,17 @@ export interface ReleaseOptions {
   /** This run's session, which is not counted as another user of the computer. */
   sessionId?: string;
   sleep?: (ms: number) => Promise<unknown>;
-  /** How long to wait for the computer to read paused. */
+  /**
+   * How long to keep asking for the pause, and then to wait for the computer to read paused. The
+   * platform refuses a pause while the computer has not yet rested after its session's last turn,
+   * which took a few minutes in a live run.
+   */
   maxWaitMs?: number;
   pollMs?: number;
 }
+
+/** What the platform says when it refuses a pause because the computer has not rested yet. */
+const IN_USE = /using the agent's computer|when it rests|state_conflict/i;
 
 const STOPPED = (status: string) =>
   status === 'paused' || status === 'destroyed' || status === 'failed';
@@ -432,8 +439,8 @@ export async function releaseComputer(
   options: ReleaseOptions = {},
 ): Promise<ReleaseResult> {
   const wait = options.sleep ?? sleep;
-  const pollMs = options.pollMs ?? 5000;
-  const maxWaitMs = options.maxWaitMs ?? 3 * 60_000;
+  const pollMs = options.pollMs ?? 15_000;
+  const maxWaitMs = options.maxWaitMs ?? 8 * 60_000;
   const computer = await client.agents.computer(agentId).catch(() => null);
   const computers = await listAll((query) => client.computers.list(query)).catch(() => []);
   const others = computers
@@ -465,18 +472,27 @@ export async function releaseComputer(
       .catch((cause) => `not stopped: ${cause instanceof Error ? cause.message : cause}`);
     say(`processes on computer ${computer.id}: ${result.stopped}`);
   }
-  // Asked once; a failed ask is retried. The computer can take a moment to read paused.
+  // Asked until it is accepted: a computer still in use after its session's last turn is
+  // refused with "try again when it rests". Any other error is retried three times. Then the
+  // computer can take a moment to read paused.
   let status: string = computer.status;
-  for (let attempt = 0; !STOPPED(status) && attempt < 3; attempt++) {
+  let failures = 0;
+  for (let waited = 0; !STOPPED(status) && waited <= maxWaitMs; waited += pollMs) {
     try {
       status = (await client.computers.pause(computer.id)).status;
       break;
     } catch (cause) {
-      if (isNotFound(cause)) status = 'destroyed';
-      else {
-        say(`pause retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
-        await wait(pollMs);
+      if (isNotFound(cause)) {
+        status = 'destroyed';
+        break;
       }
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (!IN_USE.test(message) && ++failures >= 3) {
+        say(`pause of ${computer.id} failed: ${message}`);
+        break;
+      }
+      if (waited % (pollMs * 4) === 0) say(`pause of ${computer.id} not yet accepted: ${message}`);
+      await wait(pollMs);
     }
   }
   for (let waited = 0; !STOPPED(status) && waited < maxWaitMs; waited += pollMs) {

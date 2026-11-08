@@ -63,7 +63,8 @@ function fakeClient(options: {
       },
       pause: async () => {
         calls.pauses += 1;
-        if (options.pauseError) throw options.pauseError();
+        const error = options.pauseError?.();
+        if (error) throw error;
         return { ...computer, status: afterPause.shift() ?? 'running' };
       },
       get: async () => {
@@ -134,6 +135,33 @@ describe('releaseComputer', () => {
     const { client } = fakeClient({ afterPause: [] });
     const result = await releaseComputer(client, 'agt_x', fast);
     expect(result).toMatchObject({ computerStatus: 'running', idle: false });
+  });
+
+  // Live, the platform refused the pause for a few minutes after the session's last turn.
+  it('keeps asking for the pause until the computer has rested', async () => {
+    let refusals = 3;
+    const { client, calls } = fakeClient({
+      pauseError: () => {
+        if (refusals-- > 0)
+          return new Error(
+            "a session or a person is using the agent's computer; try again when it rests",
+          );
+        return undefined;
+      },
+    });
+    const result = await releaseComputer(client, 'agt_x', { ...fast, maxWaitMs: 100 });
+    expect(calls.pauses).toBe(4);
+    expect(result).toMatchObject({ computerStatus: 'paused', idle: true });
+  });
+
+  it('stops asking after three failures of another kind', async () => {
+    const { client, calls } = fakeClient({
+      pauseError: () => new Error('internal error'),
+      afterPause: [],
+    });
+    const result = await releaseComputer(client, 'agt_x', { ...fast, maxWaitMs: 100 });
+    expect(calls.pauses).toBe(3);
+    expect(result.idle).toBe(false);
   });
 
   it('counts a computer that is gone as nothing running', async () => {
