@@ -3,6 +3,14 @@ import type { AgentDefinition } from '../define.ts';
 import { CEO_SWEEP, company, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive, readSecret } from '../naive/client.ts';
 import { type SyncResult, syncAgents } from '../sync.ts';
+import {
+  bindCeo,
+  type CatalogueReport,
+  type CeoBinding,
+  CONTROL_PLANE_OFF,
+  compareCatalogue,
+  liveCatalogue,
+} from './control-plane.ts';
 import { netrc, TOKENS, type TokenName } from './github.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
 
@@ -28,7 +36,9 @@ export interface NetrcResult {
 }
 
 export interface CompanyReport {
+  catalogue: CatalogueReport;
   agents: SyncResult[];
+  ceo: CeoBinding;
   board: { id: string; action: 'created' | 'existing'; cards: Record<string, number> };
   deployment: DeploymentResult;
   netrc: NetrcResult[];
@@ -175,15 +185,31 @@ export async function placeNetrc(
 
 /**
  * `pnpm company:sync`: creates or versions every company agent, with br-ceo's roster and board,
- * ensures the board, creates the CEO's sweep paused, and writes each GitHub token to the computers
- * that need it. Running it again changes nothing that already matches. It also checks GitHub
- * against the spec and warns about each gap, but changes nothing there.
+ * binds br-ceo as the organization's CEO, ensures the board, creates the CEO's sweep paused, and
+ * writes each GitHub token to the computers that need it. Running it again changes nothing that
+ * already matches. It also checks GitHub against the spec and warns about each gap, but changes
+ * nothing there.
+ *
+ * br-ceo is bound only after its new version names every control-plane tool off, and sync stops
+ * before changing anything while the control plane serves a tool that br-ceo does not name.
  */
 export async function syncCompany(
   client: Naive,
   log: (line: string) => void = () => undefined,
-  { preflight = () => githubPreflight() }: { preflight?: () => Promise<GithubReport> } = {},
+  {
+    preflight = () => githubPreflight(),
+    catalogue = () => liveCatalogue(),
+  }: { preflight?: () => Promise<GithubReport>; catalogue?: () => Promise<string[]> } = {},
 ): Promise<CompanyReport> {
+  const served = compareCatalogue(await catalogue());
+  if (served.unnamed.length) {
+    throw new Error(
+      `The control plane serves ${served.unnamed.length} tool(s) that br-ceo does not name, so it would be offered them at "ask": ${served.unnamed.join(', ')}. Add them to src/company/control-plane-tools.ts, then sync again. Nothing was changed.`,
+    );
+  }
+  log(
+    `control   ${served.count} control-plane tools served, every one named off on br-ceo${served.gone.length ? ` (${served.gone.length} named but no longer served)` : ''}`,
+  );
   const github = await preflight();
   for (const gap of github.gaps) log(`github    WARNING ${gap}`);
   if (!github.gaps.length)
@@ -195,6 +221,21 @@ export async function syncCompany(
   }
   const ceo = agents.find((result) => result.name === 'br-ceo');
   if (!ceo) throw new Error('br-ceo was not synced.');
+
+  // Bind only a br-ceo whose stored toolset names every control-plane tool off.
+  const stored = (await client.agents.get(ceo.id)).tools?.configs ?? {};
+  const open = CONTROL_PLANE_OFF.filter(
+    (name) => stored[name]?.enabled !== false || stored[name]?.permission !== 'deny',
+  );
+  if (open.length) {
+    throw new Error(
+      `br-ceo v${ceo.version} does not name ${open.length} control-plane tool(s) off (${open.slice(0, 5).join(', ')}...), so it was not bound.`,
+    );
+  }
+  const binding = await bindCeo(client, ceo.id);
+  log(
+    `ceo       ${binding.action} ${ceo.id} as the organization's CEO (vault ${binding.vault_id}, credential ${binding.credential_id})`,
+  );
 
   const before = await client.board.get(ceo.id).catch(() => null);
   const board = await client.board.create(ceo.id);
@@ -226,5 +267,13 @@ export async function syncCompany(
       `github    ${github.gaps.length} gap(s) above. Keep the sweep paused until they are fixed: until then only prompts keep agents off the other repo and off main and dev.`,
     );
   }
-  return { agents, board: boardResult, deployment, netrc: netrcResults, github };
+  return {
+    catalogue: served,
+    agents,
+    ceo: binding,
+    board: boardResult,
+    deployment,
+    netrc: netrcResults,
+    github,
+  };
 }

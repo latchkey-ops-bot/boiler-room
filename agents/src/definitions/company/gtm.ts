@@ -19,6 +19,13 @@ import {
  * Spec: docs/company/roles/gtm.md.
  */
 const INACTIVE = { cap_micro_usd: 0, max_task_micro_usd: 0, period: 'day' } as const;
+
+/**
+ * br-ceo is the organization's CEO, so its board is the company board, which seats every agent of
+ * the company. No GTM agent may create or assign a company card while GTM is inactive, so each names
+ * `board_write` off. Activating GTM gives it back (docs/company/roles/gtm.md).
+ */
+const NO_CARDS = ['board_write'] as const;
 const NO_SESSION = { budget_micro_usd: 0, max_minutes: 0 } as const;
 
 const GTM_RULES = [
@@ -38,6 +45,7 @@ export const gtmLead: AgentDefinition = {
   system: companyPrompt({ name: GTM_LEAD, role: 'GTM lead', skill: 'gtm-lead', rules: GTM_RULES }),
   tools: companyToolset({
     allow: ['data_search', 'data_describe'],
+    without: NO_CARDS,
     app: ['send_email', 'inbox_summaries', 'leads', 'leads_upsert', 'request_sample'],
   }),
   skills: [
@@ -64,6 +72,7 @@ export const scout: AgentDefinition = {
   }),
   tools: companyToolset({
     allow: ['data_search', 'data_describe', 'data_run'],
+    without: NO_CARDS,
     app: ['inbox_summaries', 'leads', 'leads_upsert'],
   }),
   skills: [
@@ -96,6 +105,7 @@ export const social: AgentDefinition = {
       'social.post_metrics',
       'social.cancel',
     ],
+    without: NO_CARDS,
   }),
   skills: [
     {
@@ -124,7 +134,8 @@ export const inboxSummarySchema = {
 
 /**
  * Reads one inbound email and returns fixed fields. It makes one AgentMail call, holds no send
- * tool, is not on the roster and is not seated on the board.
+ * tool, is not on the roster, and names both board tools off, so the company board, which seats
+ * every agent of the company, gives it nothing.
  */
 export const inboxReader: AgentDefinition = {
   ...BASE,

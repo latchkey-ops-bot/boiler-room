@@ -25,6 +25,8 @@ const { rmSync } = await import('node:fs');
 const { GITHUB_OWNER, netrc } = await import('../src/company/github.ts');
 const { canPush, githubPreflight, missingRules } = await import('../src/company/preflight.ts');
 const { ensureComputer, placeNetrc, syncCompany } = await import('../src/company/sync.ts');
+const { CONTROL_PLANE, bindCeo } = await import('../src/company/control-plane.ts');
+const { CONTROL_PLANE_TOOLS } = await import('../src/company/control-plane-tools.ts');
 const { SONNET_SESSION_FLOOR } = await import('../src/definitions/company/common.ts');
 const { company, NETRC } = await import('../src/definitions/company/index.ts');
 const { ENV_FILE, readSecret, scrub } = await import('../src/naive/client.ts');
@@ -52,8 +54,16 @@ function fakeClient(
     computers?: 'existing' | 'none';
     netrcContent?: string | null;
     badHash?: boolean;
+    /** The organization's CEO before the sync. */
+    ceo?: string | null;
+    /** Drops every control-plane tool from br-ceo's stored toolset. */
+    storedWithoutLockdown?: boolean;
   } = {},
 ) {
+  const org = { id: 'org_1', ceo_agent_id: options.ceo ?? null };
+  const stored = new Map<string, { tools: { configs: Record<string, unknown> } }>();
+  const vaults: { id: string; display_name: string }[] = [];
+  const credentials: Record<string, unknown>[] = [];
   const files = new Map<string, string | null>();
   const computers = new Map<string, { id: string; status: string }>();
   const execs: string[] = [];
@@ -76,11 +86,17 @@ function fakeClient(
     skills: { push: vi.fn(async ({ slug }: { slug: string }) => ({ slug, version: 1 })) },
     agents: {
       list: vi.fn(async () => ({ data: [], has_more: false, next_cursor: null })),
-      create: vi.fn(async (body: { name: string }) => ({
-        id: `agt_${body.name}`,
-        name: body.name,
-        current_version: 1,
-      })),
+      create: vi.fn(async (body: { name: string; tools: { configs: Record<string, unknown> } }) => {
+        const configs = { ...body.tools.configs };
+        if (options.storedWithoutLockdown) {
+          for (const name of Object.keys(configs)) {
+            if (name.startsWith('vetta.')) delete configs[name];
+          }
+        }
+        stored.set(`agt_${body.name}`, { tools: { configs } });
+        return { id: `agt_${body.name}`, name: body.name, current_version: 1 };
+      }),
+      get: vi.fn(async (id: string) => ({ id, ...stored.get(id) })),
       update: vi.fn(),
       computer: vi.fn(async (agentId: string) => {
         if (options.computers !== 'none') return { id: computerFor(agentId), status: 'paused' };
@@ -121,8 +137,47 @@ function fakeClient(
       })),
       update: vi.fn(),
     },
+    orgs: { list: vi.fn(async () => ({ data: [{ ...org }], has_more: false, next_cursor: null })) },
+    vaults: {
+      list: vi.fn(async () => ({ data: [...vaults], has_more: false, next_cursor: null })),
+      create: vi.fn(async (body: { display_name: string }) => {
+        const vault = { id: `vlt_${vaults.length + 1}`, ...body };
+        vaults.push(vault);
+        return vault;
+      }),
+      credentials: {
+        list: vi.fn(async (vaultId: string) => ({
+          data: credentials.filter((item) => item.vault_id === vaultId),
+          has_more: false,
+          next_cursor: null,
+        })),
+        create: vi.fn(async (vaultId: string, body: Record<string, unknown>) => {
+          const { value: _value, ...meta } = body;
+          const credential = { id: `vcr_${credentials.length + 1}`, vault_id: vaultId, ...meta };
+          credentials.push(credential);
+          const vault = vaults.find((item) => item.id === vaultId);
+          if (
+            vault?.display_name === CONTROL_PLANE.vault &&
+            body.mcp_server_url === CONTROL_PLANE.url &&
+            body.key === `ceo_${body.agent_id}`
+          ) {
+            org.ceo_agent_id = body.agent_id as string;
+          }
+          return credential;
+        }),
+      },
+    },
   };
-  return { client, naive: client as unknown as Naive, execs, writes, sessions };
+  return {
+    client,
+    naive: client as unknown as Naive,
+    execs,
+    writes,
+    sessions,
+    org,
+    vaults,
+    credentials,
+  };
 }
 
 const allTokens = () => [env.tokens.eng, env.tokens.design];
@@ -194,14 +249,67 @@ describe('ensureComputer', () => {
   );
 });
 
+const served = async () => [...CONTROL_PLANE_TOOLS];
+
 describe('syncCompany', () => {
   const clean: GithubReport = { reach: [], rules: [], gaps: [] };
+
+  it("binds br-ceo as the organization's CEO, after its stored toolset names every control-plane tool off", async () => {
+    const fake = fakeClient();
+    const lines: string[] = [];
+    const report = await syncCompany(fake.naive, (line) => lines.push(line), {
+      preflight: async () => clean,
+      catalogue: served,
+    });
+    expect(report.ceo).toMatchObject({ action: 'bound', ceo_agent_id: 'agt_br-ceo' });
+    expect(fake.org.ceo_agent_id).toBe('agt_br-ceo');
+    expect(fake.vaults).toEqual([{ id: 'vlt_1', display_name: 'Orchestrator control plane' }]);
+    expect(fake.credentials).toEqual([
+      {
+        id: 'vcr_1',
+        vault_id: 'vlt_1',
+        kind: 'static_bearer',
+        key: 'ceo_agt_br-ceo',
+        mcp_server_url: 'https://api.vetta.sh/v1/mcp',
+        agent_id: 'agt_br-ceo',
+      },
+    ]);
+    const createOrder = fake.client.agents.create.mock.invocationCallOrder.at(-1) ?? 0;
+    const bindOrder = fake.client.vaults.credentials.create.mock.invocationCallOrder[0] ?? 0;
+    expect(bindOrder).toBeGreaterThan(createOrder);
+    expect(lines).toContain(
+      'control   368 control-plane tools served, every one named off on br-ceo',
+    );
+  });
+
+  it('stops before changing anything while the control plane serves a tool br-ceo does not name', async () => {
+    const fake = fakeClient();
+    await expect(
+      syncCompany(fake.naive, () => undefined, {
+        preflight: async () => clean,
+        catalogue: async () => [...CONTROL_PLANE_TOOLS, 'agents_clone'],
+      }),
+    ).rejects.toThrow(/does not name.*agents_clone.*Nothing was changed/);
+    expect(fake.client.skills.push).not.toHaveBeenCalled();
+    expect(fake.client.agents.create).not.toHaveBeenCalled();
+    expect(fake.client.vaults.create).not.toHaveBeenCalled();
+  });
+
+  it('does not bind a br-ceo whose stored toolset lost the lockdown', async () => {
+    const fake = fakeClient({ storedWithoutLockdown: true });
+    await expect(
+      syncCompany(fake.naive, () => undefined, { preflight: async () => clean, catalogue: served }),
+    ).rejects.toThrow(/does not name 368 control-plane tool\(s\) off.*not bound/);
+    expect(fake.client.vaults.credentials.create).not.toHaveBeenCalled();
+    expect(fake.org.ceo_agent_id).toBeNull();
+  });
 
   it('creates the agents, ensures the board on br-ceo, creates the sweep paused, and writes four netrc files', async () => {
     const fake = fakeClient();
     const lines: string[] = [];
     const report = await syncCompany(fake.naive, (line) => lines.push(line), {
       preflight: async () => clean,
+      catalogue: served,
     });
     expect(fake.client.board.create).toHaveBeenCalledWith('agt_br-ceo');
     expect(report.board).toMatchObject({ id: 'brd_agt_br-ceo', action: 'created' });
@@ -225,10 +333,46 @@ describe('syncCompany', () => {
     const gaps = ['BR_GITHUB_TOKEN_DESIGN can push to boiler-room', 'boiler-room main has no rule'];
     const report = await syncCompany(fake.naive, (line) => lines.push(line), {
       preflight: async () => ({ ...clean, gaps }),
+      catalogue: served,
     });
     expect(report.github.gaps).toEqual(gaps);
     for (const gap of gaps) expect(lines).toContain(`github    WARNING ${gap}`);
     expect(lines.at(-1)).toMatch(/Keep the sweep paused/);
+  });
+});
+
+describe('bindCeo', () => {
+  it('leaves an existing binding alone', async () => {
+    const fake = fakeClient();
+    const first = await bindCeo(fake.naive, 'agt_ceo', () => 'not-a-secret');
+    const second = await bindCeo(fake.naive, 'agt_ceo', () => 'not-a-secret');
+    expect(first.action).toBe('bound');
+    expect(second).toMatchObject({ action: 'unchanged', credential_id: first.credential_id });
+    expect(fake.vaults).toHaveLength(1);
+    expect(fake.credentials).toHaveLength(1);
+  });
+
+  it('binds again when the vault is gone but the organization still names br-ceo', async () => {
+    const fake = fakeClient({ ceo: 'agt_ceo' });
+    expect((await bindCeo(fake.naive, 'agt_ceo', () => 'x')).action).toBe('bound');
+    expect(fake.credentials).toHaveLength(1);
+  });
+
+  it('never replaces another CEO', async () => {
+    const fake = fakeClient({ ceo: 'agt_default_ceo' });
+    await expect(bindCeo(fake.naive, 'agt_ceo', () => 'x')).rejects.toThrow(
+      /CEO is agt_default_ceo, not br-ceo.*founder's call/,
+    );
+    expect(fake.client.vaults.create).not.toHaveBeenCalled();
+  });
+
+  it('never stores the value it is given anywhere but the write, and never a key from the env file', async () => {
+    const fake = fakeClient();
+    await bindCeo(fake.naive, 'agt_ceo');
+    const body = fake.client.vaults.credentials.create.mock.calls[0]?.[1] as { value: string };
+    expect(body.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    for (const token of allTokens()) expect(body.value).not.toBe(token);
+    expect(JSON.stringify(fake.credentials)).not.toContain(body.value);
   });
 });
 

@@ -1,3 +1,4 @@
+import { CONTROL_PLANE_OFF } from '../../company/control-plane.ts';
 import { companyToolset } from '../../company/tools.ts';
 import type { AgentDefinition } from '../../define.ts';
 import {
@@ -14,7 +15,12 @@ import {
   SONNET,
 } from './common.ts';
 
-/** Every company agent the CEO's board seats. The inbox reader and the production crew are not on it. */
+/**
+ * br-ceo's roster: the agents its cards go to. As the organization's CEO, br-ceo owns the company
+ * board, which seats every agent of the company, roster or not. The inbox reader, the production
+ * crew and, while GTM is inactive, the GTM agents name `board_write` off, so only the builders
+ * write cards.
+ */
 export const CEO_ROSTER = [
   ENGINEERING_LEAD,
   ENGINEER,
@@ -56,9 +62,20 @@ ${PRIORITIES.map((item, index) => `${index + 1}. ${item}`).join('\n')}
 Out of scope: the founder's own session is building ${OUT_OF_SCOPE.join(', ')}. Never write a DIR card for any of them, and never one that duplicates them.`;
 
 /**
+ * What the Naive dashboard reads to pick its CEO: the rail's "CEO" row and the `/orchestrator` chat
+ * talk to the agent whose `metadata.role` is `orchestrator` (read from the dashboard's own code, not
+ * documented). Without it the dashboard shows a placeholder CEO.
+ */
+export const CEO_METADATA = { role: 'orchestrator' } as const;
+
+/**
  * The CEO: sets direction, keeps the board moving, hands delivered slugs to the founder for release,
  * and reports. It is the only coordinator, owns the board, and acts only through board cards. Spec:
  * docs/company/roles/ceo.md, except that a promotion to main is the founder's (agents/README.md).
+ *
+ * `company:sync` binds it as the organization's CEO, so its board is the company board and the
+ * dashboard's CEO chat is the founder's line to it. Bound, it is offered the platform's control
+ * plane, so its toolset names every control-plane tool off.
  */
 export const ceo: AgentDefinition = {
   ...BASE,
@@ -79,7 +96,8 @@ export const ceo: AgentDefinition = {
     ],
     more: MORE,
   }),
-  tools: companyToolset({ app: ['company_metrics'] }),
+  tools: companyToolset({ app: ['company_metrics'], off: CONTROL_PLANE_OFF }),
+  metadata: CEO_METADATA,
   skills: [
     {
       slug: 'ceo',

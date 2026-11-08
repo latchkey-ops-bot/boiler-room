@@ -1,5 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
+import {
+  CONTROL_PLANE,
+  CONTROL_PLANE_OFF,
+  compareCatalogue,
+  controlPlaneTool,
+} from '../src/company/control-plane.ts';
+import { CONTROL_PLANE_TOOLS } from '../src/company/control-plane-tools.ts';
 import { GITHUB_OWNER, netrc, TOKENS } from '../src/company/github.ts';
 import { syncSweep } from '../src/company/sync.ts';
 import {
@@ -10,7 +17,15 @@ import {
   SANDBOX,
   SOCIAL,
 } from '../src/company/tools.ts';
-import { judgeVerify, verifySchema, verifySteps } from '../src/company/verify.ts';
+import {
+  CEO_TOOLS_MESSAGE,
+  judgeCeoTools,
+  judgeVerify,
+  verifySchema,
+  verifySteps,
+} from '../src/company/verify.ts';
+import { BOARD_OFF } from '../src/define.ts';
+import { CEO_METADATA } from '../src/definitions/company/ceo.ts';
 import {
   CEO_ROSTER,
   CEO_SWEEP,
@@ -29,6 +44,7 @@ import {
   scout,
   social,
 } from '../src/definitions/company/index.ts';
+import { researcher } from '../src/definitions/index.ts';
 import { ENV_FILE, type Naive } from '../src/naive/client.ts';
 import { agentConfig, HASH_KEY, skillContent, syncAgents } from '../src/sync.ts';
 
@@ -146,9 +162,10 @@ describe('every company toolset', () => {
         'view_image',
       ]),
     );
+    const gtmBase = base.filter((name) => name !== 'board_write');
     expect(allowedTools(gtmLead.tools)).toEqual(
       sorted([
-        ...base,
+        ...gtmBase,
         'br-app.inbox_summaries',
         'br-app.leads',
         'br-app.leads_upsert',
@@ -160,7 +177,7 @@ describe('every company toolset', () => {
     );
     expect(allowedTools(scout.tools)).toEqual(
       sorted([
-        ...base,
+        ...gtmBase,
         'br-app.inbox_summaries',
         'br-app.leads',
         'br-app.leads_upsert',
@@ -169,7 +186,7 @@ describe('every company toolset', () => {
         'data_search',
       ]),
     );
-    expect(allowedTools(social.tools)).toEqual(sorted([...base, ...SOCIAL]));
+    expect(allowedTools(social.tools)).toEqual(sorted([...gtmBase, ...SOCIAL]));
     expect(allowedTools(inboxReader.tools)).toEqual(
       sorted(['agentmail.get_message', 'read_skill', 'session_spend']),
     );
@@ -261,6 +278,98 @@ describe('the roster', () => {
 
   it('refuses a roster whose member is not synced', () => {
     expect(() => agentConfig(ceo, skillVersions, new Map())).toThrow(/not synced/);
+  });
+});
+
+describe("br-ceo as the organization's CEO", () => {
+  it('lists the whole control-plane catalogue once, sorted', () => {
+    expect(CONTROL_PLANE_TOOLS.length).toBe(368);
+    expect(new Set(CONTROL_PLANE_TOOLS).size).toBe(CONTROL_PLANE_TOOLS.length);
+    expect([...CONTROL_PLANE_TOOLS]).toEqual([...CONTROL_PLANE_TOOLS].sort());
+    for (const tool of ['agents_create', 'agents_patch', 'vaults_create', 'sessions_create']) {
+      expect(CONTROL_PLANE_TOOLS, tool).toContain(tool);
+    }
+  });
+
+  it.each([...CONTROL_PLANE_TOOLS])('names vetta.%s off on br-ceo', (tool) => {
+    expect(ceo.tools.configs[controlPlaneTool(tool)]).toEqual(OFF);
+  });
+
+  it('allows no control-plane tool, so a bound session keeps only its board tools', () => {
+    expect(CONTROL_PLANE_OFF.every((name) => name.startsWith(`${CONTROL_PLANE.server}.`))).toBe(
+      true,
+    );
+    expect(allowedTools(ceo.tools).filter((name) => name.startsWith('vetta.'))).toEqual([]);
+    expect(allowedTools(ceo.tools)).toEqual([
+      'board_read',
+      'board_write',
+      'br-app.company_metrics',
+      'read_skill',
+      'session_spend',
+    ]);
+  });
+
+  it('flags a served tool that br-ceo does not name, and one that is no longer served', () => {
+    expect(compareCatalogue(CONTROL_PLANE_TOOLS)).toEqual({ count: 368, unnamed: [], gone: [] });
+    const report = compareCatalogue([...CONTROL_PLANE_TOOLS.slice(1), 'agents_clone']);
+    expect(report.unnamed).toEqual(['agents_clone']);
+    expect(report.gone).toEqual([CONTROL_PLANE_TOOLS[0]]);
+  });
+
+  it('carries the metadata the dashboard reads to pick its CEO, inside the definition hash', () => {
+    const config = agentConfig(ceo, skillVersions, memberRefs());
+    expect(config.metadata).toMatchObject({ role: 'orchestrator', source: 'boiler-room/agents' });
+    expect(ceo.metadata).toEqual(CEO_METADATA);
+    const other = agentConfig({ ...ceo, metadata: { role: 'group' } }, skillVersions, memberRefs());
+    expect(other.metadata?.[HASH_KEY]).not.toBe(config.metadata?.[HASH_KEY]);
+    for (const agent of company.filter((item) => item !== ceo)) {
+      expect(agent.metadata, agent.name).toBeUndefined();
+    }
+  });
+
+  it('judges a bound session by the tools it was offered and called, not by what it says', () => {
+    const intended = ['board_read', 'board_write', 'read_skill', 'session_spend', 'submit_output'];
+    expect(judgeCeoTools(intended, ['submit_output'])).toEqual({
+      ok: true,
+      failures: [],
+      extra: [],
+    });
+    const leaked = judgeCeoTools([...intended, 'vetta__agents_create'], ['vetta.agents_list']);
+    expect(leaked.ok).toBe(false);
+    expect(leaked.extra).toEqual(['vetta.agents_list', 'vetta__agents_create']);
+    expect(judgeCeoTools(['submit_output'], []).failures).toContain(
+      'br-ceo was not offered board_read',
+    );
+    expect(judgeCeoTools(null, []).ok).toBe(false);
+    expect(CEO_TOOLS_MESSAGE).toMatch(/exactly one tool call: submit_output/);
+  });
+
+  it('declares no MCP server, so nothing connects br-ceo to the control plane on purpose', () => {
+    expect(ceo.mcp_servers).toBeUndefined();
+  });
+});
+
+describe('the company board', () => {
+  it('lets only the builders and the CEO write cards', () => {
+    const writers = company
+      .filter((agent) => agent.tools.configs.board_write?.permission === 'allow')
+      .map((agent) => agent.name);
+    expect(writers.sort()).toEqual(
+      ['br-ceo', 'br-design', 'br-eng-lead', 'br-engineer-1', 'br-product'].sort(),
+    );
+  });
+
+  it.each([gtmLead, scout, social].map((agent) => [agent.name, agent] as const))(
+    '%s names board_write off while GTM is inactive, and can still read the board',
+    (_name, agent) => {
+      expect(agent.tools.configs.board_write).toEqual(OFF);
+      expect(agent.tools.configs.board_read?.permission).toBe('allow');
+    },
+  );
+
+  it('names both board tools off on every production crew agent', () => {
+    expect([...BOARD_OFF]).toEqual(['board_read', 'board_write']);
+    for (const tool of BOARD_OFF) expect(researcher.tools.configs[tool], tool).toEqual(OFF);
   });
 });
 

@@ -19,7 +19,12 @@ Releases are the founder's. The company's work stops at `dev` and staging: nobod
    sweep`, already claimed for you. Run the sweep below.
 2. **A digest.** When cards reach `done` or `blocked`, the board starts you with a list of them. Run
    the digest procedure below.
-3. **Any other message.** Do exactly what it asks, with the board tools, and nothing more.
+3. **The founder's chat.** Any other message is the founder, writing to you in the CEO chat of
+   the Naive dashboard. Do exactly what it asks, with the board tools, and nothing more, then
+   answer in your reply. Asked what is on the board, read it and answer from the cards, by status,
+   naming each card's title and assignee. A request that needs anything other than a card,
+   such as changing an agent, a budget, a credential or a schedule, is the founder's to do in the
+   dashboard: say so in one line and do not try.
 
 ## Card titles
 

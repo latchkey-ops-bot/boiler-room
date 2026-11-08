@@ -26,41 +26,54 @@ The company around the product, specified in `docs/company/` on `dev`, is define
 `src/definitions/company/`. Each role's operating procedure is a skill in `skills/<role>/SKILL.md`,
 so the prompts stay short.
 
-| Agent             | Model      | Started by                        | Budget (day / task) |
-| ----------------- | ---------- | --------------------------------- | ------------------- |
-| `br-ceo`          | Sonnet 5.5 | The sweep (paused), board digests | $5 / $1.00          |
-| `br-eng-lead`     | Sonnet 5.5 | `BUILD` and `SHIP` cards          | $10 / $1.50         |
-| `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                       | $10 / $1.50         |
-| `br-product`      | Sonnet 5.5 | `DIR` cards                       | $4 / $1.00          |
-| `br-design`       | Sonnet 5.5 | `DESIGN` cards                    | $5 / $1.00          |
-| `br-gtm-lead`     | Sonnet 5.5 | Nothing until GTM is activated    | $0 / $0             |
-| `br-scout`        | Haiku 5.5  | Nothing until GTM is activated    | $0 / $0             |
-| `br-social`       | Haiku 5.5  | Nothing until GTM is activated    | $0 / $0             |
-| `br-inbox-reader` | Haiku 5.5  | The app, once GTM is activated    | $0 / $0             |
+| Agent             | Model      | Started by                                            | Budget (day / task) |
+| ----------------- | ---------- | ----------------------------------------------------- | ------------------- |
+| `br-ceo`          | Sonnet 5.5 | The founder's chat, the sweep (paused), board digests | $5 / $1.00          |
+| `br-eng-lead`     | Sonnet 5.5 | `BUILD` and `SHIP` cards                              | $10 / $1.50         |
+| `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                                           | $10 / $1.50         |
+| `br-product`      | Sonnet 5.5 | `DIR` cards                                           | $4 / $1.00          |
+| `br-design`       | Sonnet 5.5 | `DESIGN` cards                                        | $5 / $1.00          |
+| `br-gtm-lead`     | Sonnet 5.5 | Nothing until GTM is activated                        | $0 / $0             |
+| `br-scout`        | Haiku 5.5  | Nothing until GTM is activated                        | $0 / $0             |
+| `br-social`       | Haiku 5.5  | Nothing until GTM is activated                        | $0 / $0             |
+| `br-inbox-reader` | Haiku 5.5  | The app, once GTM is activated                        | $0 / $0             |
 
-`br-ceo` is the only coordinator. It has `board: true` and every agent above except the inbox
-reader on its roster, each pinned at the version `company:sync` just made, so a member's new
-version also re-versions the CEO. Nobody delegates: leads create cards and assign them.
+`br-ceo` is the only coordinator and the organization's CEO (`ceo_agent_id`); Naive's default CEO
+is never created. It has `board: true` and every agent above except the inbox reader on its roster,
+each pinned at the version `company:sync` just made, so a member's new version also re-versions the
+CEO. Nobody delegates: leads create cards and assign them.
 
 ```sh
 pnpm company:sync     # idempotent: run it again and everything reads "unchanged"
 pnpm company:status   # also lists how GitHub differs from the spec
-pnpm company:verify   # one session per token holder, after its computer has paused; exits 1 on a failure
+pnpm company:verify   # one session per token holder, after its computer has paused, then the br-ceo check; exits 1 on a failure
+pnpm company:verify --ceo   # only the br-ceo check: one session that reports the tools it is offered
 ```
 
 `company:sync`:
 
-1. Checks GitHub from this machine, and warns about each gap without changing anything there:
+1. Reads the control plane's catalogue (`tools/list` on `https://api.vetta.sh/v1/mcp`) and stops,
+   before changing anything, if it serves a tool that `src/company/control-plane-tools.ts` does not
+   list.
+2. Checks GitHub from this machine, and warns about each gap without changing anything there:
    whether each token can push to each repo (GitHub serves the `git-receive-pack` ref
    advertisement only to a credential that can write; the token goes in a request header), and
    whether `main` and `dev` of both repos carry the `deletion`, `non_fast_forward` and
    `pull_request` rules. `company:status` prints the same check.
-2. Creates or versions each agent and pushes its skill, as `agents:sync` does.
-3. Ensures `br-ceo`'s board.
-4. Creates the sweep, cron `0 */2 * * *` in `America/New_York` at $1.00 a fire, with
+3. Creates or versions each agent and pushes its skill, as `agents:sync` does.
+4. Binds `br-ceo` as the organization's CEO, once its stored toolset names every control-plane tool
+   off: one `static_bearer` credential in the vault named exactly `Orchestrator control plane`, key
+   `ceo_<br-ceo's agt_ id>`, `mcp_server_url` `https://api.vetta.sh/v1/mcp`, `agent_id` br-ceo. The
+   platform never injects that credential (docs: api/vaults); it records the CEO and gives it a
+   short-lived credential each turn, so the stored value is 32 random bytes that authenticate
+   nothing. It then reads `ceo_agent_id` back. An existing binding is left alone. It never replaces
+   another CEO: if the organization or the vault names a different agent, it stops. Binding needs
+   an `admin` key, and so does every later update of `br-ceo`.
+5. Ensures `br-ceo`'s board, which is now the company board.
+6. Creates the sweep, cron `0 */2 * * *` in `America/New_York` at $1.00 a fire, with
    `enabled: false`, so it is paused until someone resumes it (`naive deploy resume <id>`). It never
    resumes or pauses an existing sweep.
-5. Writes `~/.netrc` (both `github.com` and `api.github.com`) on the computers of `br-eng-lead` and
+7. Writes `~/.netrc` (both `github.com` and `api.github.com`) on the computers of `br-eng-lead` and
    `br-engineer-1` with `BR_GITHUB_TOKEN_ENG`, and of `br-product` and `br-design` with
    `BR_GITHUB_TOKEN_DESIGN`. An agent's computer exists only once a session has needed a
    filesystem, so an agent without one first gets a boot session that runs `echo computer-ready`
@@ -76,13 +89,37 @@ empty commit to the token's own repo is accepted, and the same dry run to the ot
 refused. A dry run sends no objects, but it does fetch the `git-receive-pack` advertisement, which
 needs write access.
 
+`company:verify` then starts one `br-ceo` session that reports the tools it is offered, and code
+compares them, and every tool it called, with `board_read`, `board_write`, `read_skill`,
+`session_spend`, `submit_output` and `br-app.company_metrics`. Anything else fails it.
+
 Toolsets deny by default and name every allowed tool. Every agent also names as off the invoker
 (`vetta.tools_search`, `vetta.tools_execute`), the teammate tools, the company settings tools, and
-every planned `br-app.*` tool, and keeps `allowed_apps` explicit. The inbox reader names all 54
+every planned `br-app.*` tool, and keeps `allowed_apps` explicit. `br-ceo` also names all 368
+control-plane tools off, because the organization's CEO is offered the control plane and an MCP tool
+a toolset does not name is offered at "ask" even under a deny default. The inbox reader names all 54
 AgentMail tools and allows only `get_message`. Three things the platform decides:
 `submit_output` cannot be named (it is always offered), the `apps` tool stays off until the staging
 app exists (`STAGING_APP_ID`), and design's browser stays off until there is a staging domain to
 limit it to (`STAGING_DOMAIN`).
+
+### The company board seats every agent
+
+Because `br-ceo` is the organization's CEO, its board is the company board, and the company board
+seats every agent of the organization, on the roster or not (docs: team/board). A seated agent is
+offered `board_read` and `board_write` even under a deny default: a throwaway agent with a deny
+default and neither tool named was offered both. Naming a tool off removes it: with `board_write`
+named off it was offered `board_read` only. So:
+
+- The GTM agents name `board_write` off while GTM is inactive, and keep `board_read`. Activating
+  GTM gives `board_write` back.
+- The inbox reader names both off, as before.
+- Every production-crew toolset (`toolset()` in `src/define.ts`) names both off. That covers
+  `br-researcher` from this branch. `br-director`, `br-art-director` and `br-quality-check` are
+  defined on their own branches and synced by their own jobs: until those branches take this
+  `define.ts`, their live agents name neither tool, so each is offered both. Changing them from
+  here was refused. The fix is theirs: rebase on this branch and run `agents:sync`, or name both
+  tools off by hand.
 
 Not provisioned yet, because nothing uses them until GTM is activated: the GTM persona and the
 inbox reader's AgentMail vault credential. The activation checklist is in `docs/company/roles/gtm.md`.
@@ -111,11 +148,34 @@ Verified on 2026-11-07, on the real company:
   4 s later, moved it to `doing` and `done` with a note, and the board started a `br-ceo` digest
   session about 48 s after `done`, which read the card and created nothing.
 
-In the Naive dashboard (from its route table, not an API): each agent has a page under
-`/agents/<agt_ id>`, with its sessions and transcripts under `/sessions`, and `br-ceo`'s settings list
-its roster as team members. The `/board` page shows only the board of the company's platform CEO
-(`ceo_agent_id`), which this company does not use, so read the board with `pnpm company:status` or
-`naive board show <br-ceo's agt_ id>`.
+In the Naive dashboard (read from its own code, not documented): the rail's **CEO** row and the
+`/orchestrator` chat talk to the agent whose `metadata.role` is `orchestrator`, and with none the
+dashboard shows a placeholder CEO. `br-ceo` carries that role (`CEO_METADATA`), so the CEO row is
+`br-ceo`. The `/board` page shows the organization CEO's board, so it shows `br-ceo`'s.
+
+**The founder's line is the CEO chat** at `/orchestrator`. Each chat there is an ordinary `br-ceo`
+session: same system prompt, the `ceo` skill (which has a section for the founder's chat), the
+lockdown above, and a cap of `max_task_micro_usd`, $1.00 per chat, which is what a session falls
+back to when no budget is given (docs: api/sessions); the $5 daily cap bounds every chat together.
+A channel is not the line: a session marked `metadata.room` with the agent's id is a channel's
+transcript, and a message there runs no turn (docs: api/sessions, "A channel's session runs
+nothing"); the dashboard uses channels for groups, which hand each message to their members. The
+CEO chat lists only sessions with no `metadata.room`.
+
+Verified on 2026-11-07 (UTC 2026-11-08), after binding:
+
+- `company:sync` updated `br-ceo` to v3 (368 control-plane tools named off, `metadata.role`
+  `orchestrator`) and the three GTM agents to v2, then bound `br-ceo`: vault
+  `vlt_ngr73z1y572atmkh0q5fqx292n`, credential `vcr_7yf3bbqx521ccznvaex3b39pxc`, and
+  `ceo_agent_id` read back as `agt_3hm8pa6q84rtcp9arek8hvqsab`. The next sync changed nothing.
+- `company:verify --ceo`, session `ses_x7y22spbvs01x7eqc33zt87j5j` ($0.015): offered
+  `board_read`, `board_write`, `read_skill`, `session_spend`, `submit_output`, and nothing else.
+- One message, "What is on the board right now?", in a plain `br-ceo` session with no budget given
+  (`ses_99909082cnw6e6m5w776wy8sqf`, cap $1.00, $0.022): it read its skill and answered from the
+  board's one card by status and assignee, said no `DIR` card exists yet, and created nothing.
+- The seat probe (throwaway `br-probe-ceo-seat`, three Haiku sessions, deleted after): both board
+  tools allowed, offered both; `board_write` named off, offered `board_read` only; neither named,
+  offered both.
 
 ### Releases are the founder's
 
@@ -162,6 +222,9 @@ Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
   repos (checked 2026-11-07). Re-minting them is the founder's (above).
 - **Branch rules.** Section 5 C: rules on `main` and `dev`. Live: none on either repo (checked
   2026-11-07). Adding them is the founder's (above).
+- **Who writes cards.** The spec seats the roster on the CEO's board. Live: `br-ceo` is the
+  organization's CEO, so its board seats every agent of the organization. The GTM agents and the
+  crew name `board_write` off; see "The company board seats every agent".
 
 ## The Researcher
 

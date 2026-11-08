@@ -73,9 +73,14 @@ export function agentConfig(
     handoffs: definition.handoffs,
     ...(multiagent ? { multiagent } : {}),
     ...(definition.mcp_servers ? { mcp_servers: [...definition.mcp_servers] } : {}),
+    ...(definition.metadata ? { metadata: { ...definition.metadata } } : {}),
   };
+  // The definition's own metadata is hashed with the rest, so changing it versions the agent.
   const hash = createHash('sha256').update(canonicalJson(config)).digest('hex');
-  return { ...config, metadata: { [HASH_KEY]: hash, source: 'boiler-room/agents' } };
+  return {
+    ...config,
+    metadata: { ...definition.metadata, [HASH_KEY]: hash, source: 'boiler-room/agents' },
+  };
 }
 
 export interface SyncResult {

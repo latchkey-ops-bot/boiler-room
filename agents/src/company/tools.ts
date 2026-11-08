@@ -132,8 +132,14 @@ export const NAMED_OFF: readonly string[] = [
 export interface RoleTools {
   /** Tools this role may use, on top of the base. */
   allow?: readonly string[];
-  /** Base tools this role does not get, such as the board for an agent that is not seated. */
+  /**
+   * Base tools this role does not get. Once br-ceo is the organization's CEO, its board is the
+   * company board, which seats every agent of the company, so an agent that must not write cards
+   * names `board_write` here.
+   */
   without?: readonly string[];
+  /** More tools named off for this role only, such as every control-plane tool for the CEO. */
+  off?: readonly string[];
   /** The app tools this role may use. Every other app tool is named off. */
   app?: readonly AppTool[];
   /**
@@ -150,7 +156,7 @@ export interface RoleTools {
 /** The toolset of one company role: deny by default, every allowed tool named, the rest named off. */
 export function companyToolset(role: RoleTools): Toolset {
   const configs: Toolset['configs'] = {};
-  for (const name of NAMED_OFF) configs[name] = off;
+  for (const name of [...NAMED_OFF, ...(role.off ?? [])]) configs[name] = off;
   const allowed = [
     ...BASE_ALLOW.filter((name) => !role.without?.includes(name)),
     ...(role.allow ?? []),

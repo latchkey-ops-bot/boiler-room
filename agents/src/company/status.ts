@@ -1,5 +1,6 @@
 import { company } from '../definitions/company/index.ts';
 import { listAll, type Naive, usd } from '../naive/client.ts';
+import { CONTROL_PLANE, compareCatalogue, liveCatalogue, organization } from './control-plane.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
 
 export interface StatusAgent {
@@ -25,12 +26,13 @@ async function ledgerTotal(client: Naive, agentId: string): Promise<number> {
 }
 
 /**
- * What `pnpm company:status` prints: the agents, br-ceo's roster, the board, the sweep, spend, and
- * how GitHub differs from the spec.
+ * What `pnpm company:status` prints: the agents, whether br-ceo is the organization's CEO, br-ceo's
+ * roster, the board, the sweep, spend, and how GitHub differs from the spec.
  */
 export async function companyStatus(
   client: Naive,
   preflight: () => Promise<GithubReport> = () => githubPreflight(),
+  catalogue: () => Promise<string[]> = () => liveCatalogue(),
 ) {
   const existing = await listAll((query) => client.agents.list(query));
   const byId = new Map(existing.map((agent) => [agent.id, agent]));
@@ -75,9 +77,25 @@ export async function companyStatus(
     : [];
   const balance = await client.credits.show();
   const github = await preflight();
+  const org = await organization(client);
+  const vault = (await listAll((query) => client.vaults.list(query))).find(
+    (item) => item.display_name === CONTROL_PLANE.vault,
+  );
+  const credentials = vault
+    ? await listAll((query) => client.vaults.credentials.list(vault.id, query))
+    : [];
+  const served = compareCatalogue(await catalogue());
 
   return {
     agents,
+    ceo: {
+      ceo_agent_id: org.ceo_agent_id,
+      is_br_ceo: !!ceo && org.ceo_agent_id === ceo.id,
+      dashboard_role: (ceo?.metadata?.role as string | undefined) ?? null,
+      vault: vault?.id ?? null,
+      credentials: credentials.map((item) => `${item.id} ${item.key} -> ${item.agent_id}`),
+      control_plane: served,
+    },
     roster: { board: multiagent?.board ?? false, members: roster },
     board: board
       ? {

@@ -173,3 +173,113 @@ export async function verifyNetrc(
     }),
   );
 }
+
+/**
+ * The tools a bound br-ceo session may be offered: its board and skill tools, the always-offered
+ * `submit_output`, and the app tool it is allowed once the app exists. Nothing from the control
+ * plane.
+ */
+export const CEO_OFFERED = [
+  'board_read',
+  'board_write',
+  'br-app.company_metrics',
+  'read_skill',
+  'session_spend',
+  'submit_output',
+] as const;
+
+export const ceoToolsSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['tools_offered'],
+  properties: {
+    tools_offered: {
+      type: 'array',
+      items: { type: 'string' },
+      description: 'The exact name of every tool offered in this session, sorted.',
+    },
+  },
+} as const;
+
+export const CEO_TOOLS_MESSAGE =
+  'This session checks which tools you are offered. It is not a card and not a sweep, so read no skill and touch no card. Make exactly one tool call: submit_output, with tools_offered set to the exact name of every tool you are offered in this session, sorted, copied character for character.';
+
+/**
+ * Judges what a bound br-ceo session reported it was offered, and what it called. It fails on any
+ * tool outside `CEO_OFFERED`, which is how a control-plane tool left unnamed would show.
+ */
+export function judgeCeoTools(
+  offered: unknown,
+  called: readonly string[],
+): VerifyVerdict & { extra: string[] } {
+  if (!Array.isArray(offered) || !offered.every((name) => typeof name === 'string')) {
+    return { ok: false, failures: ['the session reported no tool list'], extra: [] };
+  }
+  const allowed = new Set<string>(CEO_OFFERED);
+  const extra = [...new Set([...offered, ...called])].filter((name) => !allowed.has(name)).sort();
+  const failures: string[] = [];
+  if (extra.length) failures.push(`br-ceo was offered or called ${extra.join(', ')}`);
+  for (const name of ['board_read', 'board_write']) {
+    if (!offered.includes(name)) failures.push(`br-ceo was not offered ${name}`);
+  }
+  return { ok: failures.length === 0, failures, extra };
+}
+
+export interface CeoVerifyResult {
+  session_id: string;
+  status: string;
+  offered: unknown;
+  called: string[];
+  verdict: VerifyVerdict & { extra: string[] };
+  consumed_micro_usd: number;
+}
+
+/**
+ * `pnpm company:verify --ceo`: one br-ceo session, after the binding, that reports the tools it is
+ * offered. Code, not the model, compares them with `CEO_OFFERED`.
+ */
+export async function verifyCeoTools(
+  client: Naive,
+  log: (line: string) => void = () => undefined,
+): Promise<CeoVerifyResult> {
+  const existing = await listAll((query) => client.agents.list(query));
+  const agent = existing.find((item) => item.name === 'br-ceo');
+  const definition = company.find((item) => item.name === 'br-ceo');
+  if (!agent || !definition) throw new Error('br-ceo is not synced. Run company:sync first.');
+  const session = await client.sessions.create({
+    agent_id: agent.id,
+    budget_micro_usd: definition.session.budget_micro_usd,
+    output_schema: ceoToolsSchema,
+    structured_output_required: true,
+    metadata: { purpose: 'company:verify --ceo', agent: definition.name },
+    message: CEO_TOOLS_MESSAGE,
+  });
+  log(`session   br-ceo ${session.id}`);
+  const started = Date.now();
+  let current = await client.sessions.get(session.id);
+  while (['running', 'queued'].includes(current.status) && Date.now() - started < 4 * 60_000) {
+    await sleep(3000);
+    current = await client.sessions.get(session.id);
+  }
+  if (['running', 'queued'].includes(current.status)) {
+    await client.sessions.interrupt(session.id).catch(() => undefined);
+  }
+  const called: string[] = [];
+  for (let after = 0, page = 0; page < 20; page++) {
+    const events = await client.sessions.events(session.id, { after_seq: after, limit: 100 });
+    for (const event of events.data) {
+      if (event.type === 'tool.started') called.push(String(event.data.name ?? ''));
+      after = Math.max(after, event.seq);
+    }
+    if (!events.has_more || !events.data.length) break;
+  }
+  const offered = (current.structured_output as { tools_offered?: unknown } | null)?.tools_offered;
+  return {
+    session_id: session.id,
+    status: `${current.status}/${current.stop_reason ?? ''}`,
+    offered: offered ?? null,
+    called,
+    verdict: judgeCeoTools(offered, called),
+    consumed_micro_usd: current.consumed_micro_usd ?? 0,
+  };
+}

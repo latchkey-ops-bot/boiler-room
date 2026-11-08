@@ -7,6 +7,13 @@ const status = await companyStatus(client);
 
 console.log('Agents');
 console.table(status.agents);
+const { ceo } = status;
+console.log(
+  `Organization CEO: ${ceo.ceo_agent_id ?? 'none'}${ceo.is_br_ceo ? ' (br-ceo)' : ' (not br-ceo)'}; dashboard role ${ceo.dashboard_role ?? 'none'}; vault ${ceo.vault ?? 'none'} ${ceo.credentials.join(', ')}`,
+);
+console.log(
+  `Control plane: ${ceo.control_plane.count} tools served; ${ceo.control_plane.unnamed.length ? `NOT named on br-ceo: ${ceo.control_plane.unnamed.join(', ')}` : 'every one named off on br-ceo'}`,
+);
 console.log(`Roster of br-ceo (board ${status.roster.board ? 'on' : 'off'})`);
 console.table(status.roster.members);
 if (status.board) {
