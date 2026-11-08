@@ -465,9 +465,16 @@ merge into `main`, and its card says production was not deployed.
 - Whether the platform attaches the control plane to a CEO that declares no `vetta` MCP server.
   The bound session was offered none of it; the named-off list covers it either way.
 
-- A **coordinator** CEO on a cron, and its `Recurring:` standing card.
+- A **coordinator** CEO on a cron, and its `Recurring:` standing card, for the real `br-ceo`. A
+  practice clone of it (a coordinator, on a five-minute schedule) was verified by the role evals on
+  2026-11-08 ([`evals.md`](evals.md)): the scheduled fire created `Recurring: Company sweep`,
+  claimed it as `doing` and named it in the message, and the sweep closed it with its report. A
+  manual run (`naive deploy run`, `deployments.run`) claims no standing card, so the sweep stops at
+  once: test the sweep by resuming its schedule, not by running it.
 - A digest of a card that a member moves to `blocked`, or that the board parks. Phase 1 probes the
-  first. A card blocked on an open blocker was not digested.
+  first. A card blocked on an open blocker was not digested. The role evals saw the board park a
+  card whose assignee's budget refused the session (`budget_exceeded`), and the practice CEO's
+  digest then start within about a minute.
 - A card whose session hit its budget staying in `doing` (docs).
 - Product or design creating cards for the lead. It is the same path as lead to engineer, but it
   was not run.

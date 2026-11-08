@@ -41,19 +41,31 @@ file.
 2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_`,
    `ghp_` or `BEGIN OPENSSH PRIVATE KEY`.
 3. Check each one before you merge it, never after: a pull request merged to find out breaks
-   `dev` for everyone. In `~/boiler-room` (clone the repo there if it is missing), run
+   `dev` for everyone. Your computer has 1 GiB of memory, so turn on 2 GiB of swap first, once per
+   computer, or the checks are killed with exit 137 (seen in the role evals on 2026-11-08):
+
+   ```bash
+   swapon --show | grep -q swapfile || sudo swapon /swapfile \
+     || (sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)
+   ```
+
+   In `~/boiler-room` (clone the repo there if it is missing), run
    `git fetch origin pull/<n>/head:pr-<n> && git checkout --detach pr-<n>`, then run
    `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test` in a script run in
    the background, because a `bash` call is killed after about 30 seconds, and poll its log until it
-   prints its exit line. Your computer has 1 GiB of memory, so turn on 2 GiB of swap first, once per
-   computer, or the checks are killed with exit 137 (seen in the role evals on 2026-11-08):
-   `swapon --show | grep -q swapfile || sudo swapon /swapfile || (sudo fallocate -l 2G /swapfile &&
-   sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)`. The engineer's note saying the checks pass is not a check. A pull request
-   whose checks fail has failed review: go to step 7, and do not merge it.
+   prints its exit line. The engineer's note saying the checks pass is not a check.
+   - **A check fails.** Run the same check on a clean checkout of `origin/dev`, without the pull
+     request. If it passes there, the pull request broke it: the pull request has failed review, so
+     go to step 7 and do not merge it.
+   - **`dev` already fails it.** The failure is not the pull request's: it passes that check when its
+     own changed files do (for lint, `pnpm exec biome check <each changed file>`), and the rest of
+     its checks pass. Then it may be merged. Create `ENG: <slug> fix <n>` for `br-engineer-1`, whose
+     body names the check that `origin/dev` fails, the commit, and the first error, so `dev` is
+     fixed too, and say so in the `SHIP` note.
 4. Merge each pull request that passed review and its checks into `dev`, squashed, with
    `curl --netrc -s -X PUT https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>/merge`
    and the body `{"merge_method":"squash"}`. Then run the same checks on the merged `dev`, in a
-   background script.
+   background script: every check that passed on `origin/dev` before the merge must still pass.
 5. Deploy staging, following `engineering-deploy`, "Deploy staging from a `SHIP: <slug>` card": in
    a clean checkout of `origin/dev`, if any merged pull request added a file under
    `apps/web/drizzle/`, run `pnpm web:db:migrate:staging` first; then run

@@ -117,7 +117,9 @@ edited once applied. A rollback never touches D1.
 2. Refuse any diff that matches a secret pattern, such as `sk_live_`, `sk_test_`, `github_pat_` or
    `BEGIN OPENSSH PRIVATE KEY`.
 3. Check out each PR's head and run lint, typecheck and tests on it, before any merge. A PR whose
-   checks fail has failed review (step 7). The engineer's note that they pass is not a check.
+   checks fail has failed review (step 7), unless `origin/dev` fails the same check without it:
+   then the PR passes when its own changed files do, and the lead creates `ENG: <slug> fix <n>` to
+   fix `dev`. The engineer's note that the checks pass is not a check.
 4. Merge each PR that passed review and its checks, squashed, through the REST API. Then run the
    same checks on the merged `dev`.
 5. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
@@ -207,8 +209,12 @@ Any other card that asks the lead, or anyone else, to touch `main` or production
   (9:16, frame 60) in 6 s. Peak use, sampled every 5 s: 911 MB of memory and 167 MB of swap. So
   engineers render their own stills, one at a time, with swap on.
 - **Measured.** A Sonnet session budget of $0.30 was refused at pre-flight. $1.00 was accepted.
-- **Not verified.** A real push or PR. The probe's push was refused because no credential was
-  registered. Git and the REST API reading `~/.netrc` is untested.
+- **Verified by the role evals, 2026-11-08** ([`../evals.md`](../evals.md)). A practice engineer
+  with the engineering token in `~/.netrc` pushed `feat/eval-ehb6zq-clamp-1` and opened pull
+  request #25 into `dev` with `curl --netrc`, and its motion tests, typecheck and Biome passed on
+  the head (the PR was then closed and the branch deleted). A practice lead fetched a pull
+  request's head, ran the checks on it, and squash-merged it through the REST API into a practice
+  base branch; given a pull request whose test fails, it sent it back without merging.
 - **Not verified.** A deploy or a release by the lead. Its computer has the Cloudflare keys, but
   not `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which the build reads, and production is not provisioned.
 - **Not verified.** Whether `~/.netrc` survives a change of computer. Step 2 of the engineer
