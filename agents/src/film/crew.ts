@@ -6,7 +6,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { FilmRejected } from '@boiler-room/motion';
+import { FilmRejected, layoutRefusals } from '@boiler-room/motion';
 import { CostLimitExceeded, chargesOf, gateCampaign, renderCampaign } from '@boiler-room/render';
 import { DEFAULT_CAP, DEFAULT_IMAGE_MODEL } from '../art/generate.ts';
 import type { ArtIssue } from '../art/prompt.ts';
@@ -90,11 +90,13 @@ export const artIssueOf = (issue: QcIssue): ArtIssue => ({
 });
 
 /**
- * The copy a scene template refused to set while frames were drawn, as Quality Check issues the
- * Director owns. motion never shrinks type to make copy fit, and neither the campaign validator
- * nor `validateFilm` measures type, so a type card or a stat-counter whose words do not fit their
- * line at their cap height stops the render with `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`. The fix is
- * shorter copy. The same error comes back from every computer that drew the scene; it is one issue.
+ * The copy a scene template refused to set, as Quality Check issues the Director owns. motion
+ * never shrinks type to make copy fit, and neither the campaign validator nor `validateFilm`
+ * measures type, so a type card or a stat-counter whose words do not fit their line at their cap
+ * height stops the render with `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`: when the film is selected,
+ * before any computer exists, for every scene at once, or, for one that gets past that, while its
+ * chunk is drawn. The fix is shorter copy. The same refusal comes back from every computer and tab
+ * that drew the scene; it is one issue.
  */
 export function renderLayoutIssues(text: string): QcIssue[] {
   const found = new Map<string, QcIssue>();
@@ -113,23 +115,22 @@ export function renderLayoutIssues(text: string): QcIssue[] {
         source: 'code',
       });
   };
-  for (const match of text.matchAll(
-    /TYPE_CARD_LAYOUT at (?:scene "([^"]+)", )?text "([^"]+)": ([^\n]+)/g,
-  )) {
-    const [, sceneId, textId, rest] = match;
-    add(
-      'type-card-layout',
-      sceneId ?? null,
-      `Text "${textId}": ${(rest ?? '').trim()}`,
-      `Shorten text "${textId}" until it sets on its lines at its cap height. motion never sets type smaller to make copy fit.`,
-    );
-  }
-  for (const match of text.matchAll(/LAYOUT_UNFIT: ([^\n]+)/g)) {
-    const rest = (match[1] ?? '').trim();
-    const sceneId = /Scene "([^"]+)"/.exec(rest)?.[1] ?? null;
+  for (const refusal of layoutRefusals(text)) {
+    const card = /^TYPE_CARD_LAYOUT at (?:scene "([^"]+)", )?text "([^"]+)": (.+)$/.exec(refusal);
+    if (card) {
+      const [, sceneId, textId, rest] = card;
+      add(
+        'type-card-layout',
+        sceneId ?? null,
+        `Text "${textId}": ${(rest ?? '').trim()}`,
+        `Shorten text "${textId}" until it sets on its lines at its cap height. motion never sets type smaller to make copy fit.`,
+      );
+      continue;
+    }
+    const rest = refusal.replace(/^LAYOUT_UNFIT: /, '').trim();
     add(
       'stat-counter-layout',
-      sceneId,
+      /Scene "([^"]+)"/.exec(rest)?.[1] ?? null,
       rest,
       'Shorten the number or its label until both set at their cap heights. motion never sets type smaller to make copy fit.',
     );

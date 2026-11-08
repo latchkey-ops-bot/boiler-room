@@ -632,6 +632,27 @@ describe('a render that motion refused', () => {
     expect(renderLayoutIssues('Chunk 2 failed: ECONNRESET')).toEqual([]);
   });
 
+  it('reads every scene of a refusal made before any computer, in either way it is printed', () => {
+    const card = (scene: string, text: string, value: string) =>
+      `TYPE_CARD_LAYOUT at scene "${scene}", text "${text}": "${value}" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.`;
+    const value = card('value', 'value-line', 'Analytics, errors and replays');
+    const name = card('name', 'name-descriptor', "Your product's context layer");
+    // posthog.com, 8 November: both scenes, which two renders on computers found one at a time.
+    const listed = [
+      'FilmRejected: This campaign cannot be rendered: laying out the copy found 2 error(s).',
+      `- TYPE_CARD_LAYOUT at scenes[3].text[0].value: ${value} Shorten scenes[3].text[0].value.`,
+      `- TYPE_CARD_LAYOUT at scenes[16].text[1].value: ${name} Shorten scenes[16].text[1].value.`,
+    ].join('\n');
+    const oneLine = `This campaign cannot be rendered: laying out the copy found 2 error(s). (1) TYPE_CARD_LAYOUT at scenes[3].text[0].value: ${value} Shorten scenes[3].text[0].value. (2) TYPE_CARD_LAYOUT at scenes[16].text[1].value: ${name} Shorten scenes[16].text[1].value.`;
+    const fromChunks = `motion refused to draw the film (2 refusal(s)):\n${value}\n${name}`;
+    for (const text of [listed, oneLine, fromChunks]) {
+      expect(renderLayoutIssues(text).map((issue) => [issue.sceneId, issue.check])).toEqual([
+        ['value', 'type-card-layout'],
+        ['name', 'type-card-layout'],
+      ]);
+    }
+  });
+
   it('keeps a failure to its first line and the line that names the error', () => {
     expect(briefFailure(LAYOUT_FAILURE)).toBe(
       'Chunk 4 failed on 2 computers: A command on cmp_1 exited with 1: SymbolicateableError [TypeCardLayoutError]: TYPE_CARD_LAYOUT at scene "name", text "name-descriptor": "Product development system" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.',
