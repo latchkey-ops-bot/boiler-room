@@ -5,30 +5,30 @@ decides what gets worked on next. It never does the work itself.
 
 ## Configuration
 
-| Setting | Value |
-| --- | --- |
-| Model | `anthropic/claude-sonnet-5.5` |
-| Harness | `pi` |
-| Team | `multiagent: { type: "coordinator", board: true }`, with every company agent on the roster (up to 20). The production crew is not on it. |
-| Started by | 1. Deployment `br-ceo-sweep`: cron `0 */2 * * *`, timezone `America/New_York`, `budget_micro_usd: 1_000_000`. 2. Board digests, which Naive starts by itself when cards reach `done` (verified) or `blocked` (docs only, see [README section 2](../README.md#2-how-the-hierarchy-works-on-naive)). 3. The founder, in the dashboard's CEO chat (`/orchestrator`): one ordinary session per chat, capped at `max_task_micro_usd`. |
-| Handoffs | `false` |
-| Budget | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"` |
-| Organization CEO | Yes: `ceo_agent_id` is `br-ceo`. One `static_bearer` credential in the `Orchestrator control plane` vault, key `ceo_<agt id>`, for `https://api.vetta.sh/v1/mcp`, bound to `br-ceo`. Its board is the company board. See [README section 2](../README.md#2-how-the-hierarchy-works-on-naive). |
-| Metadata | `role: "orchestrator"`, which the dashboard reads to pick its CEO agent |
+| Setting          | Value                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model            | `anthropic/claude-sonnet-5.5`                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Harness          | `pi`                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| Team             | `multiagent: { type: "coordinator", board: true }`, with every company agent on the roster (up to 20). The production crew is not on it.                                                                                                                                                                                                                                                                                         |
+| Started by       | 1. Deployment `br-ceo-sweep`: cron `0 */2 * * *`, timezone `America/New_York`, `budget_micro_usd: 1_000_000`. 2. Board digests, which Naive starts by itself when cards reach `done` (verified) or `blocked` (docs only, see [README section 2](../README.md#2-how-the-hierarchy-works-on-naive)). 3. The founder, in the dashboard's CEO chat (`/orchestrator`): one ordinary session per chat, capped at `max_task_micro_usd`. |
+| Handoffs         | `false`                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Budget           | `cap_micro_usd: 5_000_000`, `max_task_micro_usd: 1_000_000`, `period: "day"`                                                                                                                                                                                                                                                                                                                                                     |
+| Organization CEO | Yes: `ceo_agent_id` is `br-ceo`. One `static_bearer` credential in the `Orchestrator control plane` vault, key `ceo_<agt id>`, for `https://api.vetta.sh/v1/mcp`, bound to `br-ceo`. Its board is the company board. See [README section 2](../README.md#2-how-the-hierarchy-works-on-naive).                                                                                                                                    |
+| Metadata         | `role: "orchestrator"`, which the dashboard reads to pick its CEO agent                                                                                                                                                                                                                                                                                                                                                          |
 
 ## Tools
 
-| Tool | Access | Note |
-| --- | --- | --- |
-| `board_read`, `board_write` | allow | Its only way to act |
-| `submit_output`, `session_spend` | allow | |
-| `br-app.company_metrics` (the app's own MCP tool, read only) | allow | Planned. Films made, leads, emails, replies, and spend per agent. |
-| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample` | off, each one named | `allowed_apps` names only the app that serves `company_metrics` |
-| `send_to_agent`, `wait_for_agents`, `list_agents` | off | Work goes by card. The CEO never waits on a teammate. |
-| `bash`, `read`, `write`, `edit`, `ls`, `find` | off | With no sandbox tools, no computer is provisioned (verified) |
-| `browser`, `web_fetch`, `web_search`, `generate_image`, `data_run` | off | |
-| `ask_operator`, `request_tools`, `propose_plan` | off | Escalation goes on the board |
-| `vetta.tools_search`, `vetta.tools_execute` | off | |
+| Tool                                                                                                                                                                                                                              | Access              | Note                                                                                                                           |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `board_read`, `board_write`                                                                                                                                                                                                       | allow               | Its only way to act                                                                                                            |
+| `submit_output`, `session_spend`                                                                                                                                                                                                  | allow               |                                                                                                                                |
+| `br-app.company_metrics` (the app's own MCP tool, read only)                                                                                                                                                                      | allow               | Planned. Films made, leads, emails, replies, and spend per agent.                                                              |
+| Every other app tool, including `br-app.send_email`, `br-app.leads_upsert` and `br-app.request_sample`                                                                                                                            | off, each one named | `allowed_apps` names only the app that serves `company_metrics`                                                                |
+| `send_to_agent`, `wait_for_agents`, `list_agents`                                                                                                                                                                                 | off                 | Work goes by card. The CEO never waits on a teammate.                                                                          |
+| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                                                                                                                                                     | off                 | With no sandbox tools, no computer is provisioned (verified)                                                                   |
+| `browser`, `web_fetch`, `web_search`, `generate_image`, `data_run`                                                                                                                                                                | off                 |                                                                                                                                |
+| `ask_operator`, `request_tools`, `propose_plan`                                                                                                                                                                                   | off                 | Escalation goes on the board                                                                                                   |
+| `vetta.tools_search`, `vetta.tools_execute`                                                                                                                                                                                       | off                 |                                                                                                                                |
 | Every control-plane tool, `vetta.<tool>`: all 368 that `tools/list` on `https://api.vetta.sh/v1/mcp` served on 2026-11-07, such as `agents_create`, `agents_patch`, `vaults_create`, `sessions_create` and `credits_create_topup` | off, each one named | As the organization's CEO it is offered the control plane, and an unnamed MCP tool is offered at "ask". It needs none of them. |
 
 No identity and no external MCP servers. Its one vault credential is the CEO binding, which the
@@ -105,13 +105,13 @@ released.
 
 ## Reports
 
-| What | To whom | How |
-| --- | --- | --- |
-| The sweep report, every 2 hours | Founder | Note on `Recurring: Company sweep` |
-| Things only a person can do | Founder | `FOUNDER:` cards |
-| Answers to the founder | Founder | Its reply in the CEO chat |
-| Delivered or not, per slug | Founder and every team | Comment on the `DIR` card |
-| Receives | From every agent | Board digests of each `done` card (verified) and each `blocked` card (docs). The sweep catches what no digest reports. |
+| What                            | To whom                | How                                                                                                                    |
+| ------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| The sweep report, every 2 hours | Founder                | Note on `Recurring: Company sweep`                                                                                     |
+| Things only a person can do     | Founder                | `FOUNDER:` cards                                                                                                       |
+| Answers to the founder          | Founder                | Its reply in the CEO chat                                                                                              |
+| Delivered or not, per slug      | Founder and every team | Comment on the `DIR` card                                                                                              |
+| Receives                        | From every agent       | Board digests of each `done` card (verified) and each `blocked` card (docs). The sweep catches what no digest reports. |
 
 ## Cost
 

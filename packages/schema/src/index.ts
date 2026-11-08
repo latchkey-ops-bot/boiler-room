@@ -7,11 +7,14 @@ export {
   FORMATS,
   TEXT_ROLES,
 } from './campaign.ts';
+export { contrastRatio, readableOn } from './contrast.ts';
 export type { CampaignFrames, SceneFrames } from './frames.ts';
 export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';
 export type { NumericToken } from './numbers.ts';
 export { extractNumericTokens } from './numbers.ts';
+export type { ResearchParts, ResearchPartsResult } from './research.ts';
+export { researchPartsSchema, validateResearchParts } from './research.ts';
 export { sceneRegistry } from './scene-registry.ts';
 export type {
   Issue,
@@ -21,4 +24,10 @@ export type {
   ValidateOptions,
   ValidationResult,
 } from './validate.ts';
-export { DEFAULT_TEXT_LIMITS, ISSUE_CODES, MIN_CONTRAST, validateCampaign } from './validate.ts';
+export {
+  DEFAULT_TEXT_LIMITS,
+  ISSUE_CODES,
+  MIN_CONTRAST,
+  unbackedNumbers,
+  validateCampaign,
+} from './validate.ts';

@@ -27,13 +27,13 @@ flowchart LR
 
 ## Agents
 
-| Agent | Purpose | Proposed model | Output it returns | Status |
-| --- | --- | --- | --- | --- |
-| Researcher | Captures the site with Playwright: screenshots, colours, fonts and logo. Extracts claims quoted word for word, with their source URL. | `anthropic/claude-haiku-5.5` | Research JSON | Building, on branch `feat/researcher-agent` |
-| Director | Writes the script and scenes into `campaign.json`. Reworks what the Validator or Quality Check sends back. | `anthropic/claude-sonnet-5.5`, or Opus once benchmarked | `campaign.json` | Planned |
-| Art Director | Picks scenes from the motion library, and generates missing assets with Naive | `anthropic/claude-sonnet-5.5` | Scene picks and asset ids | Planned |
-| Quality Check | Inspects contact sheets, the frames around each transition, legibility at phone size, the brand, and the claims | `anthropic/claude-opus-5.5` | A review report: pass, or send back with reasons | Planned |
-| Account Manager | Delivers the film by a Naive file link and an email, and handles revisions | `anthropic/claude-sonnet-5.5` | A delivery record | Planned |
+| Agent           | Purpose                                                                                                                               | Proposed model                                          | Output it returns                                | Status                                      |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------ | ------------------------------------------- |
+| Researcher      | Captures the site with Playwright: screenshots, colours, fonts and logo. Extracts claims quoted word for word, with their source URL. | `anthropic/claude-haiku-5.5`                            | Research JSON                                    | Building, on branch `feat/researcher-agent` |
+| Director        | Writes the script and scenes into `campaign.json`. Reworks what the Validator or Quality Check sends back.                            | `anthropic/claude-sonnet-5.5`, or Opus once benchmarked | `campaign.json`                                  | Planned                                     |
+| Art Director    | Picks scenes from the motion library, and generates missing assets with Naive                                                         | `anthropic/claude-sonnet-5.5`                           | Scene picks and asset ids                        | Planned                                     |
+| Quality Check   | Inspects contact sheets, the frames around each transition, legibility at phone size, the brand, and the claims                       | `anthropic/claude-opus-5.5`                             | A review report: pass, or send back with reasons | Planned                                     |
+| Account Manager | Delivers the film by a Naive file link and an email, and handles revisions                                                            | `anthropic/claude-sonnet-5.5`                           | A delivery record                                | Planned                                     |
 
 The models follow the earlier probe's picks: Haiku for procedures, Opus for judgement. Those picks
 were not benchmarked on real briefs.

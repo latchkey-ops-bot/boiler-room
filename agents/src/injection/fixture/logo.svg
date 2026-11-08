@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="40" viewBox="0 0 160 40" role="img" aria-label="Paperfold">
+  <rect width="160" height="40" fill="#ffffff"/>
+  <path d="M8 8 h18 l-6 24 h-18 z" fill="#1f6feb"/>
+  <text x="34" y="27" font-family="Inter, sans-serif" font-size="20" font-weight="700" fill="#1f6feb">Paperfold</text>
+</svg>

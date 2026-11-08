@@ -20,7 +20,13 @@ export interface NegativeFixture {
 const at = <T>(list: T[], index: number): T => list[index] as T;
 
 const longText = 'x'.repeat(61);
-const registry = { hero: {}, stat: {}, outro: {} };
+/** Nova's scene types with no limits of their own, so a fixture sees only the rule it is about. */
+const registry = {
+  'word-slam': {},
+  'feature-card': {},
+  'site-hero': {},
+  'end-card': {},
+};
 
 export const novaCopy = () => structuredClone(nova) as Campaign;
 
@@ -97,9 +103,9 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a duplicate text id within a scene',
     code: 'SCHEMA_INVALID',
-    path: 'scenes[0].text[1].id',
+    path: 'scenes[1].text[1].id',
     build: (c) => {
-      at(at(c.scenes, 0).text, 1).id = at(at(c.scenes, 0).text, 0).id;
+      at(at(c.scenes, 1).text, 1).id = at(at(c.scenes, 1).text, 0).id;
     },
   },
   {
@@ -470,9 +476,11 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a number that is only a substring of the quoted number',
     code: 'CLAIM_UNBACKED',
-    path: 'scenes[2].text[0].value',
+    path: 'scenes[1].text[0].value',
     build: (c) => {
-      at(at(c.scenes, 2).text, 0).value = '200 teams';
+      const headline = at(at(c.scenes, 1).text, 0);
+      headline.value = '200 teams';
+      headline.claimIds = ['team-count'];
     },
   },
   {
@@ -515,9 +523,9 @@ export const negativeFixtures: NegativeFixture[] = [
   {
     name: 'a number in a scene CTA',
     code: 'CLAIM_UNBACKED',
-    path: 'scenes[3].text[2].value',
+    path: 'scenes[3].text[0].value',
     build: (c) => {
-      at(at(c.scenes, 3).text, 2).value = 'Try it for 30 days';
+      at(at(c.scenes, 3).text, 0).value = 'Try it for 30 days';
     },
   },
   {
@@ -722,6 +730,30 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a brand name that states a measure',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Saves 300 hours a month';
+    },
+  },
+  {
+    name: 'a brand name that states a count',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Loved by 300 teams';
+    },
+  },
+  {
+    name: 'a brand name with a unit joined to its number',
+    code: 'CLAIM_UNBACKED',
+    path: 'brand.name',
+    build: (c) => {
+      c.brand.name = 'Deploy in 5min';
+    },
+  },
+  {
     name: 'a brand name that is only a number word',
     code: 'CLAIM_UNBACKED',
     path: 'brand.name',
@@ -761,6 +793,134 @@ export const negativeFixtures: NegativeFixture[] = [
     build: (c) => {
       c.brand.name = 'Nova 2';
       at(at(c.scenes, 0).text, 0).value = 'Ship nova 2 today';
+    },
+  },
+  {
+    name: 'a percentage that ends a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9% cheaper';
+    },
+  },
+  {
+    name: 'a multiplier that ends a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 times faster';
+    },
+  },
+  {
+    name: 'a multiplier sign after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9x faster builds';
+    },
+  },
+  {
+    name: 'a scale word after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 million users';
+    },
+  },
+  {
+    name: 'a unit after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 minutes to deploy';
+    },
+  },
+  {
+    name: 'a currency word after a brand name with a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova 9';
+      at(at(c.scenes, 0).text, 0).value = 'Nova 9 dollars a seat';
+    },
+  },
+  {
+    name: 'a spelled number ending a brand name, before a multiplier',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = 'Nova Nine';
+      at(at(c.scenes, 0).text, 0).value = 'Nova Nine times faster';
+    },
+  },
+  {
+    name: 'a currency sign before a brand name that is a number',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      c.brand.name = '3M';
+      at(at(c.scenes, 0).text, 0).value = '$3M in revenue';
+    },
+  },
+  {
+    name: 'a percentage glued to the word before it',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Cut build costs by40%';
+    },
+  },
+  {
+    name: 'a multiplier glued to a letter',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Ship l0x faster';
+    },
+  },
+  {
+    name: 'a percentage behind an invisible letter',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds \u316470% faster';
+    },
+  },
+  {
+    name: 'a percentage in Arabic-Indic digits',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds ٧٠٪ faster';
+    },
+  },
+  {
+    name: 'a percentage in Devanagari digits',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds ७०% faster';
+    },
+  },
+  {
+    name: 'a percentage glued to a word in a hook',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.hooks[0].text[0].value',
+    build: (c) => {
+      at(at(c.variants.hooks, 0).text, 0).value = 'Waiting on CI? Save up to90%';
+    },
+  },
+  {
+    name: 'a percentage glued to a word in a variant CTA label',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.ctas[0].label',
+    build: (c) => {
+      at(c.variants.ctas, 0).label = 'Get50% off';
     },
   },
   {
@@ -876,7 +1036,7 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a headline over a limit the registry lowers',
     code: 'TEXT_TOO_LONG',
     path: 'scenes[0].text[0].value',
-    options: { sceneRegistry: { ...registry, hero: { text: { headline: 10 } } } },
+    options: { sceneRegistry: { ...registry, 'word-slam': { text: { headline: 10 } } } },
     build: () => undefined,
   },
   {
@@ -909,7 +1069,7 @@ export const negativeFixtures: NegativeFixture[] = [
     name: 'a scene type the registry does not know',
     code: 'SCENE_TYPE_UNKNOWN',
     path: 'scenes[0].type',
-    options: { sceneRegistry: { stat: {}, outro: {}, hero: {} } },
+    options: { sceneRegistry: registry },
     build: (c) => {
       at(c.scenes, 0).type = 'carousel';
     },

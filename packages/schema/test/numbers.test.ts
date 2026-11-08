@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractNumericTokens, isBacked } from '../src/numbers.ts';
+import { unbackedNumbers } from '../src/validate.ts';
 
 const backed = (text: string, quote: string) => {
   const tokens = extractNumericTokens(text);
@@ -227,8 +228,37 @@ describe('extractNumericTokens', () => {
   });
 
   it.each([
+    ['Arabic-Indic digits and percent sign', 'Builds ٧٠٪ faster', { kind: 'percent', value: 70 }],
+    ['Eastern Arabic digits', 'أسرع بنسبة ۷۰٪', { kind: 'percent', value: 70 }],
+    ['Devanagari digits', 'Builds ७०% faster', { kind: 'percent', value: 70 }],
+    ['Bengali digits', '৩x faster', { kind: 'multiplier', value: 3 }],
+    ['an Arabic decimal separator', '٣٫٥x', { kind: 'multiplier', value: 3.5 }],
+    ['an Arabic thousands separator', '١٬٢٠٠ فريق', { kind: 'number', value: 1200 }],
+  ])('reads %s', (_name, text, expected) => {
+    expect(kinds(text)).toEqual([expect.objectContaining(expected)]);
+  });
+
+  it.each([
+    ['a percent glued to a word', 'Cut build costs by40%', { kind: 'percent', value: 40 }],
+    ['a percent glued to a verb', 'Get50% off', { kind: 'percent', value: 50 }],
+    ['a multiplier glued to a letter', 'Ship l0x faster', { kind: 'multiplier', value: 0 }],
+    ['a multiplier word glued to a word', 'up to3 times faster', { kind: 'multiplier', value: 3 }],
+    ['money glued to a word', 'Get$50 off', { kind: 'money', value: 50 }],
+    ['a rank glued to a word', 'Rated#1', { kind: 'rank', value: 1 }],
+    [
+      'a percent behind an invisible letter',
+      'Builds \u316470% faster',
+      { kind: 'percent', value: 70 },
+    ],
+  ])('reads %s', (_name, text, expected) => {
+    expect(kinds(text)).toEqual([expect.objectContaining(expected)]);
+  });
+
+  it.each([
     ['a digit inside a word', 'Web3 tooling'],
     ['a digit inside an acronym', 'B2B teams'],
+    ['a digit inside a chemical formula', 'H2O and CO2'],
+    ['a digit inside a file type', 'mp4 and h264'],
     ['the word one', 'one click, the one tool, someone'],
     ['a one-time fee', 'a one-time fee'],
     ['the verb won after one', 'the one won the award'],
@@ -403,5 +433,35 @@ describe('isBacked', () => {
     ['cents against dollars', '99 cents', 'only $99'],
   ])('rejects %s', (_name, text, quote) => {
     expect(backed(text, quote)).toBe(false);
+  });
+});
+
+describe('unbackedNumbers', () => {
+  const raws = (copy: string, quotes: string[], brandName?: string) =>
+    unbackedNumbers(copy, quotes, { brandName }).map(({ raw }) => raw);
+
+  it('backs a figure only by a quote that states the same value and kind', () => {
+    expect(raws('Teams is $12 per user a month', ['Teams $12/user/month billed yearly'])).toEqual(
+      [],
+    );
+    expect(raws('Teams is $12 per user a month', ['Teams 12 seats'])).toEqual(['$12']);
+    expect(raws('Basic costs $10', ['Basic $110 per user/month'])).toEqual(['$10']);
+    expect(raws('A 14 day free trial', ['*14 day free trial'])).toEqual([]);
+  });
+
+  it('reads the copy strictly, so a spelled-out figure needs backing too', () => {
+    expect(raws('Cuts review time in half', ['Ship faster'])).toEqual(['50%']);
+    expect(raws('Two teams on the free plan', ['Free $0 2 teams 250 issues'])).toEqual([]);
+    expect(raws('Ten teams on the free plan', ['Free $0 2 teams'])).toEqual(['10']);
+  });
+
+  it('leaves the brand name out unless the name reads as a statistic', () => {
+    expect(raws('1Password keeps secrets', [], '1Password')).toEqual([]);
+    expect(raws('1Password keeps secrets', [])).toEqual(['1']);
+    expect(raws('100% Pure is a cosmetics brand', [], '100% Pure')).toEqual(['100%']);
+  });
+
+  it('states nothing when the copy has no figure', () => {
+    expect(raws('Linear plans and builds products', [])).toEqual([]);
   });
 });
