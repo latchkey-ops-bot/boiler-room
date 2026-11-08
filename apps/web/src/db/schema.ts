@@ -1,5 +1,13 @@
 import { sql } from 'drizzle-orm';
-import { check, index, integer, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 import {
   CREW,
   EVENT_KINDS,
@@ -195,3 +203,159 @@ export type FilmEvent = typeof filmEvents.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
 export type Revision = typeof revisions.$inferSelect;
+
+// ---------- Real films: one Naive computer per film ----------
+//
+// A real film's run lives here. The runner on the film's computer fills these tables through the
+// signed callbacks in `/api/runner/v1/`; `NaivePipeline` reads them. No page poll calls Naive.
+
+/** One run per film: its state, its computer, its costs. `id` is `films.pipeline_run_id`. */
+export const filmRuns = sqliteTable(
+  'film_runs',
+  {
+    id: text('id').primaryKey(),
+    filmId: text('film_id')
+      .notNull()
+      .references(() => films.id, { onDelete: 'cascade' }),
+    /** `customer` pauses for the script approval. `sample` (a GTM film) runs straight through. */
+    mode: text('mode', { enum: ['customer', 'sample'] }).notNull(),
+    /** See `RUN_STATES` in src/server/runner/states.ts. */
+    state: text('state').notNull(),
+    /** The phase the next or current launch runs: `script`, `render`, or `all` for a sample. */
+    phase: text('phase', { enum: ['script', 'render', 'all'] }).notNull(),
+    stage: text('stage', { enum: STAGES }).notNull().default('research'),
+    status: text('status', { enum: FILM_STATUSES }).notNull().default('queued'),
+    scriptVersion: integer('script_version').notNull().default(0),
+    /** The campaign the runner uploaded, after it passed `validateCampaign`. */
+    campaignJson: text('campaign_json'),
+    /** The customer's approval of `script_version`, as the runner's instructions carry it. */
+    approvalJson: text('approval_json'),
+    reviseJson: text('revise_json'),
+    computerId: text('computer_id'),
+    /** `none`, `creating`, `running`, `paused` or `destroyed`. */
+    computerState: text('computer_state').notNull().default('none'),
+    computerCreatedAt: integer('computer_created_at'),
+    /** When the current running stretch began, for the compute cost. Null while not running. */
+    runningSince: integer('running_since'),
+    /** The 10-minute block the compute cost has been counted up to, as an epoch ms. */
+    billedUntil: integer('billed_until'),
+    baseSnapshotId: text('base_snapshot_id').notNull(),
+    /** A snapshot of the film's computer, taken at the approval gate. */
+    checkpointId: text('checkpoint_id'),
+    runnerCommit: text('runner_commit'),
+    heartbeatAt: integer('heartbeat_at'),
+    launchedAt: integer('launched_at'),
+    phaseStartedAt: integer('phase_started_at'),
+    phaseDeadlineAt: integer('phase_deadline_at'),
+    /** When the run reached `awaiting_approval`. */
+    awaitingSince: integer('awaiting_since'),
+    launchAttempts: integer('launch_attempts').notNull().default(0),
+    /** The runner reported its exit for the current launch. */
+    exitedAt: integer('exited_at'),
+    /** Held by the one caller running `advance()` for this run. */
+    leaseUntil: integer('lease_until'),
+    costCrewMicroUsd: integer('cost_crew_micro_usd').notNull().default(0),
+    costComputeMicroUsd: integer('cost_compute_micro_usd').notNull().default(0),
+    costCapMicroUsd: integer('cost_cap_micro_usd').notNull(),
+    stopRequestedAt: integer('stop_requested_at'),
+    stopReason: text('stop_reason'),
+    /** The last stage the film was in before it failed, for the tracker. */
+    failedStage: text('failed_stage', { enum: STAGES }),
+    failureCode: text('failure_code'),
+    failureMessage: text('failure_message'),
+    /** Last thing `advance()` could not do, such as `resume_refused`. For the logs and ops. */
+    lastError: text('last_error'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+    /** Set once the computer and the checkpoint are gone. */
+    endedAt: integer('ended_at'),
+    deliveredAt: integer('delivered_at'),
+  },
+  (t) => [
+    uniqueIndex('film_runs_film_unique').on(t.filmId),
+    index('film_runs_state_idx').on(t.state, t.updatedAt),
+  ],
+);
+
+/**
+ * What the runner reported, and what the website wrote about the run. A row with `feed_seq` is on
+ * the film's decisions feed, in that order. `(run_id, source, source_seq)` makes a resent batch a
+ * no-op.
+ */
+export const runEvents = sqliteTable(
+  'run_events',
+  {
+    runId: text('run_id')
+      .notNull()
+      .references(() => filmRuns.id, { onDelete: 'cascade' }),
+    /** `runner` or `web`. */
+    source: text('source', { enum: ['runner', 'web'] }).notNull(),
+    sourceSeq: integer('source_seq').notNull(),
+    feedSeq: integer('feed_seq'),
+    filmId: text('film_id').notNull(),
+    at: integer('at').notNull(),
+    type: text('type').notNull(),
+    agent: text('agent', { enum: CREW }),
+    kind: text('kind', { enum: EVENT_KINDS }),
+    stage: text('stage', { enum: STAGES }),
+    status: text('status', { enum: FILM_STATUSES }),
+    message: text('message'),
+    dataJson: text('data_json'),
+    receivedAt: integer('received_at').notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.runId, t.source, t.sourceSeq] }),
+    index('run_events_feed_idx').on(t.runId, t.feedSeq),
+  ],
+);
+
+/** Every file the runner uploaded. The website picks each R2 key; the runner never names one. */
+export const runFiles = sqliteTable(
+  'run_files',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => filmRuns.id, { onDelete: 'cascade' }),
+    filmId: text('film_id').notNull(),
+    kind: text('kind').notNull(),
+    scriptVersion: integer('script_version').notNull(),
+    variantKey: text('variant_key'),
+    format: text('format', { enum: FORMATS }),
+    name: text('name').notNull(),
+    r2Key: text('r2_key').notNull(),
+    contentType: text('content_type').notNull(),
+    bytes: integer('bytes').notNull(),
+    sha256: text('sha256').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('run_files_r2_key_unique').on(t.r2Key),
+    index('run_files_run_idx').on(t.runId, t.kind),
+  ],
+);
+
+/** Every runner request's nonce, kept 15 minutes, so a captured request cannot be sent again. */
+export const runnerNonces = sqliteTable(
+  'runner_nonces',
+  {
+    nonce: text('nonce').primaryKey(),
+    filmId: text('film_id').notNull(),
+    seenAt: integer('seen_at').notNull(),
+  },
+  (t) => [index('runner_nonces_seen_idx').on(t.seenAt)],
+);
+
+/** One row, `global`: the kill switch the balance tripwire throws. No row reads as not halted. */
+export const runnerControl = sqliteTable('runner_control', {
+  id: text('id').primaryKey(),
+  halted: integer('halted', { mode: 'boolean' }).notNull().default(false),
+  haltedReason: text('halted_reason'),
+  balanceBaselineMicroUsd: integer('balance_baseline_micro_usd'),
+  baselineAt: integer('baseline_at'),
+  updatedAt: integer('updated_at').notNull(),
+});
+
+export type FilmRun = typeof filmRuns.$inferSelect;
+export type RunEvent = typeof runEvents.$inferSelect;
+export type RunFile = typeof runFiles.$inferSelect;

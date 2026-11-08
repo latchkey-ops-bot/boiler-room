@@ -29,6 +29,13 @@
       "when": 1794107716880,
       "tag": "0003_claim_confirmations",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794120091358,
+      "tag": "0004_film_runs",
+      "breakpoints": true
     }
   ]
 }
