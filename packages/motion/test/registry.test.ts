@@ -10,8 +10,14 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw four of the scene types in the schema registry, under its names', () => {
-    expect(IMPLEMENTED_SCENE_TYPES).toEqual(['word-slam', 'site-hero', 'feature-card', 'end-card']);
+  it('draw five of the scene types in the schema registry, under its names', () => {
+    expect(IMPLEMENTED_SCENE_TYPES).toEqual([
+      'word-slam',
+      'site-hero',
+      'feature-card',
+      'end-card',
+      'proof-bars',
+    ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
       expect(Object.hasOwn(sceneRegistry, type)).toBe(true);
   });
@@ -77,6 +83,20 @@ describe('scene templates', () => {
         ground: 'base plate',
         anchors: [{ id: 'logo', entry: { axis: 'y', sign: -1, v: 36 }, exit: undefined }],
       },
+      'proof-bars': {
+        kind: 'proof',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+          { id: 'bar-0', entry: undefined, exit: undefined },
+          { id: 'bar-1', entry: undefined, exit: undefined },
+          { id: 'bar-2', entry: undefined, exit: undefined },
+        ],
+      },
     });
   });
 
@@ -95,8 +115,11 @@ describe('validateForRender', () => {
   });
 
   it('refuses a scene type the library specifies but no template draws, by name', async () => {
+    const unbuilt = Object.keys(sceneRegistry).find(
+      (type) => !IMPLEMENTED_SCENE_TYPES.includes(type),
+    ) as string;
     const campaign = novaCopy();
-    at(campaign.scenes, 1).type = 'proof-bars';
+    at(campaign.scenes, 1).type = unbuilt;
     const { ok, issues } = await validateForRender(campaign);
     expect(ok).toBe(false);
     expect(issues).toEqual([
@@ -104,9 +127,8 @@ describe('validateForRender', () => {
         code: 'SCENE_TYPE_UNBUILT',
         severity: 'error',
         path: 'scenes[1].type',
-        message:
-          'Scene type "proof-bars" is in the scene library, but motion has no template for it yet, so it cannot be rendered.',
-        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
+        message: `Scene type "${unbuilt}" is in the scene library, but motion has no template for it yet, so it cannot be rendered.`,
+        fix: `Change scenes[1].type to a type motion renders: ${IMPLEMENTED_SCENE_TYPES.join(', ')}. Or keep it and render once the ${unbuilt} template is built.`,
       },
     ]);
   });
