@@ -12,7 +12,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "render": "pnpm --filter @boiler-room/render render"
+    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

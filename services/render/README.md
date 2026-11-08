@@ -69,6 +69,12 @@ second press says it is still cleaning up; only a third leaves without waiting, 
 closed pipe or lost parent never does. One press reaches the process several times under `pnpm`
 and `tsx`, and those copies count once.
 
+pnpm does not pass a signal on to a script's process: it ends its own child. So `pnpm render`
+runs `tsx` in place of the script's shell (`exec`), with no second `pnpm` in between, and that
+child is the CLI's `tsx`, which passes the signal to the CLI. A supervisor that stops the run by
+the pid it spawned therefore stops the render, and `pnpm` exits when the cleanup has finished. To
+stop a run you did not spawn, signal its process group: `kill -TERM -- -<pgid>`.
+
 ## Naive
 
 | Step       | How                                                                                                                                                                                                                   |

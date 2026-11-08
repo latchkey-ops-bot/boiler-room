@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "render": "tsx src/cli.ts",
+    "render": "exec tsx src/cli.ts",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },
