@@ -44,6 +44,9 @@ the change that fixes it.
   replaced with a readable mix, an accent that would vanish falls back to primary, and a logo that
   is missing, too small, the wrong shape, animated, unreadable or mostly invisible on the
   background is replaced by the brand name set in the display font.
+- Copy reads in its own direction. A block takes the direction of its first letter, and a kinetic
+  headline, which sets each word as a box of its own, marks each box with its word's direction, so
+  Hebrew and Arabic read right to left and a Latin name inside them left to right.
 - Layouts are computed from the composition size, never from a format name, and a browser frame is
   always sized to show its whole image. Text is fitted to its box with `@remotion/layout-utils`
   and is only ever made smaller to fit.
@@ -85,6 +88,7 @@ pnpm studio                  # Remotion Studio, with the examples as the public 
 pnpm stills                  # stills of both examples in every format, into out/stills
 pnpm render -- --campaign nova.campaign.json --format 9:16
 pnpm determinism             # renders sampled frames three times: in order, shuffled, in parallel
+pnpm text-direction          # checks that Hebrew and Arabic headlines read right to left
 ```
 
 Routine renders are silent.

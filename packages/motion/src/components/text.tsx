@@ -5,6 +5,7 @@ import { useBrand } from '../brand/brand-context.tsx';
 import type { BrandTheme } from '../brand/theme.ts';
 import { type PresenceWindow, presence, springAt } from '../core/presence.ts';
 import { staggerDelays } from '../core/stagger.ts';
+import { textDirection, wordMarks } from '../layout/bidi.ts';
 import { type FitResult, fitBlock } from '../layout/fit.ts';
 import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
@@ -151,37 +152,53 @@ export const WordReveal = ({
   const style = useTextStyle(spec, fit);
   const delays = staggerDelays(text.split(' ').length, fps, { each: stagger.word });
   const { exit } = presence(frame, window);
+  // Each word is a box, which the line orders by the line's direction alone, so the line reads in
+  // the copy's direction and each box carries marks of its own: Hebrew stays right to left, and a
+  // Latin name inside it left to right.
+  const direction = textDirection(text);
   let word = -1;
   return (
-    <div style={{ ...style, opacity: 1 - exit }}>
-      {fit.lines.map((line) => (
-        <div key={line} style={{ whiteSpace: 'pre' }}>
-          {line.split(' ').map((token, index) => {
-            word += 1;
-            const landed = springAt(frame, fps, window.enterAt + (delays[word] ?? 0), springs.word);
-            return (
-              <span key={`${token}-${word}`}>
-                {index > 0 ? ' ' : ''}
-                <span
-                  style={{
-                    clipPath: 'inset(-25% -12% -14% -12%)',
-                    display: 'inline-block',
-                  }}
-                >
+    <div style={{ ...style, direction, opacity: 1 - exit }}>
+      {fit.lines.map((line) => {
+        const tokens = line.split(' ');
+        const marks = wordMarks(tokens, direction);
+        return (
+          <div key={line} style={{ whiteSpace: 'pre' }}>
+            {tokens.map((token, index) => {
+              word += 1;
+              const landed = springAt(
+                frame,
+                fps,
+                window.enterAt + (delays[word] ?? 0),
+                springs.word,
+              );
+              const mark = marks[index] ?? '';
+              return (
+                <span key={`${token}-${word}`}>
+                  {index > 0 ? ' ' : ''}
+                  {mark}
                   <span
                     style={{
+                      clipPath: 'inset(-25% -12% -14% -12%)',
                       display: 'inline-block',
-                      transform: `translateY(${(1 - landed) * 120}%)`,
                     }}
                   >
-                    {token}
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        transform: `translateY(${(1 - landed) * 120}%)`,
+                      }}
+                    >
+                      {token}
+                    </span>
                   </span>
+                  {mark}
                 </span>
-              </span>
-            );
-          })}
-        </div>
-      ))}
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 };
@@ -225,8 +242,11 @@ export const RiseText = ({
   delay?: number;
 }) => {
   const style = useTextStyle(spec, fit);
+  // Plain text is ordered by the browser, but its paragraph still needs the copy's direction, or
+  // the punctuation at the end of a Hebrew or Arabic line sits at the wrong end.
+  const direction = textDirection(fit.lines.join(' '));
   return (
-    <RiseIn window={window} delay={delay ?? 0} style={style}>
+    <RiseIn window={window} delay={delay ?? 0} style={{ ...style, direction }}>
       <Lines lines={fit.lines} />
     </RiseIn>
   );

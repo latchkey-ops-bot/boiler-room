@@ -12,7 +12,8 @@
     "studio": "remotion studio src/root.tsx --public-dir ../schema/examples",
     "stills": "node scripts/stills.ts",
     "render": "node scripts/render.ts",
-    "determinism": "node scripts/determinism.ts"
+    "determinism": "node scripts/determinism.ts",
+    "text-direction": "node scripts/text-direction.ts"
   },
   "dependencies": {
     "@boiler-room/schema": "workspace:*",
