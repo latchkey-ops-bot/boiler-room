@@ -18,13 +18,14 @@ export const exampleProbe = (overrides: Record<string, LogoProbe> = {}): MediaPr
     const match = Object.keys(overrides).find((key) => url.endsWith(key));
     if (match) return overrides[match] as LogoProbe;
     if (url.endsWith('dashboard.png') || url.endsWith('editor.png')) {
-      return { loaded: true, width: 2880, height: 1800 };
+      return { loaded: true, width: 2880, height: 1800, animated: false };
     }
     if (url.endsWith('logo.svg')) {
       return {
         loaded: true,
         width: 373,
         height: 112,
+        animated: false,
         coverage: 0.4,
         palette: [
           { color: '#7799FF', share: 0.55 },
@@ -38,6 +39,7 @@ export const exampleProbe = (overrides: Record<string, LogoProbe> = {}): MediaPr
         loaded: true,
         width: 32,
         height: 32,
+        animated: false,
         coverage: 0.8,
         palette: [{ color: '#883322', share: 1 }],
       };

@@ -12,13 +12,25 @@ export interface LogoProbe {
   palette?: readonly { color: string; share: number }[];
   /** How much of it is not transparent, from 0 to 1, when the browser let it be read. */
   coverage?: number;
+  /**
+   * Whether the file has more than one frame, or animates as an SVG. Undefined when the browser
+   * would not let its bytes be read, so it cannot be told.
+   */
+  animated?: boolean;
 }
 
 export type ResolvedLogo =
   | { kind: 'image'; src: string; aspect: number }
   | { kind: 'wordmark'; reason: LogoRejection };
 
-export type LogoRejection = 'missing' | 'too-small' | 'wrong-shape' | 'blank' | 'invisible';
+export type LogoRejection =
+  | 'missing'
+  | 'too-small'
+  | 'wrong-shape'
+  | 'animated'
+  | 'blank'
+  | 'invisible'
+  | 'unreadable';
 
 /** A raster below this is a favicon, which falls apart at film size. */
 const MIN_LONG_EDGE = 48;
@@ -40,15 +52,19 @@ export const faintShare = (
 
 /** Why this logo cannot be used on this background, or undefined when it can. */
 export function rejectLogo(probe: LogoProbe, background: string): LogoRejection | undefined {
-  const { loaded, width = 0, height = 0, palette, coverage } = probe;
+  const { loaded, width = 0, height = 0, palette, coverage, animated } = probe;
   if (!loaded) return 'missing';
   if (width > 0 && height > 0) {
     if (Math.max(width, height) < MIN_LONG_EDGE) return 'too-small';
     const aspect = width / height;
     if (aspect > MAX_ASPECT || aspect < 1 / MAX_ASPECT) return 'wrong-shape';
   }
+  // The mark is in every scene, so a logo that moves on the browser's clock would flicker in all.
+  if (animated) return 'animated';
   if (coverage !== undefined && coverage < MIN_COVERAGE) return 'blank';
   if (palette && faintShare(palette, background) > MAX_FAINT_SHARE) return 'invisible';
+  // A file whose bytes the browser hides could be animated, and nothing here could tell.
+  if (animated === undefined) return 'unreadable';
   return undefined;
 }
 

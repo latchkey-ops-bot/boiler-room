@@ -117,4 +117,33 @@ describe('prepareFilm', () => {
       ),
     ).rejects.toThrow(/IMAGE_MISSING at assets\.dashboard-shot\.src/);
   });
+
+  it('refuses an animated product image, which would play on the browser clock', async () => {
+    const animated = { loaded: true, width: 2880, height: 1800, animated: true };
+    await expect(
+      prepareFilm(
+        { campaign: novaCopy(), format: '16:9' },
+        exampleProbe({ 'dashboard.png': animated }),
+      ),
+    ).rejects.toThrow(/IMAGE_ANIMATED at assets\.dashboard-shot\.src/);
+  });
+
+  it('refuses a product image whose bytes cannot be read to check it is still', async () => {
+    const unread = { loaded: true, width: 2880, height: 1800 };
+    await expect(
+      prepareFilm(
+        { campaign: novaCopy(), format: '16:9' },
+        exampleProbe({ 'dashboard.png': unread }),
+      ),
+    ).rejects.toThrow(/IMAGE_UNREADABLE at assets\.dashboard-shot\.src/);
+  });
+
+  it('sets the name as a wordmark when the logo animates', async () => {
+    const logo = { loaded: true, width: 373, height: 112, coverage: 0.4, animated: true };
+    const plan = await prepareFilm(
+      { campaign: novaCopy(), format: '16:9' },
+      exampleProbe({ 'logo.svg': logo }),
+    );
+    expect(plan.logo).toEqual({ kind: 'wordmark', reason: 'animated' });
+  });
 });

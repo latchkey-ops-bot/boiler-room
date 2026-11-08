@@ -1,3 +1,4 @@
+import { isAnimated } from './animation.ts';
 import type { LogoProbe } from './logo.ts';
 
 const SAMPLE_SIZE = 48;
@@ -51,15 +52,28 @@ function readPixels(image: HTMLImageElement): Pick<LogoProbe, 'coverage' | 'pale
   }
 }
 
-/** Loads an image to learn its size and, where it is allowed, what it looks like. */
+/** Whether the file animates, from its bytes. Undefined when the host will not let them be read. */
+async function readAnimated(url: string): Promise<boolean | undefined> {
+  try {
+    const response = await fetch(url);
+    if (!response.ok) return undefined;
+    return isAnimated(new Uint8Array(await response.arrayBuffer()));
+  } catch {
+    return undefined;
+  }
+}
+
+/** Loads an image to learn its size and, where it is allowed, what it looks like and if it moves. */
 export async function probeImage(url: string): Promise<LogoProbe> {
   const readable = await loadImage(url, true);
   const image = readable ?? (await loadImage(url, false));
   if (!image) return { loaded: false };
+  const animated = readable ? await readAnimated(url) : undefined;
   return {
     loaded: true,
     width: image.naturalWidth,
     height: image.naturalHeight,
+    ...(animated === undefined ? {} : { animated }),
     ...(readable ? readPixels(readable) : {}),
   };
 }

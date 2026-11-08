@@ -63,24 +63,39 @@ export async function prepareFilm(
     ...new Set(campaign.scenes.flatMap((scene) => screenImageId(scene, campaign) ?? [])),
   ];
   const imageSizes: Record<string, ImageSize> = {};
-  const missing: FilmIssue[] = [];
+  const unusable: FilmIssue[] = [];
   for (const id of imageIds) {
     const asset = campaign.assets[id];
     if (!asset) continue;
     const seen = await probe.image(assetUrl(asset.src));
-    if (seen.loaded && seen.width && seen.height) {
-      imageSizes[id] = { width: seen.width, height: seen.height };
-    } else {
-      missing.push({
-        code: 'IMAGE_MISSING',
-        severity: 'error',
-        path: `assets.${id}.src`,
-        message: `Image "${id}" could not be loaded from "${asset.src}".`,
-        fix: `Provide the file at "${asset.src}", or change assets.${id}.src to a file that exists.`,
-      });
+    const path = `assets.${id}.src`;
+    const reject = (code: FilmIssue['code'], message: string, fix: string) =>
+      unusable.push({ code, severity: 'error', path, message, fix });
+    if (!seen.loaded || !seen.width || !seen.height) {
+      reject(
+        'IMAGE_MISSING',
+        `Image "${id}" could not be loaded from "${asset.src}".`,
+        `Provide the file at "${asset.src}", or change ${path} to a file that exists.`,
+      );
+      continue;
     }
+    if (seen.animated) {
+      // An animated image plays on the browser's clock, so tabs and chunks would show other frames.
+      reject(
+        'IMAGE_ANIMATED',
+        `Image "${id}" at "${asset.src}" is animated, and an animated image plays on the browser's clock rather than the film's, so two renders of one frame would differ.`,
+        `Change ${path} to a still image, such as one frame of it saved as a PNG.`,
+      );
+    } else if (seen.animated === undefined) {
+      reject(
+        'IMAGE_UNREADABLE',
+        `Image "${id}" at "${asset.src}" loaded, but its host does not let its bytes be read, so it cannot be checked to be a still image.`,
+        `Save the file beside the campaign and point ${path} at it, or serve it with an Access-Control-Allow-Origin header.`,
+      );
+    }
+    imageSizes[id] = { width: seen.width, height: seen.height };
   }
-  if (missing.length > 0) throw new FilmRejected('loading the scene images', missing);
+  if (unusable.length > 0) throw new FilmRejected('loading the scene images', unusable);
 
   const logoAsset = campaign.assets[campaign.brand.logoAssetId];
   const logoSrc = logoAsset?.src ?? '';

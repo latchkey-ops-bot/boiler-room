@@ -135,6 +135,7 @@ describe('logo', () => {
       loaded: true,
       width: 373,
       height: 112,
+      animated: false,
       coverage: 0.4,
       palette: [
         { color: '#7799FF', share: 0.6 },
@@ -150,6 +151,7 @@ describe('logo', () => {
       loaded: true,
       width: 373,
       height: 112,
+      animated: false,
       palette: [
         { color: '#7799FF', share: 0.9 },
         { color: '#0B1020', share: 0.1 },
@@ -163,6 +165,7 @@ describe('logo', () => {
       loaded: true,
       width: 400,
       height: 100,
+      animated: false,
       coverage: 0.3,
       palette: [{ color: '#F4F6FB', share: 1 }],
     };
@@ -173,7 +176,15 @@ describe('logo', () => {
     });
   });
 
-  it('uses a logo whose pixels the browser would not let it read', () => {
-    expect(rejectLogo({ loaded: true, width: 400, height: 100 }, background)).toBeUndefined();
+  it('rejects a logo that animates, since it would play on the browser clock', () => {
+    const probe = { loaded: true, width: 400, height: 100, animated: true };
+    expect(rejectLogo(probe, background)).toBe('animated');
+  });
+
+  it('rejects a logo whose bytes the browser would not let it read, since it cannot be checked', () => {
+    expect(rejectLogo({ loaded: true, width: 400, height: 100 }, background)).toBe('unreadable');
+    expect(
+      rejectLogo({ loaded: true, width: 400, height: 100, animated: false }, background),
+    ).toBeUndefined();
   });
 });

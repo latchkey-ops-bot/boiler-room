@@ -182,14 +182,16 @@ try {
     try {
       selected = await selectFilm(serveUrl, { campaign, format }, browser);
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      // Remotion keeps only the first line of an error from the page in `message`; the issues
+      // FilmRejected lists follow it in `stack`.
+      const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
       if (expect !== 'identical' && message.includes(expect.rejectedWith)) {
         console.log(`${name}: refused with ${expect.rejectedWith}, as it must be`);
         continue;
       }
       failures += 1;
       console.error(
-        `FAILED: ${name} could not be selected: ${message.split('\n').slice(0, 6).join('\n')}`,
+        `FAILED: ${name} could not be selected: ${message.split('\n').slice(0, 12).join('\n')}`,
       );
       continue;
     }
