@@ -1,0 +1,335 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-proof",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 22.2,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": {
+        "family": "Sora",
+        "source": "font-display"
+      },
+      "body": {
+        "family": "Inter",
+        "source": "font-body"
+      }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [
+    {
+      "id": "cache-hits",
+      "text": "Nova serves 92% of builds from cache",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Nova serves 92% of builds from its cache, against 41% on a self-hosted runner.",
+      "status": "approved"
+    },
+    {
+      "id": "build-minutes",
+      "text": "A median build takes 9 min on Nova",
+      "sourceUrl": "https://nova.example.com/benchmarks",
+      "quote": "A median build takes 9 min on Nova, 26 min on hosted CI and 40 min on a laptop.",
+      "status": "approved"
+    },
+    {
+      "id": "flaky-retries",
+      "text": "Nova retries away 78% of flaky failures",
+      "sourceUrl": "https://nova.example.com/docs/retries",
+      "quote": "Automatic retries clear 78% of flaky test failures before anyone is paged.",
+      "status": "approved"
+    },
+    {
+      "id": "build-times",
+      "text": "Nova cuts build times by 40%",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Teams on Nova cut build times by 40% in their first month.",
+      "status": "approved"
+    },
+    {
+      "id": "deploy-rate",
+      "text": "Customers deploy 3x more often",
+      "sourceUrl": "https://nova.example.com/customers",
+      "quote": "Customers deploy 3x more often after switching to Nova, against the 1x of their old pipeline.",
+      "status": "approved"
+    }
+  ],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Proof, not promises.",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Proof, not promises.",
+        "claimIds": []
+      },
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "proof-cache",
+      "type": "proof-bars",
+      "start": 3,
+      "end": 6.2,
+      "props": {
+        "accent": {
+          "textId": "proof-cache-headline",
+          "from": 0,
+          "to": 1
+        }
+      },
+      "text": [
+        {
+          "id": "proof-cache-headline",
+          "role": "headline",
+          "value": "92% cached",
+          "claimIds": ["cache-hits"]
+        },
+        {
+          "id": "proof-cache-nova",
+          "role": "label",
+          "value": "Nova: 92%",
+          "claimIds": ["cache-hits"]
+        },
+        {
+          "id": "proof-cache-self",
+          "role": "label",
+          "value": "Self-hosted: 41%",
+          "claimIds": ["cache-hits"]
+        },
+        {
+          "id": "proof-cache-verdict",
+          "role": "subhead",
+          "value": "Less waiting",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Nova serves 92% of builds from its cache.",
+        "claimIds": ["cache-hits"]
+      },
+      "assetIds": [],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "proof-minutes",
+      "type": "proof-bars",
+      "start": 6.2,
+      "end": 9.4,
+      "props": {},
+      "text": [
+        {
+          "id": "proof-minutes-headline",
+          "role": "headline",
+          "value": "9 min builds",
+          "claimIds": ["build-minutes"]
+        },
+        {
+          "id": "proof-minutes-nova",
+          "role": "label",
+          "value": "Nova: 9 min",
+          "claimIds": ["build-minutes"]
+        },
+        {
+          "id": "proof-minutes-hosted",
+          "role": "label",
+          "value": "Hosted CI: 26 min",
+          "claimIds": ["build-minutes"]
+        },
+        {
+          "id": "proof-minutes-laptop",
+          "role": "label",
+          "value": "Laptop: 40 min",
+          "claimIds": ["build-minutes"]
+        },
+        {
+          "id": "proof-minutes-verdict",
+          "role": "subhead",
+          "value": "Ship sooner",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "A median build takes 9 minutes on Nova.",
+        "claimIds": ["build-minutes"]
+      },
+      "assetIds": [],
+      "transitionOut": "t5"
+    },
+    {
+      "id": "proof-flaky",
+      "type": "proof-bars",
+      "start": 9.4,
+      "end": 12.6,
+      "props": {},
+      "text": [
+        {
+          "id": "proof-flaky-headline",
+          "role": "headline",
+          "value": "78% retried",
+          "claimIds": ["flaky-retries"]
+        },
+        {
+          "id": "proof-flaky-retried",
+          "role": "label",
+          "value": "Retried away: 78%",
+          "claimIds": ["flaky-retries"]
+        },
+        {
+          "id": "proof-flaky-verdict",
+          "role": "subhead",
+          "value": "Fewer pages",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Retries clear 78% of flaky failures.",
+        "claimIds": ["flaky-retries"]
+      },
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "speed",
+      "type": "feature-card",
+      "start": 12.6,
+      "end": 15,
+      "props": {},
+      "text": [
+        {
+          "id": "speed-headline",
+          "role": "headline",
+          "value": "40% faster builds",
+          "claimIds": ["build-times"]
+        },
+        {
+          "id": "speed-cause",
+          "role": "label",
+          "value": "Every commit",
+          "claimIds": []
+        },
+        {
+          "id": "speed-effect",
+          "role": "label",
+          "value": "Built sooner",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Teams cut build times by 40%.",
+        "claimIds": ["build-times"]
+      },
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "proof-deploys",
+      "type": "proof-bars",
+      "start": 15,
+      "end": 18.2,
+      "props": {},
+      "text": [
+        {
+          "id": "proof-deploys-headline",
+          "role": "headline",
+          "value": "3x deploys",
+          "claimIds": ["deploy-rate"]
+        },
+        {
+          "id": "proof-deploys-nova",
+          "role": "label",
+          "value": "With Nova: 3x",
+          "claimIds": ["deploy-rate"]
+        },
+        {
+          "id": "proof-deploys-before",
+          "role": "label",
+          "value": "Old pipeline: 1x",
+          "claimIds": ["deploy-rate"]
+        },
+        {
+          "id": "proof-deploys-verdict",
+          "role": "subhead",
+          "value": "Ship daily",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Customers deploy 3x more often.",
+        "claimIds": ["deploy-rate"]
+      },
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 18.2,
+      "end": 22.2,
+      "props": {},
+      "text": [
+        {
+          "id": "close-cta",
+          "role": "cta",
+          "value": "Start free",
+          "claimIds": []
+        },
+        {
+          "id": "close-address",
+          "role": "label",
+          "value": "nova.example.com",
+          "claimIds": []
+        }
+      ],
+      "voiceover": {
+        "text": "Start free today.",
+        "claimIds": []
+      },
+      "assetIds": ["logo"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": []
+  }
+}

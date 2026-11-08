@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   type CandidateLink,
   classifyLink,
+  duplicateOf,
   judgeProbe,
   MAX_PAGES,
+  needsRecapture,
   type ProbeResponse,
   parseRobots,
   robotsAllow,
@@ -23,6 +25,8 @@ describe('classifyLink', () => {
     ['https://site.example.org/how-it-works', '', 'demo'],
     ['https://site.example.org/site.example.org', 'View live demo', 'demo'],
     ['https://site.example.org/contact', 'Book a demo', 'contact'],
+    ['https://site.example.org/contact/demo', '', 'contact'],
+    ['https://site.example.org/demo', '', 'demo'],
     ['https://site.example.org/sales', 'Talk to sales', 'contact'],
     ['https://site.example.org/login', '', 'login'],
     ['https://app.site.example.org/', 'Open app', 'login'],
@@ -65,6 +69,9 @@ describe('judgeProbe', () => {
       'sign-in',
     );
     expect(judge(ok({ final_url: 'https://other.example/demo' })).reason).toContain('off the site');
+    expect(judge(ok({ final_url: 'https://site.example.org/talk-to-sales' })).reason).toContain(
+      'contact or sales',
+    );
     expect(judge(ok({ content_type: 'application/pdf' })).found).toBe(false);
   });
 
@@ -74,7 +81,94 @@ describe('judgeProbe', () => {
       found: false,
       reason: expect.stringContaining('soft 404'),
     });
-    expect(judge(ok({ title: 'Site', length: 20000 }), shell).found).toBe(true);
+    expect(
+      judgeProbe(
+        '/demo',
+        'https://site.example.org/demo',
+        ok({ title: 'Site', length: 20000 }),
+        shell,
+        HOME,
+        true,
+      ).found,
+    ).toBe(true);
+  });
+
+  // A site that serves its users' pages at /<username> answered /product with a private person's
+  // booking page, which was captured and screenshotted as the product.
+  it('rejects a page that is neither linked from the site nor named for what was probed', () => {
+    const person = ok({
+      final_url: 'https://site.example.org/product',
+      title: 'Jane Roe | Site',
+      heading: 'Jane Roe',
+    });
+    const probe = (response: ProbeResponse, linked = false) =>
+      judgeProbe('/product', 'https://site.example.org/product', response, missing, HOME, linked);
+    expect(probe(person)).toMatchObject({ found: false, reason: expect.stringContaining('user') });
+    expect(probe(person, true).found).toBe(true);
+    expect(
+      probe(ok({ final_url: 'https://site.example.org/product', title: 'Product tour | Site' }))
+        .found,
+    ).toBe(true);
+    expect(
+      probe(
+        ok({
+          final_url: 'https://site.example.org/product',
+          title: 'Site',
+          heading: 'The product',
+        }),
+      ).found,
+    ).toBe(true);
+    expect(
+      probe(ok({ final_url: 'https://site.example.org/product-analytics', title: 'Site' })).found,
+    ).toBe(true);
+    expect(
+      judgeProbe(
+        '/how-it-works',
+        'https://site.example.org/how-it-works',
+        ok({ final_url: 'https://site.example.org/how-it-works', title: 'How it works' }),
+        missing,
+        HOME,
+      ).found,
+    ).toBe(true);
+  });
+});
+
+describe('duplicateOf', () => {
+  const text = 'Schedule posts without the spreadsheet. '.repeat(10);
+  const home = { finalUrl: 'https://site.example.org/', text };
+
+  // One page served at / and at /homepage cost a page load and two identical screenshots.
+  it('finds a second address of a page by its address after redirects or its visible text', () => {
+    expect(duplicateOf({ finalUrl: 'https://site.example.org/homepage', text }, [home])).toBe(home);
+    expect(duplicateOf({ finalUrl: 'https://site.example.org', text: 'other' }, [home])).toBe(home);
+    expect(
+      duplicateOf({ finalUrl: 'https://site.example.org/pricing', text: `${text} Pricing` }, [
+        home,
+      ]),
+    ).toBeUndefined();
+  });
+
+  it('does not call two short or empty pages the same page', () => {
+    expect(
+      duplicateOf({ finalUrl: 'https://site.example.org/a', text: 'Hi' }, [
+        { finalUrl: 'https://site.example.org/b', text: 'Hi' },
+      ]),
+    ).toBeUndefined();
+  });
+});
+
+describe('needsRecapture', () => {
+  it('marks a failed load and an HTML page that read no text, and nothing else', () => {
+    const page = { error: null, status: 200, content_type: 'text/html', text_chars: 4000 };
+    expect(needsRecapture(page)).toBe(false);
+    expect(needsRecapture({ ...page, text_chars: 0 })).toBe(true);
+    expect(
+      needsRecapture({
+        ...page,
+        error: 'browser.newContext: Target page, context or browser has been closed',
+      }),
+    ).toBe(true);
+    expect(needsRecapture({ ...page, status: 404, text_chars: 0 })).toBe(false);
   });
 });
 
@@ -153,6 +247,26 @@ describe('suggestPages', () => {
     expect(chosen).toContain('/customers');
     expect(chosen).not.toContain('/login');
     expect(chosen).not.toContain('/privacy');
+  });
+
+  // linear.app routes /demo to /demo/team/ENG/active in the browser: the probed address is the
+  // one to capture, so the page discover rendered is loaded at the same address and counted once.
+  it('suggests a rendered probe at the address that was probed', () => {
+    const probe = {
+      path: '/demo',
+      url: 'https://site.example.org/demo',
+      status: 200,
+      final_url: 'https://site.example.org/demo/team/eng/active',
+      content_type: 'text/html',
+      title: 'Engineering',
+      length: 900,
+      found: true,
+      reason: 'rendered in a browser: HTTP 200',
+      rendered: true,
+    };
+    const chosen = suggestPages(HOME, [], [probe]).map((item) => item.url);
+    expect(chosen).toContain('https://site.example.org/demo');
+    expect(chosen).not.toContain('https://site.example.org/demo/team/eng/active');
   });
 
   it('never suggests more than the page limit', () => {

@@ -1,10 +1,10 @@
 import type { NeedUpload, ResearchOutput } from '../researcher/output.ts';
 import { NAIVE_FILE_PREFIX } from '../researcher/output.ts';
-import type { ResolvedFont } from './fonts.ts';
+import { describeSubstitute, type ResolvedFont } from './fonts.ts';
 import type { LogoSource } from './logo.ts';
 import type { LinkKind, ProbeResult } from './pages.ts';
 import type { DerivedColors } from './tokens.ts';
-import type { RawCta, RawLink, RawUiCandidate } from './types.ts';
+import type { RawCta, RawLink, RawUiCandidate, UiGrade } from './types.ts';
 
 /** A file the agent must publish, and the placeholder in the template its `fil_` id replaces. */
 export interface PublishItem {
@@ -20,7 +20,7 @@ export interface Shot {
   label: string;
   mock: boolean;
   /** Product UI candidates this shot shows. */
-  ui: { label: string; mock: boolean }[];
+  ui: { label: string; mock: boolean; grade?: UiGrade }[];
   width: number;
   height: number;
   sourceUrl: string;
@@ -40,6 +40,10 @@ export interface CapturedPage {
   ui: RawUiCandidate[];
   hidden_overlays: number;
   error: string | null;
+  /** True when the load was refused: it left the site or reached a private address. */
+  refused?: boolean;
+  /** Characters of visible text read, so an empty capture is told from a page with no text. */
+  text_chars?: number;
 }
 
 export interface MaterialEntry {
@@ -88,10 +92,34 @@ export const TODO = 'TODO';
 
 export const placeholderFor = (relativePath: string) => `${PLACEHOLDER}${relativePath}`;
 
+/** Pages whose pictures show people and other companies' marks more often than the product. */
+export const PEOPLE_PAGES: ReadonlySet<LinkKind> = new Set([
+  'about',
+  'customers',
+  'careers',
+  'blog',
+]);
+
+/**
+ * Whether a candidate a shot shows is product UI a film can use: a mockup, an interactive demo or
+ * a picture named as a screen, or another large picture on a page about the product. Video,
+ * embeds of video and canvases are not, and nor are pictures on pages about people and customers,
+ * where they are portraits and other companies' logos.
+ */
+export function showsProduct(ui: Shot['ui'][number], kind: LinkKind): boolean {
+  const grade = ui.grade ?? 'image';
+  return grade === 'product' || (grade === 'image' && !PEOPLE_PAGES.has(kind));
+}
+
+/** Pages whose buttons are navigation, not calls to action a film would end on. */
+const NO_CTA_PAGES: ReadonlySet<LinkKind> = new Set(['docs', 'blog', 'legal', 'careers', 'login']);
+
 function productUiStatus(
   manifest: CaptureManifest,
 ): ResearchOutput['brief']['product_ui']['status'] {
-  const seen = manifest.pages.flatMap((page) => page.shots.flatMap((shot) => shot.ui));
+  const seen = manifest.pages.flatMap((page) =>
+    page.shots.flatMap((shot) => shot.ui.filter((ui) => showsProduct(ui, page.kind))),
+  );
   if (seen.some((ui) => !ui.mock)) return 'public';
   if (seen.length > 0) return 'mock-only';
   return manifest.login_links.length > 0 ? 'login-required' : 'none';
@@ -112,13 +140,22 @@ function needs(manifest: CaptureManifest, status: string): NeedUpload[] {
       evidence_url: manifest.site,
     });
   }
-  if (manifest.brand.fonts.some((font) => font.method === 'substitute')) {
+  // Only the fonts a film sets its words in. A stand-in for code text alone is not worth a request.
+  const standIns = manifest.brand.fonts.filter(
+    (font) => font.method === 'substitute' && font.role !== 'mono',
+  );
+  if (standIns.length > 0) {
+    const files = standIns.some(
+      (font) => font.reason === 'unreachable' || font.reason === 'no-file',
+    );
     list.push({
       id: 'brand-fonts',
       kind: 'font',
-      what: 'The brand typefaces. The site uses fonts built into the visitor’s device, so an open font stands in.',
+      what: `The brand typefaces. ${standIns.map(describeSubstitute).join(' ')}`,
       why: 'The film will use the stand-in font, which may not match how the brand is set elsewhere.',
-      request: 'If you have brand fonts, please send the font files or tell us their names.',
+      request: files
+        ? 'Please send the font files the site uses (woff2, woff, ttf or otf), or tell us where to download them.'
+        : 'If you have brand fonts, please send the font files or tell us their names.',
       blocking: false,
       evidence_url: manifest.site,
     });
@@ -139,6 +176,30 @@ function needs(manifest: CaptureManifest, status: string): NeedUpload[] {
     });
   }
   return list;
+}
+
+/**
+ * What the capture checked for public product UI, in plain words for `brief.product_ui.notes`:
+ * every probe and its verdict, and the sign-in links the home page has. It says only what was
+ * checked: sign-in pages are never loaded, so it never says a sign-in does not exist.
+ */
+export function productUiNote(manifest: CaptureManifest): string {
+  const probes = manifest.probes
+    .map(
+      (probe) =>
+        `${probe.path} ${probe.found ? `found${probe.final_url ? ` at ${probe.final_url}` : ''}` : 'not found'}`,
+    )
+    .join(', ');
+  const rendered = manifest.probes.some((probe) => probe.rendered)
+    ? ', judged on the page a browser rendered where the server answers every path alike'
+    : '';
+  const links = [
+    ...new Map(manifest.login_links.map((link) => [link.url, link.text || link.url])),
+  ].slice(0, 4);
+  const signIn = links.length
+    ? `The home page links to sign-in or app pages: ${links.map(([url, text]) => `${text} (${url})`).join(', ')}. Sign-in pages are never loaded, so nothing behind them was seen.`
+    : 'The home page shows no sign-in or app link the capture saw; sign-in pages are never loaded, so whether the product has one was not checked.';
+  return `Probed ${probes}${rendered}. ${signIn}`;
 }
 
 /**
@@ -201,10 +262,13 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
   const seenCtas = new Set<string>();
   const ctas: ResearchOutput['brief']['ctas'] = [];
   for (const page of manifest.pages) {
+    if (NO_CTA_PAGES.has(page.kind)) continue;
     for (const cta of page.ctas) {
       if (!cta.href?.startsWith('http') || seenCtas.has(cta.text.toLowerCase()) || ctas.length >= 8)
         continue;
-      if (cta.placement === 'footer') continue;
+      // A call to action is drawn as a button and says what to do in a few words.
+      if (cta.placement === 'footer' || (!cta.background && !cta.border) || cta.text.length > 40)
+        continue;
       seenCtas.add(cta.text.toLowerCase());
       ctas.push({
         label: cta.text,
@@ -245,19 +309,14 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
       css_variables: colors.cssVariables,
       notes: [
         ...colors.notes,
-        ...brand.fonts
-          .filter((item) => item.method === 'substitute')
-          .map(
-            (item) =>
-              `${item.role} text uses ${item.siteFamily ?? 'system fonts'} on the site, which loads no font file, so ${item.family} stands in.`,
-          ),
-        ...(display ? [] : ['No heading was found, so the display font is the body font.']),
+        ...brand.fonts.filter((item) => item.method === 'substitute').map(describeSubstitute),
+        ...(display ? [] : ['The home page has no heading, so the display font is the body font.']),
       ],
     },
     brief: {
       product_name: brand.name,
-      one_liner: TODO,
-      what_it_is: TODO,
+      one_liner: { text: TODO, claim_ids: [] },
+      what_it_is: { text: TODO, claim_ids: [] },
       audiences: [],
       features: [],
       pricing: null,
@@ -282,9 +341,11 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
         })),
       product_ui: {
         status,
-        notes: TODO,
+        notes: productUiNote(manifest),
         asset_ids: manifest.pages.flatMap((page) =>
-          page.shots.filter((shot) => shot.ui.length > 0).map((shot) => shot.assetId),
+          page.shots
+            .filter((shot) => shot.ui.some((ui) => showsProduct(ui, page.kind)))
+            .map((shot) => shot.assetId),
         ),
       },
     },
@@ -306,30 +367,67 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
   };
 }
 
+export type BrandNameSource = 'declared' | 'title' | 'logo' | 'text' | 'domain';
+
 /**
- * A first guess at the product's name: the site name the page declares, else the part of the title
- * that matches the domain, else the shortest part of the title, else the domain itself.
+ * A first guess at the product's name, and where it came from: the site name the page declares,
+ * else the part of the title that matches the domain, else the logo's alt text, else the shortest
+ * part of the title, else the domain's name as the page text writes it, else the domain's name as
+ * the domain writes it. A name is never recased: a site that only ever writes its name in lower
+ * case keeps it.
  */
-export function guessBrandName(
+export function brandNameGuess(
   meta: Record<string, string>,
   title: string,
   host: string,
   logoAlt = '',
-): string {
+  text = '',
+): { name: string; source: BrandNameSource } {
   const declared = (meta['og:site_name'] ?? meta['application-name'] ?? '').trim();
-  if (declared && declared.length <= 40) return declared;
+  if (declared && declared.length <= 40) return { name: declared, source: 'declared' };
   const label = host.replace(/^www\./, '').split('.')[0] ?? host;
   const segments = title
     .split(/\s+[|–—·:-]\s+/)
     .map((part) => part.trim())
     .filter((part) => part.length > 0 && part.length <= 40);
-  const matching = segments.find((part) =>
-    part.toLowerCase().replace(/\s+/g, '').includes(label.toLowerCase()),
-  );
-  if (matching) return matching;
+  const squash = (part: string) => part.toLowerCase().replace(/\s+/g, '');
+  const matching = segments.find((part) => squash(part).includes(label.toLowerCase()));
+  if (matching) return { name: nameWithin(matching, label), source: 'title' };
   const alt = logoAlt.replace(/\blogo\b/gi, '').trim();
-  if (alt && alt.length <= 40) return alt;
+  if (alt && alt.length <= 40) return { name: alt, source: 'logo' };
   const shortest = [...segments].sort((a, b) => a.length - b.length)[0];
-  if (shortest && shortest.length <= 30) return shortest;
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  if (shortest && shortest.length <= 30) return { name: shortest, source: 'title' };
+  const escaped = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // The name as the page writes it, with the domain's ending when it writes one: "danluu.com".
+  const written = new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?:\\.[a-z]{2,24}(?![\\p{L}\\p{N}]))?(?![\\p{L}\\p{N}])`,
+    'iu',
+  ).exec(text)?.[0];
+  if (written) return { name: written, source: 'text' };
+  return { name: label, source: 'domain' };
+}
+
+/**
+ * A title part without the words before the domain's name: "About danluu.com" is "danluu.com".
+ * Words after it stay, since a name can run on ("Example Domain", "Product Hunt").
+ */
+function nameWithin(part: string, label: string): string {
+  const words = part.split(/\s+/).filter(Boolean);
+  const want = label.toLowerCase();
+  for (let start = words.length - 1; start >= 0; start--) {
+    const span = words.slice(start);
+    if (span.join('').toLowerCase().includes(want)) return span.join(' ');
+  }
+  return part;
+}
+
+/** The name `brandNameGuess` gives. */
+export function guessBrandName(
+  meta: Record<string, string>,
+  title: string,
+  host: string,
+  logoAlt = '',
+  text = '',
+): string {
+  return brandNameGuess(meta, title, host, logoAlt, text).name;
 }

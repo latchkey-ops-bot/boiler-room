@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   appendFileSync,
   existsSync,
@@ -15,8 +15,15 @@ import { researcher } from '../definitions/researcher.ts';
 import { listAll, NAIVE_BASE_URL, type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { syncAgents } from '../sync.ts';
 import { bundleTool, type ToolBundle } from './bundle.ts';
-import { checkProvenance, checkResearch, type GateFailure, withoutClaims } from './gate.ts';
-import { fileIdOf, type ResearchOutput } from './output.ts';
+import {
+  checkProvenance,
+  checkResearch,
+  type GateFailure,
+  prunable,
+  withoutFailures,
+  withStoredTitles,
+} from './gate.ts';
+import { fileIdOf, type ResearchOutput, siteUrlProblem } from './output.ts';
 import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
 import { siteHost } from './text.ts';
 import { type PagesBundle, pagesBundleSchema } from './verify.ts';
@@ -28,11 +35,35 @@ export interface ResearchOptions {
   description?: string;
   budgetUsd?: number;
   maxRepairs: number;
-  keepAgent: boolean;
+  /** Leave the agent's computer running afterwards, to inspect it. By default it is paused. */
+  keepComputer: boolean;
   /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
   drillRepair: boolean;
   outRoot: string;
   definition?: AgentDefinition;
+  /** Extra Naive file ids fetched alongside the capture tool (the injection test's server). */
+  extraFileIds?: readonly string[];
+  /**
+   * Extra numbered steps run after fetch_file and before setup (the injection test), given this
+   * run's folder on the agent's computer, relative to its home, such as `br/lx1a2b3c4d5e6f`.
+   */
+  preSteps?: (runDir: string) => readonly string[];
+  /**
+   * Hosts the capture tool may load although they resolve privately. Only the injection test sets
+   * one, for its fixture on the agent's loopback; it builds and uploads a separate tool file.
+   */
+  allowPrivateHosts?: readonly string[];
+  /**
+   * Runs once after the session has stopped and before the agent's computer is paused, so a caller
+   * can read artefacts off it. Best-effort; errors are swallowed.
+   */
+  onBeforeTeardown?: (ctx: {
+    client: Naive;
+    agentId: string;
+    sessionId: string | undefined;
+    /** This run's folder on the agent's computer, relative to its home. */
+    runDir: string;
+  }) => Promise<void>;
 }
 
 /** Stop reasons after which the agent can simply be asked to carry on. */
@@ -52,13 +83,34 @@ const oneLine = (text: unknown, max: number) => {
   return flat.length > max ? `${flat.slice(0, max)}...` : flat;
 };
 
-/** Files published in the session and capture digests printed in it, read from the event stream. */
+/**
+ * Files published in the session and capture digests printed in it, read from the event stream.
+ * A digest counts only when the capture line names the site this run researches: a line for any
+ * other site is kept apart in `foreign`, so a bundle from another site's capture can never bind.
+ */
 export class EventTracker {
   readonly published = new Map<string, string>();
   readonly digests = new Set<string>();
+  /** Digests printed for another site, with the site they name. Never trusted. */
+  readonly foreign = new Map<string, string>();
   /** Accepted submit_output calls, so a new submission can be told from the session's last one. */
   submissions = 0;
+  /**
+   * The latest accepted submission, read from the `structured_output` of the `session.idle` event
+   * that ends its turn. `sessions.get` can still answer the previous turn's `structured_output` just
+   * after a turn ends, so the result is never read from there. The accepted call's arguments stand
+   * in only until that event arrives, for a stream that dropped before it.
+   */
+  output: unknown = undefined;
   private readonly started = new Map<string, { name: string; args: Record<string, unknown> }>();
+  /** The arguments of each submit_output call, by tool call id, until it completes. */
+  private readonly submitted = new Map<string, unknown>();
+  private readonly host: string;
+
+  /** `site` is the address this run researches. */
+  constructor(site: string) {
+    this.host = siteHost(site);
+  }
 
   handle(event: { type: string; data: Record<string, unknown> }): void {
     const data = event.data ?? {};
@@ -67,19 +119,155 @@ export class EventTracker {
         name: String(data.name),
         args: (data.args as Record<string, unknown>) ?? {},
       });
+      if (data.name === 'submit_output') this.submitted.set(String(data.tool_call_id), data.args);
+    }
+    if (event.type === 'session.idle') {
+      if (this.submissions > 0 && data.structured_output != null)
+        this.output = data.structured_output;
+      return;
     }
     if (event.type !== 'tool.completed' || data.is_error) return;
-    if (data.name === 'submit_output') this.submissions += 1;
+    if (data.name === 'submit_output') {
+      this.submissions += 1;
+      this.output = this.submitted.get(String(data.tool_call_id)) ?? this.output;
+    }
     const output =
       typeof data.output === 'string' ? data.output : JSON.stringify(data.output ?? '');
-    for (const match of output.matchAll(/BR_CAPTURE_DONE sha256=([0-9a-f]{64})/g))
-      if (match[1]) this.digests.add(match[1]);
+    for (const match of output.matchAll(CAPTURE_LINE)) {
+      const [, digest, site, requested] = match;
+      if (!digest) continue;
+      const hosts = [site, requested].filter((item): item is string => Boolean(item));
+      if (hosts.includes(this.host)) this.digests.add(digest);
+      else this.foreign.set(digest, site ?? '(no site named)');
+    }
     if (data.name === 'publish_file') {
       const id = /published as (fil_[a-z0-9]+)/.exec(output)?.[1];
       const path = this.started.get(String(data.tool_call_id))?.args.path;
       if (id && typeof path === 'string') this.published.set(id, path);
     }
   }
+}
+
+/** The part of the Naive client a turn is followed with, so a test can hand it a fake. */
+export type TurnClient = Pick<Naive, 'sessions' | 'stream'>;
+
+/** One event of a session's stream. */
+export interface StreamEvent {
+  seq: number;
+  type: string;
+  data: Record<string, unknown>;
+}
+
+export interface SettleOptions {
+  /** The last event already read. */
+  afterSeq: number;
+  /** When the session is interrupted, in milliseconds since the epoch. */
+  deadline: number;
+  /** The session's time limit, named when the deadline interrupts it. */
+  limitMinutes: number;
+  /** Every event, after the tracker has read it. */
+  onEvent?: (event: StreamEvent) => void;
+  sleep?: (ms: number) => Promise<unknown>;
+}
+
+export interface Turn {
+  /**
+   * The session as `sessions.get` answers once it has stopped working. Its `structured_output` can
+   * still be the previous turn's, so it is never read for the result.
+   */
+  state: Awaited<ReturnType<Naive['sessions']['get']>>;
+  afterSeq: number;
+  /** The latest accepted submission, from the turn's events: what the gate checks. */
+  output: unknown;
+}
+
+/**
+ * Streams a session until it has stopped working, feeding every event to the tracker. One stream
+ * ends at each idle, and a session can go straight on into another turn: a wrap-up after the
+ * iteration limit, or a message that was queued while it ran.
+ */
+export async function settleTurn(
+  client: TurnClient,
+  sessionId: string,
+  tracker: EventTracker,
+  options: SettleOptions,
+): Promise<Turn> {
+  const wait = options.sleep ?? sleep;
+  let afterSeq = options.afterSeq;
+  for (;;) {
+    const timer = setTimeout(
+      () => {
+        say(`time limit of ${options.limitMinutes} minutes reached; interrupting`);
+        client.sessions.interrupt(sessionId).catch(() => {});
+      },
+      Math.max(1000, options.deadline - Date.now()),
+    );
+    try {
+      for await (const event of client.stream(sessionId, { afterSeq })) {
+        afterSeq = event.seq;
+        const record = event as unknown as StreamEvent;
+        tracker.handle(record);
+        options.onEvent?.(record);
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    const state = await client.sessions.get(sessionId);
+    const working = state.status === 'running' || state.status === 'queued';
+    if (!working || Date.now() > options.deadline)
+      return { state, afterSeq, output: tracker.output };
+    await wait(1000);
+  }
+}
+
+/** The capture tool's last line: `BR_CAPTURE_DONE sha256=<hex> pages=<n> site=<host> requested=<host>`. */
+const CAPTURE_LINE =
+  /BR_CAPTURE_DONE sha256=([0-9a-f]{64})(?: pages=\d+)?(?: site=(\S+))?(?: requested=(\S+))?/g;
+
+/**
+ * A short id that sorts by start time and is unique across parallel starts. It names the run's own
+ * folder on the agent's computer, so a run never reads what an earlier run left there.
+ */
+export function runSuffix(now = Date.now(), random = randomBytes(3).toString('hex')): string {
+  return `${now.toString(36)}${random}`;
+}
+
+/** This run's folder on the agent's computer, relative to its home. */
+export function runDirFor(runId: string): string {
+  return `br/${runId}`;
+}
+
+export interface LiveSession {
+  id: string;
+  status: string;
+  created_at: string;
+}
+
+/** The agent's sessions that are running or queued, other than `except`. */
+export async function liveSessions(
+  client: Naive,
+  agentId: string,
+  except?: string,
+): Promise<LiveSession[]> {
+  const found: LiveSession[] = [];
+  for (const status of ['running', 'queued']) {
+    const page = await listAll((query) =>
+      client.sessions.list({ ...query, agent_id: agentId, status }),
+    );
+    for (const session of page)
+      if (session.id !== except && (session.status === 'running' || session.status === 'queued'))
+        found.push({ id: session.id, status: session.status, created_at: session.created_at });
+  }
+  return found;
+}
+
+/** Whether a Naive call failed because the thing it names does not exist (any more). */
+export function isNotFound(cause: unknown): boolean {
+  const error = cause as { code?: unknown; status?: unknown } | null;
+  if (error && (error.code === 'not_found' || error.status === 404)) return true;
+  return /\bnot[_ ]found\b|no such (agent|computer)/i.test(
+    cause instanceof Error ? cause.message : String(cause),
+  );
 }
 
 function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
@@ -294,38 +482,121 @@ async function gate(
   return { output, failures, bundle, bundleText };
 }
 
-/** Deleting the agent is the only way to remove its computer, which can stay listed for minutes. */
-async function teardown(
+export interface ReleaseResult {
+  computerId: string | null;
+  /** The computer's status once the release is done, or null when the agent has none. */
+  computerStatus: string | null;
+  /** True once nothing runs: the computer reads paused, or there is none. */
+  idle: boolean;
+  /** What stopping this run's processes on the computer printed, or why it was not done. */
+  stopped: string | null;
+  /** Other sessions of this agent that were live, so the computer was left running for them. */
+  busy: string[];
+  /** Computers of other agents that are live in the organisation. Never touched. */
+  others: string[];
+}
+
+export interface ReleaseOptions {
+  /** This run's session, which is not counted as another user of the computer. */
+  sessionId?: string;
+  sleep?: (ms: number) => Promise<unknown>;
+  /**
+   * How long to keep asking for the pause, and then to wait for the computer to read paused. The
+   * platform refuses a pause while the computer has not yet rested after its session's last turn,
+   * which took a few minutes in a live run.
+   */
+  maxWaitMs?: number;
+  pollMs?: number;
+}
+
+/** What the platform says when it refuses a pause because the computer has not rested yet. */
+const IN_USE = /using the agent's computer|when it rests|state_conflict/i;
+
+const STOPPED = (status: string) =>
+  status === 'paused' || status === 'destroyed' || status === 'failed';
+
+/**
+ * Leaves nothing running once a run is done, and keeps the agent for the next run. Every run uses
+ * the one `br-researcher` agent, and an agent has one computer, which all its sessions share. So
+ * when no other session of the agent is live, the run's processes on it are stopped (a capture
+ * job, Chromium, the injection test's fixture server), so none of them comes back when the
+ * computer resumes, and the computer is paused: a paused computer bills nothing, and the next
+ * session resumes it. A computer another session is using is left alone. Other agents' computers
+ * are listed and never touched.
+ */
+export async function releaseComputer(
   client: Naive,
   agentId: string,
-): Promise<{ spend: unknown; leftover: string[] }> {
-  const spend = await client.agents
-    .spend(agentId, { by: 'component' })
-    .catch((cause) => ({ error: String(cause) }));
+  options: ReleaseOptions = {},
+): Promise<ReleaseResult> {
+  const wait = options.sleep ?? sleep;
+  const pollMs = options.pollMs ?? 15_000;
+  const maxWaitMs = options.maxWaitMs ?? 8 * 60_000;
   const computer = await client.agents.computer(agentId).catch(() => null);
-  for (let attempt = 0; attempt < 6; attempt++) {
+  const computers = await listAll((query) => client.computers.list(query)).catch(() => []);
+  const others = computers
+    .filter((item) => !STOPPED(item.status) && item.id !== computer?.id)
+    .map((item) => `${item.id} ${item.name} ${item.status}`);
+  const result: ReleaseResult = {
+    computerId: computer?.id ?? null,
+    computerStatus: computer?.status ?? null,
+    idle: computer === null || STOPPED(computer.status),
+    stopped: null,
+    busy: [],
+    others,
+  };
+  if (!computer) return result;
+  result.busy = (await liveSessions(client, agentId, options.sessionId)).map(
+    (session) => `${session.id} ${session.status} since ${session.created_at}`,
+  );
+  if (result.busy.length > 0) {
+    say(`computer ${computer.id} is left running: ${result.busy.join('; ')} still uses it`);
+    return result;
+  }
+  if (computer.status === 'running') {
+    // The patterns are written so they do not match this command's own shell.
+    const command =
+      "pkill -f '[c]hrome-headless-shell'; pkill -f '[/]br/'; sleep 1; pgrep -fl '[c]hrome-headless-shell|[/]br/' || echo 'nothing left running'";
+    result.stopped = await client.computers
+      .exec(computer.id, command, 20_000)
+      .then((exec) => `${exec.stdout}${exec.stderr}`.trim() || `exit ${exec.exit_code}`)
+      .catch((cause) => `not stopped: ${cause instanceof Error ? cause.message : cause}`);
+    say(`processes on computer ${computer.id}: ${result.stopped}`);
+  }
+  // Asked until it is accepted: a computer still in use after its session's last turn is
+  // refused with "try again when it rests". Any other error is retried three times. Then the
+  // computer can take a moment to read paused.
+  let status: string = computer.status;
+  let failures = 0;
+  for (let waited = 0; !STOPPED(status) && waited <= maxWaitMs; waited += pollMs) {
     try {
-      await client.agents.delete(agentId);
-      say(`deleted agent ${agentId} to release its computer${computer ? ` ${computer.id}` : ''}`);
+      status = (await client.computers.pause(computer.id)).status;
       break;
     } catch (cause) {
-      say(`agent delete retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
-      await sleep(5000);
+      if (isNotFound(cause)) {
+        status = 'destroyed';
+        break;
+      }
+      const message = cause instanceof Error ? cause.message : String(cause);
+      if (!IN_USE.test(message) && ++failures >= 3) {
+        say(`pause of ${computer.id} failed: ${message}`);
+        break;
+      }
+      if (waited % (pollMs * 4) === 0) say(`pause of ${computer.id} not yet accepted: ${message}`);
+      await wait(pollMs);
     }
   }
-  let leftover: string[] = [];
-  for (let check = 0; check < 30; check++) {
-    const computers = await listAll((query) => client.computers.list(query));
-    leftover = computers
-      .filter((item) => item.status !== 'destroyed' && item.status !== 'failed')
-      .map((item) => `${item.id} ${item.name} ${item.status}`);
-    const mine = computer ? leftover.filter((line) => line.startsWith(computer.id)) : [];
-    if (mine.length === 0) break;
-    if (check % 3 === 0)
-      say(`waiting for computer ${computer?.id} to go (${leftover.length} live in the org)`);
-    await sleep(10_000);
+  for (let waited = 0; !STOPPED(status) && waited < maxWaitMs; waited += pollMs) {
+    await wait(pollMs);
+    status = await client.computers.get(computer.id).then(
+      (item) => item.status as string,
+      (cause) => (isNotFound(cause) ? 'destroyed' : status),
+    );
   }
-  return { spend, leftover };
+  result.computerStatus = status;
+  result.idle = STOPPED(status);
+  say(`computer ${computer.id} is ${status}`);
+  return result;
 }
 
 async function downloadAssets(
@@ -350,15 +621,26 @@ async function downloadAssets(
 }
 
 /**
- * One research run: uploads the capture tool and any customer material, syncs the agent, starts a
- * session, streams it, gates the result and sends failures back for repair, then saves the result
- * under `out/research/<host>/` and prints the cost. The agent is deleted at the end, which is the
- * only way to remove its computer; the next run recreates it from its definition.
+ * One research run: uploads the capture tool and any customer material, syncs the one
+ * `br-researcher` agent from its definition, starts a session, streams it, gates the result and
+ * sends failures back for repair, then saves the result under `out/research/<host>/` and prints
+ * the cost. Every run reuses that agent; none is created per run. Its one computer is shared by its
+ * sessions, so runs go one at a time: a run refuses to start while another session of the agent is
+ * live, and works in its own folder on the computer. At the end its processes are stopped and the
+ * computer is paused, so nothing is left running.
  */
 export async function research(options: ResearchOptions): Promise<number> {
-  const definition = options.definition ?? researcher;
-  const client = naiveClient();
+  // A site the result could never cite is refused before any spend.
+  const problem = siteUrlProblem(options.url);
+  if (problem) {
+    say(`error: ${problem}`);
+    return 1;
+  }
+  const definition: AgentDefinition = options.definition ?? researcher;
   const host = siteHost(options.url);
+  const runId = runSuffix();
+  const runDir = runDirFor(runId);
+  const client = naiveClient();
   const outDir = join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
   // Files an earlier run of this host left behind would read as this run's results.
@@ -378,14 +660,21 @@ export async function research(options: ResearchOptions): Promise<number> {
     url: options.url,
     host,
     started_at: startedAt,
+    agent_name: definition.name,
+    run_dir: runDir,
     model: definition.model,
     budget_micro_usd: budgetMicro,
   };
-  const tracker = new EventTracker();
+  const tracker = new EventTracker(options.url);
   let agentId: string | undefined;
   let sessionId: string | undefined;
+  /** Set once this run may use the agent's computer: no other session of the agent was live. */
+  let ownsComputer = false;
+  let spendBefore: number | undefined;
   let exitCode = 1;
   let cleaned = false;
+  const agentSpend = (id: string) =>
+    client.agents.spend(id, { by: 'component' }).catch((cause) => ({ error: String(cause) }));
 
   const cleanup = async () => {
     if (cleaned) return;
@@ -396,29 +685,46 @@ export async function research(options: ResearchOptions): Promise<number> {
         await client.sessions.interrupt(sessionId).catch(() => {});
       if (session) report.session_micro_usd = session.consumed_micro_usd;
     }
-    if (agentId && !options.keepAgent) {
-      const { spend, leftover } = await teardown(client, agentId);
+    if (agentId && ownsComputer && options.onBeforeTeardown) {
+      await options
+        .onBeforeTeardown({ client, agentId, sessionId, runDir })
+        .catch((cause) =>
+          say(`before-teardown hook failed: ${cause instanceof Error ? cause.message : cause}`),
+        );
+    }
+    if (agentId && ownsComputer && !options.keepComputer) {
+      const result = await releaseComputer(client, agentId, { sessionId });
+      Object.assign(report, {
+        computer_id: result.computerId,
+        computer_status: result.computerStatus,
+        nothing_running: result.idle,
+        processes_stopped: result.stopped,
+        busy_sessions: result.busy,
+        other_live_computers: result.others,
+      });
+      if (result.others.length)
+        say(`other agents' computers live in the org (not touched): ${result.others.join('; ')}`);
+    } else if (agentId && ownsComputer) {
+      const computer = await client.agents.computer(agentId).catch(() => null);
+      report.computer_id = computer?.id ?? null;
+      report.computer_status = computer?.status ?? null;
+      say(`kept computer ${computer?.id ?? '(none)'} running; pause it when done`);
+    }
+    if (agentId) {
+      const spend = await agentSpend(agentId);
       report.agent_spend = spend;
-      report.computers_live_after = leftover;
-      say(
-        leftover.length
-          ? `computers still live in the org: ${leftover.join('; ')}`
-          : 'no computers left in the org',
-      );
-    } else if (agentId) {
-      report.agent_spend = await client.agents
-        .spend(agentId, { by: 'component' })
-        .catch(() => null);
-      say(`kept agent ${agentId}; its computer stays until the agent is deleted`);
+      const after = (spend as { spent_micro_usd?: number }).spent_micro_usd;
+      if (after !== undefined && spendBefore !== undefined)
+        report.agent_spend_this_run_micro_usd = after - spendBefore;
     }
     const balanceAfter = (await client.credits.show().catch(() => null))?.balance_micro_usd;
     if (balanceAfter !== undefined) report.balance_delta_micro_usd = balanceBefore - balanceAfter;
     report.finished_at = new Date().toISOString();
     writeFileSync(join(outDir, 'report.json'), scrub(`${JSON.stringify(report, null, 1)}\n`));
     const session = Number(report.session_micro_usd ?? 0);
-    const agentSpend = (report.agent_spend as { spent_micro_usd?: number } | null)?.spent_micro_usd;
+    const runSpend = report.agent_spend_this_run_micro_usd as number | undefined;
     say(
-      `cost: session ${usd(session)}${agentSpend !== undefined ? `, agent total incl. computer ${usd(agentSpend)}` : ''}${report.balance_delta_micro_usd !== undefined ? `, balance change ${usd(Number(report.balance_delta_micro_usd))}` : ''}. Computer time can book a few minutes late.`,
+      `cost: session ${usd(session)}${runSpend !== undefined ? `, agent incl. computer this run ${usd(runSpend)}` : ''}${report.balance_delta_micro_usd !== undefined ? `, balance change ${usd(Number(report.balance_delta_micro_usd))}` : ''}. Computer time can book a few minutes late.`,
     );
   };
   const onSignal = () => {
@@ -429,7 +735,7 @@ export async function research(options: ResearchOptions): Promise<number> {
   process.once('SIGTERM', onSignal);
 
   try {
-    const tool = await bundleTool();
+    const tool = await bundleTool({ allowPrivateHosts: options.allowPrivateHosts });
     const toolFileId = await ensureToolFile(client, tool);
     say(`capture tool ${tool.name} ${tool.sha256.slice(0, 12)} -> ${toolFileId}`);
     const { refs, manifestId } = await uploadMaterial(client, options.material, host);
@@ -445,6 +751,28 @@ export async function research(options: ResearchOptions): Promise<number> {
       tool_file_id: toolFileId,
       material: refs,
     });
+    // One agent, one computer: a run starts only when no other session of the agent is live.
+    const busy = await liveSessions(client, synced.id);
+    if (busy.length > 0) {
+      report.busy_sessions = busy;
+      throw new Error(
+        `${synced.name} is busy with ${busy.map((item) => `${item.id} (${item.status} since ${item.created_at})`).join(', ')}. Its sessions share one computer, so runs go one at a time; start this one when that one has finished.`,
+      );
+    }
+    ownsComputer = true;
+    spendBefore = ((await agentSpend(synced.id)) as { spent_micro_usd?: number }).spent_micro_usd;
+    const computer = await client.agents.computer(synced.id).catch(() => null);
+    report.computer_at_start = computer ? `${computer.id} ${computer.status}` : null;
+    if (computer?.status === 'paused') {
+      await client.computers
+        .resume(computer.id)
+        .then((item) => say(`resumed computer ${item.id} (${item.status})`))
+        .catch((cause) =>
+          say(
+            `resume of ${computer.id} failed, the session resumes it: ${cause instanceof Error ? cause.message : cause}`,
+          ),
+        );
+    }
 
     const session = await client.sessions.create({
       agent_id: synced.id,
@@ -456,6 +784,9 @@ export async function research(options: ResearchOptions): Promise<number> {
         material: refs,
         budgetUsd: budgetMicro / 1e6,
         description: options.description,
+        extraFileIds: options.extraFileIds,
+        preSteps: options.preSteps?.(runDir),
+        runDir,
       }),
       budget_micro_usd: budgetMicro,
       ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
@@ -464,7 +795,17 @@ export async function research(options: ResearchOptions): Promise<number> {
     });
     sessionId = session.id;
     report.session_id = session.id;
-    say(`session ${session.id} started, budget ${usd(budgetMicro)}`);
+    say(`session ${session.id} started, budget ${usd(budgetMicro)}, folder ~/${runDir}`);
+    // Two runs that checked at the same moment would share the computer: both back off.
+    const rivals = await liveSessions(client, synced.id, session.id);
+    if (rivals.length > 0) {
+      report.busy_sessions = rivals;
+      ownsComputer = false;
+      await client.sessions.interrupt(session.id).catch(() => {});
+      throw new Error(
+        `Another session of ${synced.name} started at the same time (${rivals.map((item) => item.id).join(', ')}), so this run stopped its own and leaves the computer to it.`,
+      );
+    }
 
     const deadline = Date.now() + definition.session.max_minutes * 60_000;
     let afterSeq = 0;
@@ -475,43 +816,26 @@ export async function research(options: ResearchOptions): Promise<number> {
     let accepted: ResearchOutput | undefined;
     let verdict: GateVerdict | undefined;
 
-    // Streams until the session has stopped working. One stream ends at each idle, and a session
-    // can go straight on into another turn: a wrap-up after the iteration limit, or a message that
-    // was queued while it ran.
-    const settle = async () => {
-      for (;;) {
-        const timer = setTimeout(
-          () => {
-            say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
-            client.sessions.interrupt(session.id).catch(() => {});
-          },
-          Math.max(1000, deadline - Date.now()),
-        );
-        try {
-          for await (const event of client.stream(session.id, { afterSeq })) {
-            afterSeq = event.seq;
-            const record = event as unknown as { type: string; data: Record<string, unknown> };
-            tracker.handle(record);
-            if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-              appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
-            const line = describe(record);
-            if (line) say(line);
-          }
-        } finally {
-          clearTimeout(timer);
-        }
-        const state = await client.sessions.get(session.id);
-        const working = state.status === 'running' || state.status === 'queued';
-        if (!working || Date.now() > deadline) return state;
-        await sleep(1000);
-      }
+    const onEvent = (event: StreamEvent) => {
+      if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+        appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
+      const line = describe(event);
+      if (line) say(line);
     };
 
     for (;;) {
-      const state = await settle();
+      const turn = await settleTurn(client, session.id, tracker, {
+        afterSeq,
+        deadline,
+        limitMinutes: definition.session.max_minutes,
+        onEvent,
+      });
+      afterSeq = turn.afterSeq;
+      const { state, output } = turn;
       // A turn can end on the iteration limit right after submitting, and a session keeps its last
-      // result, so only a submit_output seen since the last gate counts as a new submission.
-      const fresh = tracker.submissions > gated && Boolean(state.structured_output);
+      // result, so only a submit_output seen since the last gate counts as a new submission. The
+      // result is the one the turn's events carry: sessions.get can still answer the previous one.
+      const fresh = tracker.submissions > gated && output != null;
       if (!fresh) {
         // A turn that hits the iteration limit gets a wrap-up and ends as end_turn, with the work
         // unfinished. Nudge it on; stop only on a reason a nudge cannot fix.
@@ -536,7 +860,7 @@ export async function research(options: ResearchOptions): Promise<number> {
       round += 1;
       verdict = await gate(
         client,
-        state.structured_output,
+        output,
         tracker,
         materialIds,
         options.drillRepair && round === 1,
@@ -544,10 +868,13 @@ export async function research(options: ResearchOptions): Promise<number> {
       rounds.push({ round, failures: verdict.failures });
       writeFileSync(
         join(outDir, `submission-${round}.json`),
-        `${JSON.stringify(state.structured_output, null, 1)}\n`,
+        `${JSON.stringify(output, null, 1)}\n`,
       );
       if (verdict.failures.length === 0) {
-        accepted = verdict.output;
+        accepted =
+          verdict.output && verdict.bundle
+            ? withStoredTitles(verdict.output, verdict.bundle)
+            : verdict.output;
         say(`gate passed on submission ${round}`);
         break;
       }
@@ -559,23 +886,25 @@ export async function research(options: ResearchOptions): Promise<number> {
       );
       if (round > options.maxRepairs || Date.now() > deadline) break;
       const sent = await client.sessions.send(session.id, {
-        message: repairMessage(verdict.failures, host, round, options.maxRepairs),
+        message: repairMessage(verdict.failures, runDir, host, round, options.maxRepairs),
         queue: true,
       });
       afterSeq = sent.accepted_seq;
     }
     report.rounds = rounds;
     report.capture_digests = [...tracker.digests];
+    if (tracker.foreign.size) report.foreign_capture_digests = Object.fromEntries(tracker.foreign);
     report.published_files = Object.fromEntries(tracker.published);
 
     if (!accepted && verdict?.output && verdict.bundle) {
-      // Out of repair rounds: drop the claims that still fail, and accept the rest only if nothing
-      // else fails. An unverified claim never reaches the output.
+      // Out of repair rounds: drop the claims and non-claims that still fail and correct the page
+      // list, and accept the rest only if nothing else fails. An unverified claim never reaches
+      // the output.
       const rejected = new Set(
         verdict.failures.flatMap((failure) => (failure.claimId ? [failure.claimId] : [])),
       );
-      if (rejected.size > 0) {
-        const trimmed = withoutClaims(verdict.output, rejected);
+      if (verdict.failures.some(prunable)) {
+        const trimmed = withoutFailures(verdict.output, verdict.failures, verdict.bundle);
         const again = await checkResearch(trimmed, verdict.bundle, {});
         const sha = createHash('sha256')
           .update(verdict.bundleText ?? '')
@@ -594,7 +923,9 @@ export async function research(options: ResearchOptions): Promise<number> {
         report.rejected_claims = verdict.output.claims.filter((claim) => rejected.has(claim.id));
         if (left.length === 0 && again.output) {
           accepted = again.output;
-          say(`accepted after dropping ${rejected.size} claim(s) that could not be verified`);
+          say(
+            `accepted after the gate settled ${verdict.failures.filter(prunable).length} problem(s) itself, dropping ${rejected.size} claim(s) that could not be verified`,
+          );
         } else verdict = { ...verdict, failures: left };
       }
     }

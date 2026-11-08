@@ -114,4 +114,20 @@ describe('wordmarkSvg', () => {
     expect(svg).toContain('Ben &amp; Jo’s &lt;Lab&gt;');
     expect(sniff(bytes(svg))).toBe('svg');
   });
+
+  // danluu.com: the wordmark was bold Source Serif 4, but the site shows its name in the
+  // browser's default Times New Roman at regular weight.
+  it("sets the name in the site's own font stack and weight", () => {
+    const svg = wordmarkSvg('danluu.com', '"Times New Roman"', '#000000', 'serif', 400);
+    expect(svg).toContain('font-family="&quot;Times New Roman&quot;, serif"');
+    expect(svg).toContain('font-weight="400"');
+    expect(svg).toContain('>danluu.com</text>');
+  });
+
+  // A serif site's wordmark fell back to a sans face wherever its font was missing.
+  it('falls back to the same kind of face as the brand font', () => {
+    expect(wordmarkSvg('notes', 'Source Serif 4', '#000000', 'serif')).toContain(
+      'font-family="Source Serif 4, serif"',
+    );
+  });
 });

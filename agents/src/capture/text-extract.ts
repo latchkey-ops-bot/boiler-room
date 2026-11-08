@@ -44,6 +44,16 @@ export function htmlToText(html: string): string {
     .join('\n');
 }
 
+/** The text of the first `<h1>` of an HTML document, or an empty string. */
+export function htmlHeading(html: string): string {
+  const match = /<h1\b[^>]*>([\s\S]*?)<\/h1>/i.exec(html);
+  return match?.[1]
+    ? decodeEntities(match[1].replace(/<[^>]+>/g, ' '))
+        .replace(/\s+/g, ' ')
+        .trim()
+    : '';
+}
+
 /** The `<title>` of an HTML document. */
 export function htmlTitle(html: string): string {
   const match = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
