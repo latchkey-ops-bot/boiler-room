@@ -1,0 +1,67 @@
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { formatReport, qualityCheckRender } from '../quality/run.ts';
+
+const usage = `Usage: pnpm qc <render-dir> [--research <research.json>] [--campaign <campaign.json>] [--no-model] [--budget-usd 1] [--json]
+
+  <render-dir>  A folder the render service wrote: film.mp4, film.manifest.json and film.quality/.
+  --research    The Researcher's research.json. Claims and brand colours are traced to it.
+  --campaign    Review against this campaign file instead of the one the manifest names. Its
+                SHA-256 must still match the one the film was rendered from.
+  --no-model    Run the code checks only. The verdict is then blocked: no film passes unless
+                br-quality-check has opened its frames.
+  --budget-usd  Spend cap for the review session (at least 1, Sonnet's minimum).
+  --json        Print the report as JSON instead of text.
+
+The report is also written to <render-dir>/<campaign id>.qc/qc-report.json. Exit code 0 is pass,
+1 is fail, 2 is a usage or input error.`;
+
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    research: { type: 'string' },
+    campaign: { type: 'string' },
+    'no-model': { type: 'boolean', default: false },
+    'budget-usd': { type: 'string' },
+    json: { type: 'boolean', default: false },
+    help: { type: 'boolean', short: 'h', default: false },
+  },
+});
+
+// pnpm runs a package script from the package folder; INIT_CWD is where the command was typed.
+const from = (path: string) => resolve(process.env.INIT_CWD ?? process.cwd(), path);
+const dir = positionals[0];
+if (values.help || !dir) {
+  console.log(usage);
+  process.exit(values.help ? 0 : 2);
+}
+for (const path of [dir, values.research, values.campaign]) {
+  if (path && !existsSync(from(path))) {
+    console.error(`Not found: ${path}`);
+    process.exit(2);
+  }
+}
+const budget = values['budget-usd'] === undefined ? undefined : Number(values['budget-usd']);
+if (budget !== undefined && !(budget >= 1 && budget <= 1.5)) {
+  console.error(
+    '--budget-usd must be between 1 (the Sonnet minimum) and 1.5 (the agent budget per task).',
+  );
+  process.exit(2);
+}
+
+try {
+  const report = await qualityCheckRender({
+    renderDir: from(dir),
+    ...(values.research ? { researchFile: from(values.research) } : {}),
+    ...(values.campaign ? { campaignFile: from(values.campaign) } : {}),
+    model: !values['no-model'],
+    ...(budget !== undefined ? { budgetUsd: budget } : {}),
+    say: values.json ? (line) => console.error(line) : undefined,
+  });
+  console.log(values.json ? JSON.stringify(report, null, 2) : `\n${formatReport(report)}`);
+  process.exit(report.verdict === 'pass' ? 0 : 1);
+} catch (cause) {
+  console.error(cause instanceof Error ? cause.message : String(cause));
+  process.exit(2);
+}

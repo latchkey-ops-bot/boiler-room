@@ -5,10 +5,14 @@ import type { AgentCreate } from '@usenaive-sdk/managed-agents';
 import type { AgentDefinition, SkillDefinition } from './define.ts';
 import { listAll, type Naive } from './naive/client.ts';
 
-const SKILLS_DIR = new URL('../skills/', import.meta.url);
+const SKILLS_DIRS = {
+  agents: new URL('../skills/', import.meta.url),
+  repo: new URL('../../skills/', import.meta.url),
+} as const;
 
 export function skillContent(skill: SkillDefinition): string {
-  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, SKILLS_DIR)), 'utf8');
+  const dir = SKILLS_DIRS[skill.dir ?? 'agents'];
+  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, dir)), 'utf8');
 }
 
 /** JSON with object keys sorted, so equal configs hash equally. */

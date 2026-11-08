@@ -29,10 +29,14 @@ export function toolset(allowed: readonly string[], denied: readonly string[] = 
   return { default_config: { permission: 'deny' }, configs };
 }
 
-/** A skill kept in this repo as `agents/skills/<slug>/SKILL.md` and pushed by `agents:sync`. */
+/**
+ * A skill kept in this repo and pushed by `agents:sync`: `agents/skills/<slug>/SKILL.md`, or with
+ * `dir: 'repo'` the company skill at `skills/<slug>/SKILL.md` that people and agents share.
+ */
 export interface SkillDefinition {
   slug: string;
   description: string;
+  dir?: 'agents' | 'repo';
 }
 
 /**

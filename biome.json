@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!agents/skills"]
+    "includes": ["**", "!agents/skills", "!skills"]
   },
   "formatter": {
     "indentStyle": "space",
