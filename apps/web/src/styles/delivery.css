@@ -38,29 +38,31 @@
 }
 
 /* The player wears an ink frame, as in the script review sample. The screen keeps 16:9 and a
-   tall or square film sits in the middle of it, on ink. */
-.player {
+   tall or square film sits in the middle of it, on ink. Scoped to .delivery-player: the script
+   review's player uses the same class names (script-review.css), and Next keeps a page's styles
+   loaded after a client-side navigation. */
+.delivery-player .player {
   --frame: var(--br-ink);
   --drop: var(--br-sky);
   padding: 0;
   background: var(--br-ink);
 }
-.player .screen {
+.delivery-player .player .screen {
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 9;
   overflow: hidden;
   background: var(--br-ink);
 }
-.player .shape {
+.delivery-player .player .shape {
   height: 100%;
   max-width: 100%;
 }
-.player video {
+.delivery-player .player video {
   display: block;
   background: var(--br-ink);
 }
-.player .controls {
+.delivery-player .player .controls {
   display: flex;
   align-items: center;
   gap: var(--br-space-3) var(--br-space-4);
@@ -68,24 +70,24 @@
   padding: var(--br-space-3) var(--br-space-4);
   background: var(--br-white);
 }
-.player fieldset.seg {
+.delivery-player .player fieldset.seg {
   min-inline-size: 0;
   padding: 0;
   border: 0;
 }
-.player .time {
+.delivery-player .player .time {
   font-family: var(--br-font-mono);
   font-size: 13px;
   color: var(--br-ink);
   white-space: nowrap;
 }
-.player .download {
+.delivery-player .player .download {
   margin-left: auto;
 }
 
 /* The preview of a film with no file, in the customer's brand, never ours. Sizes follow the
    stage, so a tall film reads as well as a wide one. */
-.stage {
+.delivery-player .stage {
   position: relative;
   container-type: size;
   overflow: hidden;
@@ -98,21 +100,21 @@
   align-content: center;
   padding: 0 9cqw;
 }
-.stage .copy {
+.delivery-player .stage .copy {
   display: grid;
   gap: 3cqmin;
   max-width: 84%;
 }
-.stage .big {
+.delivery-player .stage .big {
   font: 800 max(20px, 12.5cqmin) / 1 var(--brand-display);
   letter-spacing: -0.02em;
   text-wrap: balance;
 }
-.stage .small {
+.delivery-player .stage .small {
   font: 600 max(12px, 4.8cqmin) / 1.35 var(--brand-body);
   color: var(--brand-muted);
 }
-.stage .cta {
+.delivery-player .stage .cta {
   justify-self: start;
   margin-top: 2cqmin;
   padding: 2.4cqmin 4.4cqmin;
@@ -121,7 +123,7 @@
   color: var(--brand-background);
   font: 700 max(12px, 4.4cqmin) / 1 var(--brand-body);
 }
-.stage .sign {
+.delivery-player .stage .sign {
   position: absolute;
   left: 9cqw;
   bottom: 8cqmin;
@@ -129,7 +131,7 @@
   font: 800 max(12px, 4.4cqmin) / 1 var(--brand-display);
 }
 /* The simulated label sits on a solid chip, so it reads on any customer's colours. */
-.stage .tag {
+.delivery-player .stage .tag {
   position: absolute;
   left: 10px;
   top: 10px;
@@ -141,7 +143,7 @@
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
-.stage .where {
+.delivery-player .stage .where {
   position: absolute;
   right: 10px;
   bottom: 8px;
@@ -334,13 +336,13 @@
 }
 @media (max-width: 640px) {
   /* On a phone a tall or square film gets the room it needs, not a pillarbox. */
-  .player .screen[data-shape="9:16"] {
+  .delivery-player .player .screen[data-shape="9:16"] {
     aspect-ratio: 4 / 5;
   }
-  .player .screen[data-shape="1:1"] {
+  .delivery-player .player .screen[data-shape="1:1"] {
     aspect-ratio: 1 / 1;
   }
-  .player .download {
+  .delivery-player .player .download {
     width: calc(100% - 4 * var(--br-px));
     margin-left: var(--br-px);
   }

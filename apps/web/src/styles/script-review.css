@@ -67,12 +67,14 @@
 
 /* ---------- Player: the selected scene in the customer's brand ---------- */
 
-.player {
+/* Scoped to .script-review: the delivery screen's player uses the same class names
+   (delivery.css), and Next keeps a page's styles loaded after a client-side navigation. */
+.script-review .player {
   --frame: var(--br-ink);
   padding: 0;
   background: var(--br-ink);
 }
-.stage {
+.script-review .stage {
   position: relative;
   display: grid;
   place-items: center;
@@ -80,7 +82,7 @@
   overflow: hidden;
   background: var(--br-ink);
 }
-.stage .tag {
+.script-review .stage .tag {
   position: absolute;
   left: 10px;
   top: 8px;
@@ -229,7 +231,7 @@
   pointer-events: none;
 }
 
-.player .controls {
+.script-review .player .controls {
   display: flex;
   align-items: center;
   gap: var(--br-space-3) var(--br-space-5);
@@ -237,13 +239,13 @@
   padding: var(--br-space-3) var(--br-space-4);
   background: var(--br-white);
 }
-.player .where {
+.script-review .player .where {
   display: flex;
   align-items: baseline;
   gap: var(--br-space-3);
   margin-right: auto;
 }
-.player .time {
+.script-review .player .time {
   color: var(--br-ink);
   font: 400 var(--br-text-mono) / 1.5 var(--br-font-mono);
   white-space: nowrap;
@@ -582,7 +584,7 @@ dialog.approve-dialog::backdrop {
     width: 100%;
     margin-left: 0;
   }
-  .player .where {
+  .script-review .player .where {
     width: 100%;
   }
   .timeline .lane {
