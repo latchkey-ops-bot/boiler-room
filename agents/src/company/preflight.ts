@@ -18,12 +18,11 @@ export const REQUIRED_RULES = ['deletion', 'non_fast_forward', 'pull_request'] a
 export const PROTECTED_BRANCHES = ['main', 'dev'] as const;
 
 /**
- * Branches whose pull requests need a person's approval. Releases are the founder's, and every agent
- * holds a token that can merge, so a `pull_request` rule that requires 0 approvals on `main` stops
- * no agent: it only leaves a pull request behind. `dev` stays at 0, because the engineering lead
- * merges into it.
+ * Branches whose pull requests need a person's approval. None: by the founder's ruling of
+ * 2026-11-07, releases are autonomous, so `main` and `dev` both take pull requests with 0 approvals.
+ * The `pull_request` rule still leaves a pull request behind for every change.
  */
-export const APPROVAL_BRANCHES = ['main'] as const;
+export const APPROVAL_BRANCHES = [] as const;
 
 export interface TokenReach {
   token: TokenName;

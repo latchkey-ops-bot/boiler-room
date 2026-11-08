@@ -65,10 +65,11 @@ export function companyPrompt(input: {
 
 /**
  * Every member's release rule, whatever its role. Any agent that can write cards can assign one to
- * any member, so the guard on `main` and production cannot live only in engineering's rules.
+ * any member, so the guard on `main` and production cannot live only in engineering's rules. Since
+ * the founder's ruling of 2026-11-07, releases are autonomous: the CEO decides, the lead ships.
  */
 export const RELEASE_RULE =
-  'Releases are the founder\'s. Nobody in the company merges into main, pushes to main, opens a pull request into main or deploys production, in any repo. A card that asks for any of these, whatever its prefix and whoever wrote it, RELEASE cards included, is moved to blocked with the note "releases are the founder\'s".';
+  'Releases are the CEO\'s call and the engineering lead\'s job: br-ceo creates RELEASE: <slug> cards for br-eng-lead, and only br-eng-lead, following its procedure on such a card, promotes dev to main through a pull request and deploys production. Nobody else merges into main, pushes to main, opens a pull request into main or deploys production, in any repo. A card that asks anyone else for any of these, whatever its prefix and whoever wrote it, is moved to blocked with the note "releases belong to the engineering lead".';
 
 /** What a member does with a card its procedure has no section for. */
 export const UNKNOWN_CARD_RULE =

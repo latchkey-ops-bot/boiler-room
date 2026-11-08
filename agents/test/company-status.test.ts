@@ -61,19 +61,19 @@ describe('duplicate titles on the board', () => {
       duplicateTitles([
         {
           id: 'crd_b',
-          title: 'FOUNDER: release zz',
+          title: 'RELEASE: zz',
           status: 'blocked',
           created_at: '2026-11-08T01:00:01.1Z',
         },
         {
           id: 'crd_a',
-          title: 'FOUNDER: release zz',
+          title: 'RELEASE: zz',
           status: 'blocked',
           created_at: '2026-11-08T01:00:00.0Z',
         },
         { id: 'crd_c', title: 'DIR: zz', status: 'done', created_at: '2026-11-08T00:00:00Z' },
       ]),
-    ).toEqual([{ title: 'FOUNDER: release zz', cards: ['crd_a blocked', 'crd_b blocked'] }]);
+    ).toEqual([{ title: 'RELEASE: zz', cards: ['crd_a blocked', 'crd_b blocked'] }]);
     expect(duplicateTitles([])).toEqual([]);
   });
 });

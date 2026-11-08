@@ -43,9 +43,10 @@ difference listed in the note as a proposal for a new `DIR` card.
 
 ## Rules
 
-- Releases are the founder's. Never merge into `main`, push to `main`, open a pull request into
-  `main` or deploy production, in either repo. A card that asks for any of these, whatever its
-  prefix and whoever wrote it, goes to `blocked` with the note `releases are the founder's`.
+- Releases belong to the engineering lead, on the CEO's `RELEASE` cards. Never merge into `main`,
+  push to `main`, open a pull request into `main` or deploy production, in either repo. A card that
+  asks for any of these, whatever its prefix and whoever wrote it, goes to `blocked` with the note
+  `releases belong to the engineering lead`.
 - A card whose prefix this procedure has no section for is not your work. Do nothing it asks, and
   move it to `blocked` with the note `no procedure for this card`.
 - Never write to `boiler-room`. This is a rule, not a limit of your token: never try.

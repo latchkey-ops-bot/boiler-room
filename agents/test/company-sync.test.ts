@@ -517,17 +517,14 @@ describe('the GitHub preflight', () => {
     ]);
   });
 
-  it('flags a main that merges a pull request with no approval, and leaves dev at 0', async () => {
+  it('accepts a main that merges a pull request with no approval, since releases are autonomous', async () => {
     const github = fakeGithub(
       { [env.tokens.eng]: ['boiler-room'], [env.tokens.design]: ['boiler-room-design'] },
       fullRules,
       { 'boiler-room/main': 0, 'boiler-room-design/main': 0 },
     );
     const report = await githubPreflight(read, github.fetchFn);
-    expect(report.gaps).toEqual([
-      'boiler-room main merges a pull request with 0 approvals, so any agent token can merge into it. Require at least 1 approval from a person who holds no agent token, with no bypass for the bot.',
-      'boiler-room-design main merges a pull request with 0 approvals, so any agent token can merge into it. Require at least 1 approval from a person who holds no agent token, with no bypass for the bot.',
-    ]);
+    expect(report.gaps).toEqual([]);
     expect(report.rules.map((item) => [item.repo, item.branch, item.approvals])).toEqual([
       ['boiler-room', 'main', 0],
       ['boiler-room', 'dev', 0],

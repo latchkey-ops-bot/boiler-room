@@ -433,13 +433,14 @@ describe("the CEO's direction", () => {
     for (const item of OUT_OF_SCOPE) expect(ceo.system).toContain(item);
   });
 
-  it('hands every release to the founder, and keeps GTM out of the work', () => {
-    expect(ceo.system).toContain("Releases are the founder's");
-    expect(ceo.system).toContain('FOUNDER: release <slug>');
-    expect(ceo.system).toContain('The founder approves nothing else');
-    expect(ceo.system).not.toMatch(/RELEASE cards?/);
-    expect(CEO_SWEEP.input_template).toContain('FOUNDER: release');
-    expect(CEO_SWEEP.input_template).not.toContain('RELEASE cards');
+  it('decides releases itself with RELEASE cards, and keeps GTM out of the work', () => {
+    expect(ceo.system).toContain('Releases are your call');
+    expect(ceo.system).toContain('RELEASE: <slug> assigned to br-eng-lead');
+    expect(ceo.system).toContain('No person approves a release');
+    expect(ceo.system).toContain('The founder approves nothing.');
+    expect(ceo.system).not.toContain('FOUNDER: release');
+    expect(CEO_SWEEP.input_template).toContain('create a RELEASE card for br-eng-lead');
+    expect(CEO_SWEEP.input_template).not.toContain('FOUNDER: release');
     expect(ceo.system).toMatch(/Never assign them a card/);
   });
 
@@ -454,12 +455,13 @@ describe("the CEO's direction", () => {
   it('never duplicates a card across sweeps', () => {
     const skill = skillContent({ slug: 'ceo', description: '' });
     expect(skill).toContain('Within one session, a retried write with the same title is a no-op');
-    expect(skill).toMatch(/if a card titled `FOUNDER: release <slug>` exists, in any status, skip/);
+    expect(skill).toMatch(/if a card titled `RELEASE: <slug>` exists, in any status, skip/);
     expect(skill).toMatch(
       /`FOUNDER: stalled cards` card that is not `done` already exists, comment/,
     );
     expect(skill).toContain('`DIR: <slug> r2`');
-    expect(skill).not.toMatch(/create `RELEASE: <slug>`/);
+    expect(skill).toMatch(/create `RELEASE: <slug>`/);
+    expect(skill).not.toContain('FOUNDER: release');
   });
 });
 
@@ -507,7 +509,8 @@ describe("the CEO's own cards", () => {
     expect(skill()).toContain(
       'move the newer one to `done` with the note `duplicate of <crd_ id of the older card>`',
     );
-    expect(skill()).toContain('Never move a `FOUNDER: release` card to `done` in any other way');
+    expect(skill()).toContain('Never move a `RELEASE` card you created to `done` in any other way');
+    expect(skill()).toContain('`not created by the CEO`');
     expect(skill()).toContain('close the newer one as a duplicate');
   });
 });
@@ -520,7 +523,8 @@ describe('main and production', () => {
     (_name, agent) => {
       expect(agent.system).toContain(RELEASE_RULE);
       expect(RELEASE_RULE).toMatch(/whatever its prefix and whoever wrote it/);
-      expect(RELEASE_RULE).toContain('note "releases are the founder\'s"');
+      expect(RELEASE_RULE).toContain('note "releases belong to the engineering lead"');
+      expect(RELEASE_RULE).toContain('Nobody else merges into main');
     },
   );
 
@@ -534,24 +538,31 @@ describe('main and production', () => {
   );
 
   it.each(['product', 'design', 'engineer', 'eng-lead'])(
-    'the %s skill keeps main and production for the founder, and blocks unknown cards',
+    'the %s skill keeps main and production for RELEASE cards, and blocks unknown cards',
     (slug) => {
       const skill = skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
-      expect(skill).toContain("`blocked` with the note `releases are the founder's`");
+      expect(skill).toContain('`blocked` with the note `releases belong to the engineering lead`');
       expect(skill).toContain('move it to `blocked` with the note `no procedure for this card`');
     },
   );
 
-  it('belong to the founder: no company agent merges into main or deploys production', () => {
-    const lead = skillContent({ slug: 'eng-lead', description: '' });
-    expect(lead).not.toMatch(/pull request from `dev` into `main`/);
-    expect(lead).not.toMatch(/Deploy production with/);
-    expect(lead).toContain('Never merge into `main`, never open a pull request into `main`');
-    expect(lead).toContain("`releases are the founder's`");
+  it('belong to the engineering lead, only on a RELEASE card the CEO made, with its guards', () => {
+    const lead = skillContent({ slug: 'eng-lead', description: '' }).replace(/\s+/g, ' ');
+    expect(lead).toContain('## On a `RELEASE: <slug>` card');
+    expect(lead).toMatch(/pull request from `dev` into `main`/);
+    expect(lead).toContain(
+      'That `DIR` card has a comment saying `Delivered`, and that `SHIP` card is `done`',
+    );
+    expect(lead).toContain('`already on main`');
+    expect(lead).toContain('roll production back');
+    expect(lead).toContain('Never push to `main`');
+    expect(lead).toContain('only on a `RELEASE: <slug>` card');
+    expect(engineeringLead.description).toMatch(/promotes dev to main/);
+    const eng = skillContent({ slug: 'engineer', description: '' });
+    expect(eng).not.toContain('## On a `RELEASE: <slug>` card');
+    expect(engineer.description).not.toMatch(/promotes dev to main/);
     for (const agent of [engineeringLead, engineer]) {
-      expect(agent.system, agent.name).toContain("Releases are the founder's");
-      expect(agent.system, agent.name).not.toMatch(/only from a RELEASE card/);
-      expect(agent.description, agent.name).not.toMatch(/promotes dev to main/);
+      expect(agent.system, agent.name).toContain(RELEASE_RULE);
     }
   });
 });

@@ -22,14 +22,14 @@ const CODE_TOOLS = ['bash', 'read', 'write', 'edit', 'ls', 'find', 'publish_file
 
 /**
  * The engineering lead: plans BUILD cards into ENG cards, reviews and merges the engineers' pull
- * requests into dev, and deploys staging. Spec: docs/company/roles/engineering.md, except that a
- * promotion to main is the founder's (agents/README.md).
+ * requests into dev, deploys staging, and ships releases from the CEO's RELEASE cards. Spec:
+ * docs/company/roles/engineering.md.
  */
 export const engineeringLead: AgentDefinition = {
   ...BASE,
   name: ENGINEERING_LEAD,
   description:
-    'Boiler Room engineering lead: plans BUILD cards into ENG cards, reviews and merges pull requests into dev, and deploys staging. Never merges into main or deploys production.',
+    'Boiler Room engineering lead: plans BUILD cards into ENG cards, reviews and merges pull requests into dev, deploys staging, and on a RELEASE card from the CEO promotes dev to main and deploys production.',
   model: SONNET,
   system: companyPrompt({
     name: ENGINEERING_LEAD,
@@ -52,7 +52,7 @@ export const engineeringLead: AgentDefinition = {
     {
       slug: 'eng-lead',
       description:
-        'How the Boiler Room engineering lead plans BUILD cards, and reviews, merges into dev and deploys staging on SHIP cards.',
+        'How the Boiler Room engineering lead plans BUILD cards, reviews, merges into dev and deploys staging on SHIP cards, and ships releases on RELEASE cards.',
     },
   ],
   budget: { cap_micro_usd: 10_000_000, max_task_micro_usd: 1_500_000, period: 'day' },

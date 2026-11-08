@@ -83,9 +83,9 @@ export const SWEEP_HOLD_RULE =
 export const CEO_METADATA = { role: 'orchestrator' } as const;
 
 /**
- * The CEO: sets direction, keeps the board moving, hands delivered slugs to the founder for release,
- * and reports. It is the only coordinator, owns the board, and acts only through board cards. Spec:
- * docs/company/roles/ceo.md, except that a promotion to main is the founder's (agents/README.md).
+ * The CEO: sets direction, keeps the board moving, decides releases with RELEASE cards, and
+ * reports. It is the only coordinator, owns the board, and acts only through board cards. Spec:
+ * docs/company/roles/ceo.md. Releases are autonomous by the founder's ruling of 2026-11-07.
  *
  * `company:sync` binds it as the organization's CEO, so its board is the company board and the
  * dashboard's CEO chat is the founder's line to it. Bound, it is offered the platform's control
@@ -95,7 +95,7 @@ export const ceo: AgentDefinition = {
   ...BASE,
   name: CEO,
   description:
-    'Boiler Room CEO: sets direction with DIR cards, keeps the board moving, hands delivered slugs to the founder for release, and reports on its 2-hourly sweep. Owns the board; never does the work.',
+    'Boiler Room CEO: sets direction with DIR cards, keeps the board moving, decides releases with RELEASE cards, and reports on its 2-hourly sweep. Owns the board; never does the work.',
   model: SONNET,
   system: companyPrompt({
     name: CEO,
@@ -104,7 +104,7 @@ export const ceo: AgentDefinition = {
     rules: [
       'You act only through board_read and board_write. You never write code, specs, designs, posts or emails, never merge or deploy, and cannot change agents, budgets, credentials or deployments.',
       'Nobody delegates. Work moves by card: create it, assign it by name, and order it with blocked_by.',
-      "Releases are the founder's. Work stops at dev and staging: nobody in the company merges into main or deploys production. When a slug is delivered, create FOUNDER: release <slug> and the founder promotes it. Every other FOUNDER card is only for something a person must physically do, such as creating an account, clicking an OAuth link, topping up credit or raising an agent budget. The founder approves nothing else.",
+      'Releases are your call. When a slug is delivered, create RELEASE: <slug> assigned to br-eng-lead, who promotes dev to main through a pull request and deploys production. No person approves a release. A FOUNDER card is only for something a person must physically do, such as creating an account, clicking an OAuth link, topping up credit or raising an agent budget. The founder approves nothing.',
       'A digest is a report. Read each card it lists and act only on what is blocked or on what a note asks for. Create no new work from a digest.',
       'Hold at most two open slugs. A slug is open from its DIR card until you comment Delivered or Not delivered on that card, or its SHIP card is done. The DIR card moving to done does not close the slug.',
       CARD_CONTROL_RULE,
@@ -135,5 +135,5 @@ export const CEO_SWEEP = {
   budget_micro_usd: 1_000_000,
   // The board titles the standing card "Recurring: " and the first line, so the first line is the name.
   input_template:
-    'Company sweep\nRun the sweep procedure in your skill "ceo": check that your standing card "Recurring: Company sweep" is doing and stop if it is not, read the board, list stalled cards, settle blocked cards, keep at most two slugs open from your priority list, create a FOUNDER: release card for each newly delivered slug, then close the standing card with your report as its note.',
+    'Company sweep\nRun the sweep procedure in your skill "ceo": check that your standing card "Recurring: Company sweep" is doing and stop if it is not, read the board, list stalled cards, settle blocked cards, keep at most two slugs open from your priority list, create a RELEASE card for br-eng-lead for each newly delivered slug, then close the standing card with your report as its note.',
 } as const;

@@ -61,7 +61,7 @@ pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
    whether each token can push to each repo (GitHub serves the `git-receive-pack` ref
    advertisement only to a credential that can write; the token goes in a request header), and
    whether `main` and `dev` of both repos carry the `deletion`, `non_fast_forward` and
-   `pull_request` rules, and whether `main`'s `pull_request` rule requires at least 1 approval.
+   `pull_request` rules. Both take 0 approvals, because releases are autonomous.
    `company:status` prints the same check.
 3. Creates or versions each agent and pushes its skill, as `agents:sync` does.
 4. Binds `br-ceo` as the organization's CEO, once its stored toolset names every control-plane tool
@@ -221,23 +221,28 @@ Verified on 2026-11-08 UTC, after the member release rule, the sweep hold and th
 - Not run live: a member given a card with an unknown prefix, or one that asks for `main`. Both
   rules are prompt text, checked by tests only.
 
-### Releases are the founder's
+### Releases are autonomous
 
-The company's work stops at `dev` and staging. When a slug is delivered, the CEO creates
-`FOUNDER: release <slug>`, unassigned and `blocked`, naming the `DIR` and `SHIP` cards and the `dev`
-commit. The founder promotes `dev` to `main` and deploys production. No agent merges into `main` or
-deploys production.
+By the founder's ruling of 2026-11-07 (also in the founder's `~/.claude/CLAUDE.md`), releases need no
+person. When a slug is delivered, the CEO creates `RELEASE: <slug>` for `br-eng-lead`, naming the
+`DIR` and `SHIP` cards and the `dev` commit, unless a card with that title already exists. The lead
+checks that the slug really is delivered, that the commit is on `dev` and not yet on `main`, then
+opens a pull request from `dev` into `main`, merges it, deploys production with the repo's deploy
+command once one exists, runs the smoke check and rolls back on failure.
 
 The guard is every member's, not only engineering's, because any agent that writes cards can assign
 one to any member. `RELEASE_RULE` in `src/definitions/company/common.ts` is in the prompt of every
-agent a card starts: a card that asks to merge into `main`, push to it, open a pull request into
-it, or deploy production, whatever its prefix and whoever wrote it, goes to `blocked` with the note
-`releases are the founder's`. A card whose prefix the member's procedure has no section for is not
-done as its body asks any more: it goes to `blocked` with the note `no procedure for this card`
-(`UNKNOWN_CARD_RULE`). Before this, `br-product` ran a `TASK:` card's body, `curl` included.
+agent a card starts: only `br-eng-lead`, following its procedure on a `RELEASE` card, touches `main`
+or production. Any other card that asks for that, whatever its prefix and whoever wrote it, goes to
+`blocked` with the note `releases belong to the engineering lead`. A card whose prefix the member's
+procedure has no section for is not done as its body asks: it goes to `blocked` with the note
+`no procedure for this card` (`UNKNOWN_CARD_RULE`). Cards record no creator, so the lead's release
+guard rests on the board's state (a `Delivered` comment and a `done` `SHIP` card) rather than on who
+wrote the card. A forged `RELEASE` card can at worst promote work that is already reviewed on `dev`.
 
-These are prompts. What stops a token at `main` is GitHub: the preflight reports a `main` whose
-`pull_request` rule requires 0 approvals as a gap, because every agent token can merge.
+These are prompts. What GitHub enforces is the `protect-main` and `protect-dev` rulesets: no
+deletion, no force push, and a pull request for every change, with 0 approvals because releases are
+autonomous.
 
 ### Before anyone resumes the sweep
 
