@@ -13,12 +13,19 @@ import type {
  * it is and what the crew decided, passes on the customer's approval or note, and reads the files.
  *
  * `SimulatedPipeline` walks a film through every stage for development and demos.
- * `NaivePipeline` is the real one, still to be wired.
+ * `NaivePipeline` is the real one: one Naive computer per film, reporting through signed callbacks.
  */
 export interface PipelineClient {
   readonly kind: PipelineKind;
-  /** Starts making a film of `url`. `filmId` is the app's id, so a retried start is one run. */
-  start(input: { filmId: string; url: string }): Promise<{ runId: string }>;
+  /**
+   * Starts making a film of `url`. `filmId` is the app's id, so a retried start is one run. A
+   * `sample` film (a GTM sample) runs straight through with no approval step.
+   */
+  start(input: {
+    filmId: string;
+    url: string;
+    mode?: 'customer' | 'sample';
+  }): Promise<{ runId: string }>;
   /** Where the run is now. */
   status(runId: string): Promise<PipelineStatus>;
   /** The crew's events in order, after the event with id `after` when it is given. */

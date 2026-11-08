@@ -40,7 +40,7 @@ vi.mock('../src/server/next.ts', () => ({
   requireSignedIn: async () => page.principal,
   currentPrincipal: async () => page.principal,
   workerBindings: () => page.bindings,
-  simulatedEnvironment: () => page.simulatedEnv,
+  simulatedForCaller: async () => page.simulatedEnv,
 }));
 
 vi.mock('@clerk/nextjs', async () => {

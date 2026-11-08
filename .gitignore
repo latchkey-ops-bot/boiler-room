@@ -3,3 +3,6 @@ out
 .playwright-mcp
 *.mp4
 .env*
+
+# The stand-in film command's labelled test clips.
+!services/film-runner/standin/fixtures/*.mp4

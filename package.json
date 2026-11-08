@@ -35,6 +35,7 @@
     "web:db:migrate:production": "pnpm --filter @boiler-room/web db:migrate:production",
     "web:provision:staging": "pnpm --filter @boiler-room/web provision:staging",
     "web:provision:production": "pnpm --filter @boiler-room/web provision:production",
+    "web:runner:keys:staging": "pnpm --filter @boiler-room/web runner:keys:staging",
     "web:secrets:sync:staging": "pnpm --filter @boiler-room/web secrets:sync:staging",
     "web:secrets:sync:production": "pnpm --filter @boiler-room/web secrets:sync:production",
     "web:deploy:staging": "pnpm --filter @boiler-room/web deploy:staging",
@@ -43,7 +44,10 @@
     "web:rollback:production": "pnpm --filter @boiler-room/web rollback:production",
     "web:logs:staging": "pnpm --filter @boiler-room/web logs:staging",
     "web:logs:production": "pnpm --filter @boiler-room/web logs:production",
-    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts"
+    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts",
+    "runner:snapshot": "cd services/film-runner && exec node scripts/build-snapshot.ts",
+    "runner:e2e": "cd services/film-runner && exec node scripts/e2e-computer.ts",
+    "runner:test": "pnpm --filter @boiler-room/film-runner test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"
