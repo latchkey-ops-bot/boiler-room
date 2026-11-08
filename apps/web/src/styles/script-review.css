@@ -1,0 +1,616 @@
+/* Script review, built from boiler-room-design design-system/samples/script-review.html with the
+   tokens and components in tokens.css and components.css. Imported by the script review page only.
+   The preview inside the player wears the customer's brand from campaign.json, never ours: its
+   colours, radius and font names arrive as --b-* custom properties on .stage. */
+
+.script-review {
+  display: grid;
+  gap: var(--br-space-5);
+}
+
+/* ---------- Top bar: where you are, and the two ways out ---------- */
+
+.review-bar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-3) var(--br-space-4);
+  flex-wrap: wrap;
+  min-height: 72px;
+  padding: var(--br-space-3) 0;
+  background: var(--br-paper);
+  box-shadow: 0 var(--br-px) 0 0 var(--br-deep);
+}
+.review-crumb {
+  margin-bottom: calc(var(--br-space-4) * -1);
+}
+.review-bar h1 {
+  font-size: var(--br-text-h3);
+}
+.review-bar .badges {
+  display: flex;
+  gap: var(--br-space-2);
+  flex-wrap: wrap;
+}
+.review-bar .actions {
+  display: flex;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+  box-shadow: none;
+}
+.back-link .icon {
+  width: 14px;
+  height: 14px;
+  transform: scaleX(-1);
+}
+
+.review-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 400px;
+  gap: var(--br-space-6);
+  align-items: start;
+}
+.review-main,
+.inspector,
+.inspector > * {
+  min-width: 0;
+}
+
+/* ---------- Player: the selected scene in the customer's brand ---------- */
+
+.player {
+  --frame: var(--br-ink);
+  padding: 0;
+  background: var(--br-ink);
+}
+.stage {
+  position: relative;
+  display: grid;
+  place-items: center;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: var(--br-ink);
+}
+.stage .tag {
+  position: absolute;
+  left: 10px;
+  top: 8px;
+  z-index: 2;
+  padding: 2px 6px;
+  background: var(--br-ink);
+  color: var(--br-sky);
+  font: 600 10px / 1.4 var(--br-font-label);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.frame {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  container-type: inline-size;
+  background: var(--b-bg);
+  color: var(--b-fg);
+  font-family: var(--b-body);
+}
+.frame-wide {
+  width: 100%;
+}
+.frame-tall {
+  aspect-ratio: 9 / 16;
+}
+.frame-square {
+  aspect-ratio: 1;
+}
+.frame .copy {
+  position: absolute;
+  inset: 14% 8%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 1.6cqw;
+}
+.frame .copy-center {
+  align-items: center;
+  text-align: center;
+}
+.frame-wide.with-shot .copy {
+  right: 50%;
+}
+.frame-tall.with-shot .copy,
+.frame-square.with-shot .copy {
+  inset: 12% 9% 50%;
+}
+.frame .big {
+  font: 800 7.4cqw / 0.95 var(--b-display);
+  letter-spacing: -0.02em;
+}
+.frame .mid {
+  font: 700 max(12px, 3.2cqw) / 1.2 var(--b-body);
+}
+.frame .small {
+  color: var(--b-muted);
+  font: 600 max(11px, 2.1cqw) / 1.3 var(--b-body);
+}
+.frame em {
+  font-style: normal;
+  color: var(--b-primary);
+}
+.frame .cta {
+  margin-top: 1cqw;
+  padding: 1.2cqw 2.6cqw;
+  border-radius: var(--b-radius);
+  background: var(--b-primary);
+  color: var(--b-bg);
+  font: 800 2.6cqw / 1.1 var(--b-display);
+}
+.frame-tall .big {
+  font-size: 12cqw;
+}
+.frame-tall .mid {
+  font-size: max(12px, 5.6cqw);
+}
+.frame-tall .small {
+  font-size: max(11px, 4.2cqw);
+}
+.frame-tall .cta {
+  font-size: 4.6cqw;
+}
+.frame-square .big {
+  font-size: 9.6cqw;
+}
+.frame-square .mid {
+  font-size: max(12px, 4.4cqw);
+}
+.frame-square .small {
+  font-size: max(11px, 3.2cqw);
+}
+.frame-square .cta {
+  font-size: 3.6cqw;
+}
+/* A stand-in for the product shot the scene shows. Customer brands keep their own shapes. */
+.frame .shot {
+  position: absolute;
+  right: -4%;
+  top: 18%;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 6%;
+  width: 50%;
+  aspect-ratio: 16 / 10;
+  padding: 3%;
+  border: 2px solid color-mix(in srgb, var(--b-fg) 16%, var(--b-bg));
+  border-radius: var(--b-radius);
+  background: color-mix(in srgb, var(--b-fg) 6%, var(--b-bg));
+}
+.frame-tall .shot,
+.frame-square .shot {
+  left: 9%;
+  right: -14%;
+  top: 56%;
+  width: auto;
+}
+.frame .shot .dots {
+  display: flex;
+  gap: 4px;
+}
+.frame .shot .dots i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--b-fg) 16%, var(--b-bg));
+}
+.frame .shot .bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 6%;
+}
+.frame .shot .bars i {
+  flex: 1;
+  border-radius: 4px 4px 0 0;
+  background: var(--b-primary);
+}
+.frame .shot .bars i:nth-child(odd) {
+  background: color-mix(in srgb, var(--b-primary) 40%, var(--b-bg));
+}
+.frame .safe {
+  position: absolute;
+  inset: 5%;
+  border: 1px dashed rgba(151, 215, 255, 0.35);
+  pointer-events: none;
+}
+
+.player .controls {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-3) var(--br-space-5);
+  flex-wrap: wrap;
+  padding: var(--br-space-3) var(--br-space-4);
+  background: var(--br-white);
+}
+.player .where {
+  display: flex;
+  align-items: baseline;
+  gap: var(--br-space-3);
+  margin-right: auto;
+}
+.player .time {
+  color: var(--br-ink);
+  font: 400 var(--br-text-mono) / 1.5 var(--br-font-mono);
+  white-space: nowrap;
+}
+.seg-field {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--br-space-2);
+}
+.seg-field .seg button:disabled {
+  color: var(--br-muted);
+  cursor: not-allowed;
+}
+
+/* ---------- Timeline: scenes, voice, music and sound on one clock ---------- */
+
+.timeline {
+  display: grid;
+  gap: var(--br-space-3);
+  margin-top: var(--br-space-5);
+}
+.timeline .lane {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+.timeline .lane > .label {
+  color: var(--br-muted);
+  text-align: right;
+}
+.timeline .ruler {
+  position: relative;
+  height: 18px;
+  color: var(--br-muted);
+}
+.timeline .ruler span {
+  position: absolute;
+  transform: translateX(-50%);
+}
+.timeline .ruler span:first-child {
+  transform: none;
+}
+.timeline .ruler span:last-child {
+  transform: translateX(-100%);
+}
+.timeline .lane-track {
+  position: relative;
+  height: 30px;
+}
+.timeline .scenes {
+  height: 56px;
+}
+.timeline .scene {
+  --frame: var(--br-steel);
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  display: grid;
+  align-content: center;
+  gap: 2px;
+  margin-left: 2px;
+  padding: 0 10px;
+  overflow: hidden;
+  border: 0;
+  background: var(--br-white);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  box-shadow:
+    0 -2px 0 0 var(--frame),
+    0 2px 0 0 var(--frame),
+    -2px 0 0 0 var(--frame),
+    2px 0 0 0 var(--frame);
+}
+.timeline .scene strong {
+  color: var(--br-deep);
+  font: 700 15px / 1.1 var(--br-font-display);
+  white-space: nowrap;
+}
+.timeline .scene .label {
+  color: var(--br-muted);
+  white-space: nowrap;
+}
+.timeline .scene:hover {
+  background: var(--br-sky-soft);
+}
+.timeline .scene:focus-visible {
+  outline: 2px dashed var(--br-deep);
+  outline-offset: 4px;
+}
+.timeline .scene[aria-pressed="true"] {
+  --frame: var(--br-deep);
+  z-index: 1;
+  background: var(--br-sky);
+  box-shadow:
+    0 -2px 0 0 var(--frame),
+    0 2px 0 0 var(--frame),
+    -2px 0 0 0 var(--frame),
+    2px 0 0 0 var(--frame),
+    calc(var(--br-px) * 3) calc(var(--br-px) * 3) 0 0 var(--br-deep);
+}
+.timeline .scene[aria-pressed="true"] .label {
+  color: var(--br-ink);
+}
+.timeline .transition {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  background: var(--br-cream);
+  box-shadow:
+    0 -2px 0 0 var(--br-deep),
+    0 2px 0 0 var(--br-deep),
+    -2px 0 0 0 var(--br-deep),
+    2px 0 0 0 var(--br-deep);
+}
+.timeline .voice > span {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  margin-left: 2px;
+  background: var(--br-cream);
+  box-shadow:
+    0 -2px 0 0 var(--br-cream-deep),
+    0 2px 0 0 var(--br-cream-deep),
+    -2px 0 0 0 var(--br-cream-deep),
+    2px 0 0 0 var(--br-cream-deep);
+}
+.timeline .music {
+  margin: 2px;
+  background: repeating-linear-gradient(90deg, var(--br-sky-soft) 0 6px, var(--br-sky) 6px 9px);
+}
+.timeline .sfx > span {
+  position: absolute;
+  top: 7px;
+  width: 16px;
+  height: 16px;
+  margin-left: -8px;
+  color: var(--br-deep);
+}
+.timeline .sfx .icon {
+  width: 16px;
+  height: 16px;
+  vertical-align: top;
+}
+
+/* ---------- Approve: the choices the crew needs, then one button ---------- */
+
+dialog.approve-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: var(--br-space-6);
+  overflow: auto;
+  border: 0;
+  color: var(--br-ink);
+}
+dialog.approve-dialog::backdrop {
+  background: rgba(11, 46, 64, 0.55);
+}
+.approve-dialog h2 {
+  font-size: var(--br-text-h3);
+}
+.approve-dialog fieldset {
+  display: grid;
+  gap: var(--br-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.approve-dialog legend {
+  margin-bottom: var(--br-space-2);
+  color: var(--br-muted);
+}
+.approve-dialog .check {
+  align-items: flex-start;
+}
+.approve-dialog .choice {
+  display: grid;
+  line-height: 1.35;
+}
+.approve-dialog .choice .mono {
+  font-size: 12px;
+}
+.approve-dialog .check input[type="radio"]:checked {
+  background:
+    linear-gradient(var(--br-deep), var(--br-deep)) center / 8px 8px no-repeat var(--br-white);
+  box-shadow:
+    0 -3px 0 0 var(--br-deep),
+    0 3px 0 0 var(--br-deep),
+    -3px 0 0 0 var(--br-deep),
+    3px 0 0 0 var(--br-deep);
+}
+.approve-dialog .shapes {
+  display: flex;
+  gap: var(--br-space-3) var(--br-space-5);
+  flex-wrap: wrap;
+}
+.approve-dialog .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+  margin-top: var(--br-space-2);
+}
+
+/* ---------- Inspector: the scene's words, every source, and the data ---------- */
+
+.inspector {
+  display: grid;
+  gap: var(--br-space-5);
+  align-content: start;
+}
+.inspector .panel {
+  display: grid;
+  gap: var(--br-space-4);
+}
+.inspector .panel[hidden] {
+  display: none;
+}
+.inspector .panel > * {
+  min-width: 0;
+}
+.panel .scene-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--br-space-2);
+}
+.panel .scene-head h2 {
+  font-size: var(--br-text-h4);
+  letter-spacing: -0.01em;
+}
+.panel .props {
+  display: flex;
+  gap: var(--br-space-2);
+  flex-wrap: wrap;
+}
+.panel .intro {
+  color: var(--br-muted);
+  font-size: var(--br-text-sm);
+}
+.panel .json {
+  max-height: 480px;
+  padding: var(--br-space-3);
+  overflow: auto;
+  background: var(--br-paper);
+  color: var(--br-ink);
+  font: 400 12px / 1.5 var(--br-font-mono);
+}
+.panel .json pre {
+  margin: 0;
+  font: inherit;
+}
+.panel .json:focus-visible {
+  outline: 2px dashed var(--br-deep);
+  outline-offset: 2px;
+}
+
+.copy-item {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.copy-item .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--br-space-2);
+}
+.copy-item .count {
+  color: var(--br-muted);
+}
+.copy-item .count.over {
+  color: var(--br-error-ink);
+}
+.copy-item .value {
+  color: var(--br-ink);
+  font: 700 20px / 1.3 var(--br-font-display);
+  letter-spacing: -0.01em;
+}
+.copy-item .value.body {
+  font: 600 16px / 1.5 var(--br-font-body);
+}
+.inspector .claim-card .top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--br-space-2);
+  flex-wrap: wrap;
+}
+
+.confirm {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.confirm .row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.confirm h3 {
+  font-size: 20px;
+}
+.confirm p {
+  font-size: var(--br-text-sm);
+}
+.confirm .claim-card {
+  background: var(--br-white);
+}
+.stack-sm {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.changes textarea.input {
+  min-height: 84px;
+}
+
+@media (max-width: 1280px) {
+  .review-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 860px) {
+  .review-bar {
+    position: static;
+  }
+}
+@media (max-width: 640px) {
+  .review-bar .actions {
+    width: 100%;
+    margin-left: 0;
+  }
+  .player .where {
+    width: 100%;
+  }
+  .timeline .lane {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+  .timeline .lane > .label {
+    text-align: left;
+  }
+  .timeline .lane > .spacer {
+    display: none;
+  }
+  .timeline .scene {
+    padding: 0 6px 0 10px;
+  }
+  .timeline .scene strong {
+    font-size: 13px;
+  }
+  .timeline .scene .label {
+    display: none;
+  }
+  dialog.approve-dialog {
+    padding: var(--br-space-5);
+  }
+  .approve-dialog .dialog-actions {
+    justify-content: stretch;
+  }
+  .approve-dialog .dialog-actions .btn {
+    flex: 1;
+  }
+}
