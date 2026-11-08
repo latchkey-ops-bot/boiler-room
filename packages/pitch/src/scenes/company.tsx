@@ -449,7 +449,7 @@ export function CompanyGtm({ duration }: SceneProps) {
       </Rise>
       <Rise delay={10} style={{ position: 'absolute', left: SIDE, top: 330 }}>
         <Pill fill={C.attentionSoft} color={C.attentionInk} size={26}>
-          Set up · daily caps at $0, so switched off for now
+          Switched on today · in dry run · the founder posts
         </Pill>
       </Rise>
       <div

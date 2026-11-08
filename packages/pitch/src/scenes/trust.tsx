@@ -57,7 +57,7 @@ export function TrustCaps({ duration }: SceneProps) {
       </div>
       <Rise delay={64} style={{ position: 'absolute', left: SIDE, top: 900 }}>
         <p style={body(34, C.muted)}>
-          Live caps on Naive, per agent, per day. The 4 GTM agents are at $0: switched off.
+          Live caps on Naive, per agent, per day. The 4 GTM agents: $1 to $5 a day.
         </p>
       </Rise>
     </SceneShell>
