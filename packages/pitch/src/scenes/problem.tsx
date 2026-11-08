@@ -1,4 +1,4 @@
-import { C, F } from '../brand.ts';
+import { C } from '../brand.ts';
 import { display, Kicker, PixelBox, Rise, SceneShell, SIDE, Words } from '../ui.tsx';
 import type { SceneProps } from './types.ts';
 
@@ -39,16 +39,12 @@ export function ProblemAnswer({ duration }: SceneProps) {
         <div style={{ display: 'flex', gap: 64, marginTop: 88 }}>
           <Rise delay={30}>
             <PixelBox fill={C.cream} style={chip}>
-              <span style={{ fontFamily: F.pixel, fontWeight: 700, fontSize: 64, color: C.deep }}>
-                About fifteen minutes
-              </span>
+              <span style={display(60)}>About fifteen minutes</span>
             </PixelBox>
           </Rise>
           <Rise delay={42}>
             <PixelBox fill={C.cream} style={chip}>
-              <span style={{ fontFamily: F.pixel, fontWeight: 700, fontSize: 64, color: C.deep }}>
-                A couple of dollars
-              </span>
+              <span style={display(60)}>A couple of dollars</span>
             </PixelBox>
           </Rise>
         </div>

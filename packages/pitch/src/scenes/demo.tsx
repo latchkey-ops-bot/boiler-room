@@ -45,9 +45,9 @@ export function DemoTimelapse({ duration, manifest }: SceneProps) {
             <Pill>Real run · sped up</Pill>
             <span
               style={{
-                fontFamily: F.pixel,
+                fontFamily: F.mono,
                 fontWeight: 700,
-                fontSize: 60,
+                fontSize: 56,
                 color: C.deep,
                 minWidth: 150,
                 textAlign: 'right',

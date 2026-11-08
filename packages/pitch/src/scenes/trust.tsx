@@ -47,23 +47,13 @@ export function TrustCaps({ duration }: SceneProps) {
           <Rise key={c.who} delay={14 + i * 4}>
             <PixelBox lift={8} style={{ padding: '24px 28px', height: 190 }}>
               <p style={body(28, C.muted, 700)}>{c.who}</p>
-              <p
-                style={{
-                  fontFamily: F.pixel,
-                  fontWeight: 700,
-                  fontSize: 84,
-                  color: C.deep,
-                  margin: '12px 0 0',
-                }}
-              >
-                {c.cap}
-              </p>
+              <p style={{ ...display(88), marginTop: 14 }}>{c.cap}</p>
             </PixelBox>
           </Rise>
         ))}
       </div>
       <Rise delay={64} style={{ position: 'absolute', left: SIDE, top: 900 }}>
-        <p style={body(34, C.muted)}>A day&rsquo;s cap, per agent. Spend stops there.</p>
+        <p style={body(34, C.muted)}>Live caps on Naive, per agent, per day.</p>
       </Rise>
     </SceneShell>
   );
@@ -133,7 +123,7 @@ export function TrustTripwire({ duration }: SceneProps) {
           drop={C.pink}
           style={{ padding: '26px 44px', display: 'inline-block' }}
         >
-          <p style={display(64, C.attentionInk)}>Films halt. Nothing overspends.</p>
+          <p style={display(64, C.attentionInk)}>Below the line, films halt.</p>
         </PixelBox>
       </div>
     </SceneShell>

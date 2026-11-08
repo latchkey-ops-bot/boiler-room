@@ -200,11 +200,11 @@ export function CompanyOrg({ duration }: SceneProps) {
 
 /** The first autonomous cycle, card by card, with the real UTC times from the CEO's board. */
 const CYCLE = [
-  { at: '11:10:42', who: 'CEO', what: 'Sweep: wakes and reads the board' },
+  { at: '11:10:42', who: 'CEO', what: 'Sweep: reads the board' },
   { at: '11:10:57', who: 'CEO', what: 'DIR: scene-library-first-scene' },
-  { at: '11:12:39', who: 'Product', what: 'Spec merged (design PR #13)' },
+  { at: '11:12:39', who: 'Product', what: 'Spec merged: design PR #13' },
   { at: '11:12:48', who: 'Product', what: 'BUILD: scene-library-first-scene' },
-  { at: '11:13:37', who: 'Eng lead', what: 'ENG 1/3: status-relay layout and timing' },
+  { at: '11:13:37', who: 'Eng lead', what: 'ENG 1/3: status-relay layout' },
   { at: '11:21:34', who: 'Engineer', what: 'Pull request #32 opened' },
 ];
 
@@ -236,12 +236,12 @@ export function CompanyCycle({ duration }: SceneProps) {
   return (
     <SceneShell duration={duration}>
       <Kicker>This morning · UTC</Kicker>
-      <div style={{ position: 'absolute', left: SIDE, top: 200, width: 620 }}>
+      <div style={{ position: 'absolute', left: SIDE, top: 200, width: 560 }}>
         <Rise>
-          <p style={display(70)}>One idea, from the CEO&rsquo;s card to a pull request.</p>
+          <p style={display(64)}>One idea, from the CEO&rsquo;s card to a pull request.</p>
         </Rise>
         <Rise delay={8} style={{ marginTop: 56 }}>
-          <span style={{ fontFamily: F.pixel, fontWeight: 700, fontSize: 132, color: C.ink }}>
+          <span style={{ fontFamily: F.mono, fontWeight: 700, fontSize: 104, color: C.ink }}>
             {toHms(clock)}
           </span>
         </Rise>
@@ -251,7 +251,7 @@ export function CompanyCycle({ duration }: SceneProps) {
         </div>
       </div>
       <div
-        style={{ position: 'absolute', left: 900, width: 860, top: 168, display: 'grid', gap: 22 }}
+        style={{ position: 'absolute', left: 780, width: 980, top: 168, display: 'grid', gap: 22 }}
       >
         {CYCLE.map((card, i) => {
           const p = enter(frame, appear[i] ?? 0, 10);
@@ -277,11 +277,12 @@ export function CompanyCycle({ duration }: SceneProps) {
                     fontSize: 26,
                     color: C.muted,
                     width: 136,
+                    flexShrink: 0,
                   }}
                 >
                   {card.at}
                 </span>
-                <span style={{ width: 170 }}>
+                <span style={{ width: 190, flexShrink: 0 }}>
                   <Pill size={20}>{card.who}</Pill>
                 </span>
                 <span style={body(30, C.ink, 700)}>{card.what}</span>
