@@ -61,33 +61,54 @@ request merged to find out breaks `dev` for everyone.
    `ghp_` or `BEGIN OPENSSH PRIVATE KEY`.
 3. Run lint, typecheck and tests on the pull request merged onto the tip of its base: that is the
    code the base holds after the merge, so a pull request cut from an older `dev` is judged on
-   today's `dev`. In `~/boiler-room` (clone the repo there if it is missing), write this script,
-   and run it in the background, because a `bash` call is killed after about 30 seconds:
+   today's `dev`. The checks run the pull request's code, which nobody has merged yet, and your
+   computer holds the Cloudflare keys and the GitHub token. So they run as `br-check`, a user of
+   your computer that cannot read your files, in its own clone in `/home/br-check/boiler-room`,
+   with no variable of yours and no install script. Never run a pull request's install, lint,
+   typecheck, tests or build as yourself or in `~/boiler-room`. Write this script, and run it in
+   the background, because a `bash` call is killed after about 30 seconds:
 
    ```bash
    cat > ~/check.sh <<'SH'
-   # bash ~/check.sh <base> [<pull request number>]
+   # bash ~/check.sh <base> [<pull request number> [<changed file> ...]]
    export npm_config_manage_package_manager_versions=false
-   cd ~/boiler-room && { git merge --abort 2>/dev/null; git reset -q --hard; } \
-     && git fetch -q origin && git checkout -q --detach "origin/$1" || { echo "CHECK_EXIT setup"; exit; }
-   if [ -n "$2" ]; then
-     git fetch -q origin "+pull/$2/head:pr-$2" && git -c user.name=br-eng-lead \
-       -c user.email=br-eng-lead@agents.boiler-room.invalid merge -q --no-ff --no-edit "pr-$2" \
+   # The pull request's code runs as br-check, which cannot read ~/.boiler-room.env or ~/.netrc.
+   id br-check >/dev/null 2>&1 || sudo -n useradd --create-home --shell /bin/bash br-check \
+     || { echo "CHECK_EXIT setup"; exit; }
+   sudo -n -u br-check true || { echo "CHECK_EXIT setup"; exit; }
+   for f in ~/.boiler-room.env ~/.netrc; do
+     if [ -e "$f" ] && sudo -n -u br-check test -r "$f"; then echo "CHECK_EXIT exposed"; exit; fi
+   done
+   sudo -n -u br-check env -i PATH="$PATH" HOME=/home/br-check CI=1 \
+     npm_config_manage_package_manager_versions=false bash -s -- "$@" <<'CHECK' || echo "CHECK_EXIT setup"
+   base=$1; pr=$2; if [ $# -ge 2 ]; then shift 2; else shift $#; fi
+   command -v git >/dev/null && command -v pnpm >/dev/null || { echo "CHECK_EXIT tools"; exit; }
+   cd ~ && { [ -d boiler-room ] || git clone -q https://github.com/latchkey-ops-bot/boiler-room; } \
+     && cd boiler-room && { git merge --abort 2>/dev/null; git reset -q --hard; } \
+     && git fetch -q origin && git checkout -q --detach "origin/$base" || { echo "CHECK_EXIT setup"; exit; }
+   if [ -n "$pr" ]; then
+     git fetch -q origin "+pull/$pr/head:pr-$pr" && git -c user.name=br-eng-lead \
+       -c user.email=br-eng-lead@agents.boiler-room.invalid merge -q --no-ff --no-edit "pr-$pr" \
        || { echo "CHECK_EXIT conflict"; exit; }
    fi
-   pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test
+   if [ $# -gt 0 ]; then lint() { pnpm exec biome check -- "$@"; }; else lint() { pnpm lint; }; fi
+   pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile && lint "$@" && pnpm typecheck && pnpm test
    echo "CHECK_EXIT $?"
+   CHECK
    SH
    nohup bash ~/check.sh <base> <n> > ~/check-<n>.log 2>&1 &
    ```
 
    Poll its log until it prints its `CHECK_EXIT` line. `CHECK_EXIT 0` passes. `CHECK_EXIT conflict`
-   means the pull request no longer merges into its base: it has failed review. The engineer's
-   note saying the checks pass is not a check.
+   means the pull request no longer merges into its base: it has failed review. `CHECK_EXIT setup`,
+   `tools` or `exposed` means the checks cannot run apart from your keys: never run them another
+   way. Move your card to `blocked` with the note `checks cannot run apart from the keys` and that
+   line. The engineer's note saying the checks pass is not a check.
    - **A check fails.** Run the same check on the base alone (`bash ~/check.sh <base>`, in the
      background). If it passes there, the pull request broke it: it has failed review.
    - **The base already fails it.** The failure is not the pull request's: it passes that check
-     when its own changed files do (for lint, `pnpm exec biome check -- <each changed file>`), and
+     when its own changed files do (for lint, `bash ~/check.sh <base> <n> <each changed file>`, in
+     the background, which lints only those files with Biome and runs the rest of the checks), and
      the rest of its checks pass. Then it may be merged. Unless an open card already names that
      failure, create `ENG: <slug> fix <n>` for `br-engineer-1`, whose body names the check that
      `origin/dev` fails, the commit, and the first error, so `dev` is fixed too, and say so in your

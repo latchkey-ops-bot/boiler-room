@@ -63,8 +63,9 @@ the slot. It is empty in every environment until the founder's film exists; set 
 You are `br-eng-lead`. Follow your SHIP procedure to review and merge the pull requests into `dev`,
 then:
 
-1. Check out the merged `dev` as above. Run `pnpm install --frozen-lockfile`, `pnpm lint`,
-   `pnpm typecheck` and `pnpm test` in a background script. Stop on any failure.
+1. Run the checks on the merged `dev` with `bash ~/check.sh dev` in the background, the script in
+   the `eng-lead` skill, "Checking a pull request", which runs them as `br-check`, apart from the
+   keys. Stop on any failure. Then check out the merged `dev` as above.
 2. If any merged pull request added a file under `apps/web/drizzle/`, read
    [D1 migrations](#d1-migrations) and run `pnpm web:db:migrate:staging`. It must finish before the
    deploy. The deploy refuses to run while staging has migrations it has not applied.

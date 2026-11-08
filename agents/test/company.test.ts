@@ -1,4 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CONTROL_PLANE,
@@ -690,6 +693,80 @@ describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
   it('give the engineer a fixed note to block on, which the CEO looks for', () => {
     expect(flat('engineer')).toContain('`waiting for PR #<n> to be merged into dev`');
     expect(flat('engineer')).toContain('never build on its unmerged branch');
+  });
+});
+
+describe("the lead's checks run apart from the keys", () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+  /** The lead's `~/check.sh`, as the skill writes it. */
+  const leadScript = () => {
+    const raw = skillContent({ slug: 'eng-lead', description: '' });
+    const match = /cat > ~\/check\.sh <<'SH'\n([\s\S]*?)\n\s*SH\n/.exec(raw);
+    if (!match?.[1]) throw new Error('eng-lead has no check script');
+    return `${match[1]
+      .split('\n')
+      .map((line) => line.replace(/^ {3}/, ''))
+      .join('\n')}\n`;
+  };
+
+  it("run the pull request's code as br-check, with no variable of the lead's and no install script", () => {
+    const script = leadScript();
+    expect(script).toContain('sudo -n -u br-check env -i PATH="$PATH" HOME=/home/br-check CI=1');
+    expect(script).toContain(
+      'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile && lint "$@" && pnpm typecheck && pnpm test',
+    );
+    // Everything after the user switch is fed to br-check's shell: nothing runs pnpm before it.
+    const before = script.slice(0, script.indexOf('sudo -n -u br-check env -i'));
+    expect(before).not.toMatch(/\bpnpm\b(?! version)/);
+    expect(before).not.toContain('~/boiler-room');
+    const lead = flat('eng-lead');
+    expect(lead).toContain(
+      "Never run a pull request's install, lint, typecheck, tests or build as yourself or in `~/boiler-room`",
+    );
+    expect(lead).toContain('`checks cannot run apart from the keys`');
+    const deploy = skillContent({ slug: 'engineering-deploy', description: '', root: 'repo' });
+    expect(deploy.replace(/\s+/g, ' ')).toContain('`bash ~/check.sh dev` in the background');
+  });
+
+  /** Runs the script with a stand-in `sudo` that runs the command as this user, and `id`. */
+  const runScript = (options: { readable: boolean; sudoWorks: boolean }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'br-check-sh-'));
+    try {
+      const bin = join(dir, 'bin');
+      const home = join(dir, 'home');
+      mkdirSync(bin);
+      mkdirSync(home);
+      writeFileSync(join(dir, 'check.sh'), leadScript());
+      writeFileSync(join(bin, 'id'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(
+        join(bin, 'sudo'),
+        options.sudoWorks
+          ? '#!/bin/bash\nwhile [ "$1" = -n ] || [ "$1" = -u ]; do [ "$1" = -u ] && shift; shift; done\nexec "$@"\n'
+          : '#!/bin/sh\necho "sudo: a password is required" >&2\nexit 1\n',
+        { mode: 0o755 },
+      );
+      if (options.readable) writeFileSync(join(home, '.boiler-room.env'), '# fake\n');
+      const result = spawnSync('bash', [join(dir, 'check.sh'), 'dev', '7'], {
+        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home },
+        encoding: 'utf8',
+        timeout: 20_000,
+      });
+      return `${result.stdout}${result.stderr}`;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('stop with CHECK_EXIT exposed when br-check can read a key file, before any clone', () => {
+    const out = runScript({ readable: true, sudoWorks: true });
+    expect(out.trim().split('\n').at(-1)).toBe('CHECK_EXIT exposed');
+    expect(out).not.toMatch(/Cloning|clone/);
+  });
+
+  it('stop with CHECK_EXIT setup when the lead cannot act as br-check', () => {
+    const out = runScript({ readable: false, sudoWorks: false });
+    expect(out).toContain('CHECK_EXIT setup');
+    expect(out).not.toContain('CHECK_EXIT exposed');
   });
 });
 
