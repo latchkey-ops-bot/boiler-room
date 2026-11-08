@@ -301,7 +301,9 @@ Resuming it is the founder's call. Two things bear on it:
    `pnpm company:verify`. The lockdown check still fails while any agent the company board
    over-exposes is unfixed (see "The company board seats every agent").
 2. **`main` and `dev` have rules, on both repos.** Until they do, `company:sync` and
-   `company:status` report a gap, and only prompts keep an agent off `main` and `dev`. Add the rulesets from
+   `company:status` report a gap, and only prompts keep an agent off `main` and `dev`. A rules read
+   is tried four times with backoff; one that still fails is printed as `UNKNOWN`, not as a gap,
+   because it proves nothing (it failed on 3 of 10 runs on 2026-11-08 with the rulesets intact). Add the rulesets from
    `docs/company/README.md` section 5 C: `protect-main` and `protect-dev`, each with Restrict
    deletions, Block force pushes, and Require a pull request, and an empty bypass list. On `main`,
    require at least 1 approval from a person whose account holds no agent token; `dev` stays at 0,

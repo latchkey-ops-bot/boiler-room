@@ -315,7 +315,8 @@ export async function syncCompany(
   const github = await preflight();
   for (const line of github.accepted) log(`github    ACCEPTED ${line}`);
   for (const gap of github.gaps) log(`github    WARNING ${gap}`);
-  if (!github.gaps.length) {
+  for (const line of github.unknown) log(`github    ${line}`);
+  if (!github.gaps.length && !github.unknown.length) {
     log(
       `github    each token reaches its own repo${github.accepted.length ? ' (and the other, accepted above)' : ' only'}; main and dev have their rules`,
     );

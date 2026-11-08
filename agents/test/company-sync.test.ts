@@ -34,8 +34,15 @@ const env = await vi.hoisted(async () => {
 
 const { rmSync } = await import('node:fs');
 const { GITHUB_OWNER, netrc } = await import('../src/company/github.ts');
-const { branchRules, canPush, githubPreflight, missingRules, OTHER_REPO_REACH_ACCEPTED } =
-  await import('../src/company/preflight.ts');
+const {
+  branchRules,
+  canPush,
+  githubPreflight,
+  missingRules,
+  OTHER_REPO_REACH_ACCEPTED,
+  readBranchRules,
+  RULES_RETRY_MS,
+} = await import('../src/company/preflight.ts');
 const { deployKeysOn, ensureComputer, placeDeployKeys, placeFile, placeNetrc, syncCompany } =
   await import('../src/company/sync.ts');
 const { CLOUDFLARE_KEYS, cloudflareTokenActive, deployEnvFile } = await import(
@@ -295,7 +302,7 @@ describe('ensureComputer', () => {
 const served = async () => [...CONTROL_PLANE_TOOLS];
 
 describe('syncCompany', () => {
-  const clean: GithubReport = { reach: [], rules: [], gaps: [], accepted: [] };
+  const clean: GithubReport = { reach: [], rules: [], gaps: [], accepted: [], unknown: [] };
 
   it("binds br-ceo as the organization's CEO, after its stored toolset names every control-plane tool off", async () => {
     const fake = fakeClient();
@@ -694,8 +701,60 @@ describe('the GitHub preflight', () => {
       expect(await canPush('fake', 'boiler-room', fetchFn), `${status}`).toBe(expected);
     }
     expect(
-      await missingRules('boiler-room', 'dev', async () => new Response('', { status: 403 })),
+      await missingRules('boiler-room', 'dev', async () => new Response('', { status: 403 }), []),
     ).toBe(null);
+  });
+
+  it('tries a failed rules read again with backoff, and keeps the rules it then reads', async () => {
+    const answers: (() => Response)[] = [
+      () => new Response('', { status: 502 }),
+      () => {
+        throw new Error('socket hang up');
+      },
+      () => Response.json(allRules.map((type) => ({ type }))),
+    ];
+    const fetchFn = vi.fn(async () => (answers.shift() as () => Response)());
+    const slept: number[] = [];
+    const read = await readBranchRules('boiler-room', 'main', fetchFn, [5, 10, 20], async (ms) => {
+      slept.push(ms);
+    });
+    expect(read).toEqual({ ok: true, missing: [], approvals: 0 });
+    expect(fetchFn).toHaveBeenCalledTimes(3);
+    expect(slept).toEqual([5, 10]);
+    expect(RULES_RETRY_MS.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('reports rules it could not read as UNKNOWN, never as a gap', async () => {
+    const github = fakeGithub(
+      { [env.tokens.eng]: ['boiler-room'], [env.tokens.design]: ['boiler-room-design'] },
+      fullRules,
+    );
+    const reset = Math.floor(Date.UTC(2026, 10, 8, 13, 0, 0) / 1000);
+    const flaky = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/boiler-room/rules/branches/dev')) {
+        return new Response('', {
+          status: 403,
+          headers: { 'x-ratelimit-remaining': '0', 'x-ratelimit-reset': String(reset) },
+        });
+      }
+      return github.fetchFn(url, init);
+    });
+    const report = await githubPreflight(read, flaky, [0, 0, 0]);
+    expect(report.gaps).toEqual([]);
+    expect(report.unknown).toEqual([
+      "UNKNOWN: the rules on boiler-room dev could not be read after 4 tries (HTTP 403, GitHub's rate limit for unauthenticated reads is used up until 2026-11-08T13:00:00.000Z). Not a gap: run it again.",
+    ]);
+    expect(
+      report.rules.find((item) => item.branch === 'dev' && item.repo === 'boiler-room'),
+    ).toEqual({
+      repo: 'boiler-room',
+      branch: 'dev',
+      missing: null,
+      approvals: null,
+    });
+    expect(
+      flaky.mock.calls.filter(([url]) => url.endsWith('/boiler-room/rules/branches/dev')),
+    ).toHaveLength(4);
   });
 });
 

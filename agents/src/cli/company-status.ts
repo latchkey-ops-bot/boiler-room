@@ -57,9 +57,14 @@ console.table(
   status.github.rules.map((item) => ({ ...item, missing: item.missing?.join(', ') ?? 'unknown' })),
 );
 for (const line of status.github.accepted) console.log(`GitHub, accepted: ${line}`);
+for (const line of status.github.unknown) console.log(`GitHub, ${line}`);
 if (status.github.gaps.length) {
   console.log('Not ready to resume the sweep. GitHub differs from the spec:');
   for (const gap of status.github.gaps) console.log(`- ${gap}`);
+} else if (status.github.unknown.length) {
+  console.log(
+    `GitHub matches the spec where it could be read; ${status.github.unknown.length} read(s) are UNKNOWN above, not gaps. Run pnpm company:status again.`,
+  );
 } else {
   console.log(
     `GitHub matches the spec${status.github.accepted.length ? ', apart from the accepted risks above' : ''}.`,
