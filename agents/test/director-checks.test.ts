@@ -300,6 +300,52 @@ describe('checkSubmission', () => {
     expect(await codesAfter(edit)).toContain(expected);
   });
 
+  describe('superlatives against the cited quotes', () => {
+    const growth = {
+      id: 'growth',
+      text: 'The fastest-growing teams review with Fernhook',
+      sourceUrl: 'https://fernhook.example.com/customers',
+      quote: 'The fastest-growing teams review with Fernhook. Our best-seller is the preview link.',
+      status: 'approved' as const,
+    };
+    async function superlativeIssues(value: string, claimIds: string[]) {
+      const submission = exampleSubmission();
+      const research = exampleResearch();
+      research.claims.push(structuredClone(growth));
+      submission.campaign.claims.push(structuredClone(growth));
+      const line = text(submission.campaign, 'value-line');
+      line.value = value;
+      line.claimIds = claimIds;
+      const verdict = await checkSubmission(submission, research, exampleBrief());
+      return verdict.blocking
+        .filter((issue) => issue.code === 'CLAIM_SUPERLATIVE')
+        .map((issue) => `${issue.path}: ${issue.message}`);
+    }
+
+    it.each([
+      ['Fastest previews.', 'fastest', 'fastest-growing'],
+      ['The best preview link.', 'best', 'best-seller'],
+    ])(
+      'refuses "%s", whose quote only says it inside a compound',
+      async (value, word, compound) => {
+        const issues = await superlativeIssues(value, ['growth']);
+        expect(issues).toHaveLength(1);
+        expect(issues[0]).toContain('campaign.scenes[3].text[0].value');
+        expect(issues[0]).toContain(`"${word}"`);
+        expect(issues[0]).toContain(`"${compound}"`);
+      },
+    );
+
+    it('accepts copy that repeats the compound the quote uses', async () => {
+      expect(await superlativeIssues('Fastest-growing teams.', ['growth'])).toEqual([]);
+    });
+
+    it('refuses a superlative only the Director lists, cited or not', async () => {
+      expect(await superlativeIssues('World-class previews.', [])).toHaveLength(1);
+      expect(await superlativeIssues('World-class previews.', ['growth'])).toHaveLength(1);
+    });
+  });
+
   it('refuses a CTA on a lookalike host that only ends with the site host', async () => {
     const edited = await codesAfter((s) => {
       for (const cta of s.campaign.variants.ctas)

@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import nova from '../examples/nova.campaign.json' with { type: 'json' };
 import type { Campaign } from '../src/campaign.ts';
 import { contrastRatio } from '../src/contrast.ts';
-import { DEFAULT_TEXT_LIMITS, ISSUE_CODES, validateCampaign } from '../src/validate.ts';
+import {
+  DEFAULT_TEXT_LIMITS,
+  ISSUE_CODES,
+  superlativeForms,
+  validateCampaign,
+} from '../src/validate.ts';
 import { negativeFixtures, novaCopy } from './negative-fixtures.ts';
 
 const at = <T>(list: T[], index: number): T => list[index] as T;
@@ -474,6 +479,26 @@ describe('validateCampaign', () => {
       expect(new Set(await codes(campaign))).toEqual(
         new Set(['CLAIM_UNKNOWN', 'CLAIM_SUPERLATIVE']),
       );
+    });
+  });
+
+  describe('superlativeForms', () => {
+    it.each([
+      ['Fastest scheduling.', ['fastest']],
+      ['The fastest-growing companies use it', ['fastest-growing']],
+      ['Our best-seller, and the best-in-class one', ['best-seller', 'best-in-class']],
+      ['The second-fastest build', ['second-fastest']],
+      ['A bestseller, misleading no one', []],
+      ['No. 1 and number one and #1', ['#1', '#1', '#1']],
+      ['ＦＡＳＴＥＳＴ', ['fastest']],
+    ])('reads %j as %j', (text, forms) => {
+      expect(superlativeForms(text)).toEqual(forms);
+    });
+
+    it('takes extra words', () => {
+      expect(
+        superlativeForms('The most  powerful, world-class tool', 'most\\s+powerful|world-class'),
+      ).toEqual(['most powerful', 'world-class']);
     });
   });
 

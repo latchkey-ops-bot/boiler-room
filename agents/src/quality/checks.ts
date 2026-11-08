@@ -9,6 +9,7 @@ import {
   type CampaignFrames,
   type Issue,
   sceneFrames,
+  superlativeForms,
   type ValidationResult,
 } from '@boiler-room/schema';
 import {
@@ -574,6 +575,46 @@ function routeIssue(issue: Issue, campaign: Campaign | undefined, fps: number): 
 }
 
 /**
+ * Copy that cites a claim and states a superlative the cited quotes do not state as a word of their
+ * own. `validateCampaign` stays silent once copy cites anything, so "Fastest scheduling" citing
+ * "The fastest-growing companies use it" would otherwise pass.
+ */
+function launderedSuperlatives(
+  campaign: Campaign,
+): { sceneId: string; path: string; value: string; form: string; quoted: string[] }[] {
+  const quotes = new Map(campaign.claims.map((claim) => [claim.id, claim.quote]));
+  const scenes = [
+    ...campaign.scenes.map((scene, index) => ({ scene, path: `scenes[${index}]` })),
+    ...campaign.variants.hooks.map((scene, index) => ({ scene, path: `variants.hooks[${index}]` })),
+  ];
+  return scenes.flatMap(({ scene, path }) =>
+    [
+      ...scene.text.map((item, index) => ({
+        path: `${path}.text[${index}].value`,
+        value: item.value,
+        ids: item.claimIds,
+      })),
+      ...(scene.voiceover
+        ? [
+            {
+              path: `${path}.voiceover.text`,
+              value: scene.voiceover.text,
+              ids: scene.voiceover.claimIds,
+            },
+          ]
+        : []),
+    ].flatMap(({ path: at, value, ids }) => {
+      const known = ids.filter((id) => quotes.has(id));
+      if (known.length === 0) return [];
+      const quoted = known.flatMap((id) => superlativeForms(quotes.get(id) ?? ''));
+      return [...new Set(superlativeForms(value))]
+        .filter((form) => !quoted.includes(form))
+        .map((form) => ({ sceneId: scene.id, path: at, value, form, quoted }));
+    }),
+  );
+}
+
+/**
  * `validateCampaign` as the skill's gate step runs it. `plain` runs without the scene registry and
  * decides the gate. `registry` runs with the 15-type `sceneRegistry` that the Director writes to:
  * a scene type outside it is reported as a minor issue for motion, because the renderer's
@@ -600,6 +641,7 @@ export function checkGate(
   const unknownTypes = registryOnly.filter((issue) => issue.code === 'SCENE_TYPE_UNKNOWN');
   const registryLimits = registryOnly.filter((issue) => issue.code === 'TEXT_TOO_LONG');
 
+  const laundered = campaign ? launderedSuperlatives(campaign) : [];
   const uncited = (campaign?.scenes ?? []).flatMap((scene) =>
     scene.text.filter((item) => item.claimIds.length === 0).map((item) => `${scene.id}/${item.id}`),
   );
@@ -617,11 +659,16 @@ export function checkGate(
       ),
       check(
         'claims-cited',
-        claimIssues.length ? 'fail' : 'pass',
-        claimIssues.length
-          ? claimIssues.map((issue) => `${issue.code} ${issue.path}`).join('; ')
+        claimIssues.length || laundered.length ? 'fail' : 'pass',
+        claimIssues.length || laundered.length
+          ? [
+              ...claimIssues.map((issue) => `${issue.code} ${issue.path}`),
+              ...laundered.map(
+                (each) => `superlative "${each.form}" not in its cited quotes at ${each.path}`,
+              ),
+            ].join('; ')
           : `every number in copy and voiceover is in a cited quote; ${uncited.length} text item(s) cite no claim and state no number or superlative${uncited.length ? ` (${uncited.join(', ')})` : ''}`,
-        'no CLAIM_UNBACKED, CLAIM_UNKNOWN or CLAIM_SUPERLATIVE',
+        'no CLAIM_UNBACKED, CLAIM_UNKNOWN or CLAIM_SUPERLATIVE, and every cited superlative is a word of its own in a cited quote',
       ),
       check(
         'scene-registry',
@@ -637,6 +684,19 @@ export function checkGate(
     ],
     issues: [
       ...[...blocking, ...registryLimits].map((issue) => routeIssue(issue, campaign, fps)),
+      ...laundered.map((each) =>
+        codeIssue(
+          {
+            severity: 'blocker',
+            check: 'claims-cited',
+            owner: 'director',
+            sceneId: each.sceneId,
+            what: `${each.path} "${each.value}" says "${each.form}", which its cited quotes do not state as a word of its own${each.quoted.length ? ` (they say ${each.quoted.map((form) => `"${form}"`).join(', ')})` : ''}.`,
+            fix: `Remove "${each.form}" from ${each.path}, or cite a claim whose quote says it about the same thing.`,
+          },
+          fps,
+        ),
+      ),
       ...(unknownTypes.length
         ? [
             codeIssue(

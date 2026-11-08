@@ -39,4 +39,11 @@ export type {
   ValidateOptions,
   ValidationResult,
 } from './validate.ts';
-export { DEFAULT_TEXT_LIMITS, ISSUE_CODES, MIN_CONTRAST, validateCampaign } from './validate.ts';
+export {
+  DEFAULT_TEXT_LIMITS,
+  ISSUE_CODES,
+  MIN_CONTRAST,
+  SUPERLATIVE_WORDS,
+  superlativeForms,
+  validateCampaign,
+} from './validate.ts';

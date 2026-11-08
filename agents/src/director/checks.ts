@@ -5,6 +5,7 @@ import {
   type Issue,
   type Scene,
   sceneRegistry,
+  superlativeForms,
   type TextItem,
   toFrame,
   validateCampaign,
@@ -42,9 +43,11 @@ export interface ResearchFacts {
 
 const FPS = 30;
 
-/** The superlatives `validateCampaign` warns on, which Director policy treats as errors. */
-const SUPERLATIVE =
-  /(?<![\p{L}\p{N}])(?:fastest|quickest|best|leading|top-rated|#1|no\.\s?1|number[\s-]one|cheapest|largest|biggest|greatest|highest|lowest|smartest|strongest|safest|easiest|unmatched|unrivall?ed|unbeatable|most powerful|world-class)(?![\p{L}\p{N}])/giu;
+/**
+ * Superlatives Director policy adds to the ones `validateCampaign` warns on (`SUPERLATIVE_WORDS`).
+ * Uncited, the validator's own are reported by the validator; Director policy makes them errors.
+ */
+const DIRECTOR_SUPERLATIVES = 'most\\s+powerful|world-class';
 
 /** Validator codes the Director fixes. `CONTRAST_LOW` and `ASSET_UNAVAILABLE` belong to others. */
 const DIRECTOR_CODES = new Set([
@@ -684,17 +687,29 @@ function checkSources(
           );
         }
       }
-      if (ids.length === 0) continue;
-      const quotes = ids.map((id) => claims.get(id)?.quote.toLowerCase() ?? '').join(' ');
-      for (const match of value.matchAll(SUPERLATIVE)) {
-        if (!quotes.includes(match[0].toLowerCase())) {
-          push(
-            'CLAIM_SUPERLATIVE',
-            `${at}.value`,
-            `"${value}" says "${match[0]}", which no cited quote states.`,
-            `Remove "${match[0]}", or cite a claim whose quote says it.`,
-          );
-        }
+      const forms = superlativeForms(value, DIRECTOR_SUPERLATIVES);
+      // The validator already reports a superlative from its own list that cites no known claim.
+      const known = ids.filter((id) => claims.has(id));
+      const own = known.length === 0 ? new Set(superlativeForms(value)) : new Set<string>();
+      const quoted = known.flatMap((id) => {
+        const quote = claims.get(id)?.quote;
+        return quote ? superlativeForms(quote, DIRECTOR_SUPERLATIVES) : [];
+      });
+      for (const form of new Set(forms)) {
+        if (own.has(form) || quoted.includes(form)) continue;
+        const inCompound = quoted.filter((each) => each.split('-').includes(form));
+        push(
+          'CLAIM_SUPERLATIVE',
+          `${at}.value`,
+          known.length === 0
+            ? `"${value}" says "${form}" and cites no claim.`
+            : inCompound.length
+              ? `"${value}" says "${form}", but the cited quotes only use it inside ${inCompound.map((each) => `"${each}"`).join(', ')}, which describes something else.`
+              : `"${value}" says "${form}", which no cited quote states.`,
+          inCompound.length
+            ? `Remove "${form}", or repeat the quote's own "${inCompound[0]}" with what it describes.`
+            : `Remove "${form}", or cite a claim whose quote says it as a word of its own.`,
+        );
       }
     }
     if (!brief.narrationPaid && scene.voiceover) {

@@ -257,6 +257,36 @@ describe('gate and claims', () => {
     );
   });
 
+  it('fails a cited superlative its quote only uses inside a compound', async () => {
+    const campaign = example();
+    campaign.claims.push({
+      id: 'growth',
+      text: 'The fastest-growing teams ship with Nova',
+      sourceUrl: 'https://nova.example.com',
+      quote: 'The fastest-growing teams ship with Nova every week.',
+      status: 'approved',
+    });
+    const headline = campaign.scenes[3]?.text[0];
+    if (headline) {
+      headline.value = 'The fastest way to ship.';
+      headline.claimIds = ['growth'];
+    }
+    const plain = await validateCampaign(campaign);
+    const withRegistry = await validateCampaign(campaign, { sceneRegistry });
+    expect(plain.ok).toBe(true);
+    const { checks, issues } = checkGate(plain, withRegistry, campaign, 30);
+    expect(checks.find((check) => check.id === 'claims-cited')?.result).toBe('fail');
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        severity: 'blocker',
+        check: 'claims-cited',
+        owner: 'director',
+        sceneId: 'close',
+        what: expect.stringContaining('"fastest-growing"'),
+      }),
+    );
+  });
+
   it('reports scene types outside the registry once, as a minor issue for motion', async () => {
     const campaign = example();
     const plain = await validateCampaign(campaign);
