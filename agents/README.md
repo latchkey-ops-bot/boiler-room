@@ -249,7 +249,9 @@ Until both of these are true, only prompts keep an agent off the other repo and 
    repositories": `BR_GITHUB_TOKEN_ENG` gets `boiler-room` only, `BR_GITHUB_TOKEN_DESIGN` gets
    `boiler-room-design` only, each with Contents and Pull requests read and write. Put them in
    `~/.boiler-room.env`, run `pnpm company:sync` (it rewrites `~/.netrc` on all four computers),
-   then `pnpm company:verify`, which must pass for all four.
+   then `pnpm company:verify`, whose four token checks must pass. Its lockdown check also fails
+   while any agent the company board over-exposes is unfixed (see "The company board seats every
+   agent").
 2. **`main` and `dev` have rules, on both repos.** Add the rulesets from
    `docs/company/README.md` section 5 C: `protect-main` and `protect-dev`, each with Restrict
    deletions, Block force pushes, and Require a pull request, and an empty bypass list. On `main`,
