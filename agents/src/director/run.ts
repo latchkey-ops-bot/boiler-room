@@ -7,6 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { Campaign } from '@boiler-room/schema';
 import type { AgentDefinition } from '../define.ts';
 import { director } from '../definitions/director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
@@ -51,6 +52,31 @@ export interface DirectOptions {
   client?: Naive;
   /** `verify` never creates or changes the agent: it checks the deployed one matches. */
   agentSync?: AgentSync;
+  /**
+   * Measures a passing submission's copy in the fonts the film will be set in, in every format
+   * of the brief, and returns what its templates would refuse to set. Only a browser can measure
+   * type, so the checks above cannot: without this, copy that does not fit is found at the
+   * render, when a customer may already have approved the script. `pnpm film` passes the live
+   * one; it never throws.
+   */
+  copyFit?: (campaign: Campaign) => Promise<DirectorIssue[]>;
+}
+
+/**
+ * A verdict with the copy `copyFit` measured as the film will set it. It is measured only when
+ * nothing else blocks the submission, since a campaign the validator refuses cannot be set; what
+ * does not fit is the Director's to shorten, unless it is text the Director may not change.
+ */
+export async function withCopyFit(
+  verdict: Verdict,
+  copyFit: DirectOptions['copyFit'],
+): Promise<Verdict> {
+  if (!copyFit || verdict.blocking.length > 0 || !verdict.campaign) return verdict;
+  for (const issue of await copyFit(verdict.campaign)) {
+    const blocking = issue.owner === 'director' && issue.severity === 'error';
+    (blocking ? verdict.blocking : verdict.other).push(issue);
+  }
+  return verdict;
 }
 
 /** The issue a repair drill adds to the first submission. */
@@ -196,7 +222,10 @@ export async function direct(options: DirectOptions): Promise<number> {
           if (line) say(line);
         },
         check: async (output) => {
-          const verdict = await checkSubmission(output, research, options.brief, tour);
+          const verdict = await withCopyFit(
+            await checkSubmission(output, research, options.brief, tour),
+            options.copyFit,
+          );
           if (options.drillRepair && verdicts.length === 0) verdict.blocking.push(DRILL_ISSUE);
           verdicts.push(verdict);
           const round = verdicts.length;

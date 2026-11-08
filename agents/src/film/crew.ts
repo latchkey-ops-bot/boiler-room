@@ -4,16 +4,24 @@
  * client that holds the stage to the ceiling the film gives it, and reads what the stage spent,
  * which sessions it ran and what it decided from the reports it wrote.
  */
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { FilmRejected, layoutRefusals } from '@boiler-room/motion';
-import { CostLimitExceeded, chargesOf, gateCampaign, renderCampaign } from '@boiler-room/render';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
+import { FilmRejected, type Format, layoutRefusals } from '@boiler-room/motion';
+import {
+  CostLimitExceeded,
+  chargesOf,
+  checkCopyFit,
+  gateCampaign,
+  renderCampaign,
+} from '@boiler-room/render';
+import type { Campaign } from '@boiler-room/schema';
+import { checkBrand } from '../art/brand.ts';
 import { DEFAULT_CAP, DEFAULT_IMAGE_MODEL } from '../art/generate.ts';
 import type { ArtIssue } from '../art/prompt.ts';
 import { artDirect } from '../art/run.ts';
 import type { DirectorIssue } from '../director/checks.ts';
 import { direct } from '../director/run.ts';
-import { naiveClient } from '../naive/client.ts';
+import { naiveClient, scrub } from '../naive/client.ts';
 import { closeSession } from '../naive/session.ts';
 import type { QcIssue, QcReport } from '../quality/output.ts';
 import { qualityCheckRender } from '../quality/run.ts';
@@ -134,14 +142,90 @@ export function renderLayoutIssues(text: string): QcIssue[] {
       continue;
     }
     const rest = refusal.replace(/^LAYOUT_UNFIT: /, '').trim();
+    const sceneId = /Scene "([^"]+)"/.exec(rest)?.[1] ?? null;
+    if (rest.includes('feature-card headline')) {
+      add(
+        'feature-card-layout',
+        sceneId,
+        rest,
+        'Shorten the headline until it sets on 2 lines at the sentence cap height. motion never sets type smaller to make copy fit.',
+      );
+      continue;
+    }
     add(
       'stat-counter-layout',
-      /Scene "([^"]+)"/.exec(rest)?.[1] ?? null,
+      sceneId,
       rest,
       'Shorten the number or its label until both set at their cap heights. motion never sets type smaller to make copy fit.',
     );
   }
   return [...found.values()];
+}
+
+/** Where a refusal names its scene and text: `scene "x", text "y"` or `Scene "x", text "y"`. */
+const REFUSED_TEXT = /(?:[Ss]cene "([^"]+)", )?text "([^"]+)"/;
+
+/**
+ * What motion refused to set when it measured the copy, as issues in the Director's repair loop:
+ * one per text it names, at that text's path, with every format it was refused in. A name card's
+ * headline is `brand.name`, which the Director may not change, so a refusal of it is left to a
+ * person rather than sent back.
+ */
+export function copyFitIssues(
+  refusals: readonly { format: string; refusal: string }[],
+  campaign: Json,
+): DirectorIssue[] {
+  const scenes = Array.isArray(campaign.scenes) ? (campaign.scenes as Json[]) : [];
+  const found = new Map<string, { issue: DirectorIssue; formats: string[]; what: string }>();
+  for (const { format, refusal } of refusals) {
+    for (const piece of layoutRefusals(refusal)) {
+      const [, sceneId, textId] = REFUSED_TEXT.exec(piece) ?? [];
+      const sceneIndex = scenes.findIndex(
+        (scene) =>
+          (sceneId === undefined || scene.id === sceneId) &&
+          Array.isArray(scene.text) &&
+          (scene.text as Json[]).some((item) => item.id === textId),
+      );
+      const scene = scenes[sceneIndex];
+      const items = Array.isArray(scene?.text) ? (scene.text as Json[]) : [];
+      const textIndex = items.findIndex((item) => item.id === textId);
+      const path =
+        sceneIndex < 0
+          ? 'campaign.scenes'
+          : textIndex < 0
+            ? `campaign.scenes[${sceneIndex}].text`
+            : `campaign.scenes[${sceneIndex}].text[${textIndex}].value`;
+      const what = piece.replace(/\s*Shorten scenes\[\d+\]\.text\[\d+\]\.value\.$/, '');
+      const known = found.get(path);
+      if (known) {
+        if (!known.formats.includes(format)) known.formats.push(format);
+        continue;
+      }
+      const brandName =
+        scene?.type === 'type-card' &&
+        (scene.props as Json | undefined)?.variant === 'name' &&
+        items[textIndex]?.role === 'headline';
+      const at = path.replace(/^campaign\./, '');
+      found.set(path, {
+        formats: [format],
+        what,
+        issue: {
+          code: 'COPY_FIT',
+          severity: 'error',
+          path,
+          message: '',
+          fix: brandName
+            ? 'The name card shows brand.name, which the Director may not change. A person must shorten the brand name or choose a narrower font.'
+            : `Shorten ${at} until it sets at its cap height: fewer or shorter words. motion measured it in the film's own fonts and never sets type smaller to make copy fit.`,
+          owner: brandName ? 'researcher' : 'director',
+        },
+      });
+    }
+  }
+  return [...found.values()].map(({ issue, formats, what }) => ({
+    ...issue,
+    message: `Measured in the film's fonts, in ${formats.join(' and ')}: ${what}`,
+  }));
 }
 
 /** Which gate a `FilmRejected` names: "This campaign cannot be rendered: <check> found ...". */
@@ -305,6 +389,13 @@ export class NaiveCrew implements FilmCrew {
         client: capped.client,
         ...this.sync,
         ...(revise ? { revise } : {}),
+        copyFit: (campaign) =>
+          this.measureCopy({
+            campaign,
+            formats: input.brief.formats,
+            researchFile: input.researchFile,
+            dir: join(input.dir, 'copy-fit'),
+          }),
       });
     } catch (cause) {
       failure = message(cause);
@@ -339,6 +430,72 @@ export class NaiveCrew implements FilmCrew {
         report: join(input.dir, 'director-report.json'),
       },
     } satisfies StageOutcome<{ campaignFile: string; handoffFile: string }>;
+  }
+
+  /**
+   * The Director's copy measured as the render will set it: in the fonts the Art Director's code
+   * settles on (`checkBrand`: the brand's own when its licence is open, Inter when it is not; the
+   * Art Director never changes a font after that), in every format the brief asks for, by the
+   * same check motion makes before a render. It spends nothing. A check that cannot run, such as
+   * a font that does not load, is logged and sends nothing back: the render's own gate still
+   * stands after it.
+   */
+  private async measureCopy(input: {
+    campaign: Campaign;
+    formats: readonly Format[];
+    researchFile: string;
+    dir: string;
+  }): Promise<DirectorIssue[]> {
+    const log = (line: string) => this.options.log?.(`copy fit: ${line}`);
+    try {
+      const brand = checkBrand(input.campaign);
+      const fonts = new Set([brand.brand.fonts.display.source, brand.brand.fonts.body.source]);
+      const assets = { ...input.campaign.assets, ...brand.assets };
+      // Only the font files are put beside the copy: no picture is loaded to measure type.
+      rmSync(input.dir, { recursive: true, force: true });
+      mkdirSync(input.dir, { recursive: true });
+      const fontsFile = join(input.dir, 'fonts.json');
+      writeFileSync(
+        fontsFile,
+        JSON.stringify({
+          assets: Object.fromEntries(Object.entries(assets).filter(([id]) => fonts.has(id))),
+        }),
+      );
+      const local = await localizeCampaign({
+        campaignFile: fontsFile,
+        outDir: input.dir,
+        searchDirs: [join(dirname(input.researchFile), 'files')],
+        download: (fileId) => naiveClient().files.downloadBytes(fileId),
+      });
+      for (const [id, file] of Object.entries(local.files))
+        assets[id] = {
+          ...(assets[id] as Campaign['assets'][string]),
+          src: `assets/${basename(file)}`,
+        };
+      const probe = { ...input.campaign, brand: brand.brand, assets };
+      const campaignFile = join(input.dir, 'campaign.json');
+      writeFileSync(campaignFile, `${JSON.stringify(probe, null, 2)}\n`);
+      const results = await checkCopyFit({ campaignFile, formats: input.formats, log });
+      const refused = results.flatMap((result) =>
+        result.refusal ? [{ format: result.format, refusal: result.refusal }] : [],
+      );
+      const issues = copyFitIssues(refused, probe as unknown as Json);
+      writeFileSync(
+        join(input.dir, 'copy-fit.json'),
+        `${JSON.stringify({ fonts: brand.fonts, results, issues }, null, 2)}\n`,
+      );
+      for (const result of results) {
+        if (!result.refusal) log(`${result.format}: every line fits`);
+        else if (layoutRefusals(result.refusal).length === 0)
+          log(`${result.format}: not measured: ${scrub(result.refusal).slice(0, 300)}`);
+      }
+      if (issues.length)
+        log(`${issues.length} text(s) do not fit: ${issues.map((each) => each.path).join(', ')}`);
+      return issues;
+    } catch (cause) {
+      log(`not measured: ${scrub(message(cause)).slice(0, 300)}`);
+      return [];
+    }
   }
 
   async art(input: Parameters<FilmCrew['art']>[0]) {

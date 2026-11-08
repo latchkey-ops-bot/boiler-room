@@ -7,8 +7,10 @@ import {
   expectedTemplate,
   onSite,
   researchFacts,
+  wrappedLines,
 } from '../src/director/checks.ts';
 import { OUTREACH_BRIEF } from '../src/director/output.ts';
+import { withCopyFit } from '../src/director/run.ts';
 import { frameSeconds, rowStarts, TEMPLATES } from '../src/director/templates.ts';
 import {
   exampleBrief,
@@ -285,6 +287,28 @@ describe('checkSubmission', () => {
       expected: 'CARD_FIT campaign.scenes[9].text[1].value',
     },
     {
+      // posthog.com, 8 November: 24 characters, which motion refused in Inter after approval.
+      name: 'a name descriptor motion refused in Inter',
+      edit: (s: ReturnType<typeof exampleSubmission>) => {
+        text(s.campaign, 'name-descriptor').value = 'Product and company data';
+      },
+      expected: 'CARD_FIT campaign.scenes[9].text[1].value',
+    },
+    {
+      name: 'a feature-card headline that breaks into 3 lines',
+      edit: (s: ReturnType<typeof exampleSubmission>) => {
+        text(s.campaign, 'push-line').value = 'Previews arrive automatically whenever';
+      },
+      expected: 'CARD_FIT campaign.scenes[4].text[0].value',
+    },
+    {
+      name: 'a feature-card headline with a word longer than its line',
+      edit: (s: ReturnType<typeof exampleSubmission>) => {
+        text(s.campaign, 'push-line').value = 'Get instantaneously-shareable previews';
+      },
+      expected: 'CARD_FIT campaign.scenes[4].text[0].value',
+    },
+    {
       name: 'invented capture data',
       edit: (s: ReturnType<typeof exampleSubmission>) => {
         const hero = s.campaign.scenes[2];
@@ -519,5 +543,63 @@ describe('checkSubmission', () => {
     expect(verdict.blocking[0]?.fix).toBe(
       'Cite a claim whose quote states "60" in scenes[6].text[0].claimIds, or remove "60" from the text.',
     );
+  });
+});
+
+describe('wrappedLines', () => {
+  it.each([
+    ['Watch sessions back like video', 20, 2, false],
+    ['Let your AI agent use PostHog', 20, 2, false],
+    ['Previews arrive automatically whenever', 20, 3, false],
+    ['Get instantaneously-shareable previews', 20, 3, true],
+    ['Review the real thing.', 14, 2, false],
+  ])('sets "%s" on lines of %i characters', (value, perLine, lines, tooLong) => {
+    expect(wrappedLines(value, perLine)).toEqual({ lines, tooLong });
+  });
+});
+
+describe('withCopyFit', () => {
+  const unfit = {
+    code: 'COPY_FIT',
+    severity: 'error' as const,
+    path: 'campaign.scenes[9].text[1].value',
+    message: "Measured in the film's fonts, in 16:9: does not fit.",
+    fix: 'Shorten scenes[9].text[1].value.',
+    owner: 'director' as const,
+  };
+
+  it('sends back the copy the film would refuse to set, from a submission that passes', async () => {
+    const passed = await checkSubmission(exampleSubmission(), exampleResearch(), exampleBrief());
+    const copyFit = async (campaign: Campaign) => {
+      expect(campaign.id).toBe('fernhook-launch');
+      return [unfit];
+    };
+    const verdict = await withCopyFit(passed, copyFit);
+    expect(verdict.blocking).toEqual([unfit]);
+  });
+
+  it('leaves text the Director may not change to its owner', async () => {
+    const passed = await checkSubmission(exampleSubmission(), exampleResearch(), exampleBrief());
+    const name = {
+      ...unfit,
+      path: 'campaign.scenes[9].text[0].value',
+      owner: 'researcher' as const,
+    };
+    const verdict = await withCopyFit(passed, async () => [name]);
+    expect(verdict.blocking).toEqual([]);
+    expect(verdict.other).toEqual([name]);
+  });
+
+  it('measures nothing while other issues block the submission', async () => {
+    const submission = exampleSubmission();
+    text(submission.campaign, 'proof-number').value = 'Under 60 s';
+    const blocked = await checkSubmission(submission, exampleResearch(), exampleBrief());
+    let measured = false;
+    const verdict = await withCopyFit(blocked, async () => {
+      measured = true;
+      return [unfit];
+    });
+    expect(measured).toBe(false);
+    expect(verdict.blocking.map((issue) => issue.code)).not.toContain('COPY_FIT');
   });
 });

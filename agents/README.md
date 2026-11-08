@@ -980,17 +980,32 @@ each stage the same function its own command runs.
 
 **A scene motion refuses to draw.** Neither `validateCampaign` nor `validateFilm` measures type,
 so copy that does not fit its line at its cap height passes the gate: a type card throws
-`TYPE_CARD_LAYOUT` and a stat-counter `LAYOUT_UNFIT` (the first live film of linear.app stopped
-on "Product development system" in its name card). Three layers now catch it:
+`TYPE_CARD_LAYOUT`, and a feature-card headline or a stat-counter `LAYOUT_UNFIT` (the first live
+film of linear.app stopped on "Product development system" in its name card). Four layers now
+catch it:
 
-- The Director's own checks refuse a type-card line far too long for its format (`CARD_FIT`: 26
-  characters on one line at 16:9, 19 at 9:16, 18 at 1:1), in its repair loop, before any film
-  stage sees it.
-- `prepareFilm` in `@boiler-room/motion` measures every type card and stat-counter of the cut
-  with the brand fonts loaded (`copyFitIssues`), in the page where `calculateMetadata` runs. The
-  render selects the film there on this machine before any computer exists, so the refusal costs
-  nothing and names every scene at once. On 8 November it named both posthog.com scenes that two
-  renders on computers had found one at a time, and linear.app's value line.
+- The Director's own checks refuse a type-card line too long for its format (`CARD_FIT`: 22
+  characters on one line at 16:9, 16 at 9:16, 15 at 1:1, where every line measured in Inter
+  fitted), and a feature-card headline that does not break into 2 lines of 20 characters at
+  16:9 or 14 at 9:16 and 1:1, in its repair loop, before any film stage sees it.
+- Every submission that passes is then measured as the film will set it (`withCopyFit`, with
+  the crew's `measureCopy`): in the fonts the Art Director's code settles on (`checkBrand`: the
+  brand's own when its licence is open, Inter when not), in every format of the brief, by
+  `checkCopyFit` in `@boiler-room/render`, which selects motion's `CopyFit` composition in a
+  browser. It loads no picture, creates no computer and takes about 4 s. A text that does not fit
+  goes back into the same session as `COPY_FIT`, at its path. This is the layer the film runner
+  needs: once the customer approves a script the Director may not change it, so before it, two
+  PostHog films and one Linear film of 8 November were approved with a name-card descriptor
+  motion then refused (24 to 26 characters, inside the old `CARD_FIT` limit of 26), and ended
+  with no film. A name card's headline is `brand.name`, which the Director may not change, so
+  a refusal of it is left to a person. The probe and its result are in the round's
+  `director/copy-fit/`.
+- `prepareFilm` in `@boiler-room/motion` measures every type card, feature-card headline and
+  stat-counter of the cut with the brand fonts loaded (`copyFitIssues`), in the page where
+  `calculateMetadata` runs. The render selects the film there on this machine before any
+  computer exists, so the refusal costs nothing and names every scene at once. On 8 November it
+  named both posthog.com scenes that two renders on computers had found one at a time, and
+  linear.app's value line.
 - On the computers, a chunk motion refuses is not rendered again on a new one (it would refuse
   the same way), and the other chunks draw on so that their refusals join the same failure
   (`MotionRefused` in `@boiler-room/render`). A chunk that fails on every try names each try's

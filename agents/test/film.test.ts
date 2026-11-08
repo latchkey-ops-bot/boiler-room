@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { expectedTemplate, type ResearchFacts } from '../src/director/checks.ts';
 import { localizeCampaign } from '../src/film/assets.ts';
 import { type CappableClient, CapReached, capClient } from '../src/film/cap.ts';
-import { directorIssueOf, gateFilm, renderLayoutIssues } from '../src/film/crew.ts';
+import { copyFitIssues, directorIssueOf, gateFilm, renderLayoutIssues } from '../src/film/crew.ts';
 import { artDecisions, directorDecisions, qcDecisions } from '../src/film/decisions.ts';
 import { LocalFilmOrder } from '../src/film/local-order.ts';
 import {
@@ -653,6 +653,14 @@ describe('a render that motion refused', () => {
     }
   });
 
+  it('reads a feature-card headline motion could not set as its own check', () => {
+    const feature =
+      'Error: LAYOUT_UNFIT: Scene "feature-mcp", text "mcp-line": the feature-card headline "Let your AI agent use PostHog" does not fit on 2 lines of 849 px at the sentence cap height (78 px) at 1080x1920. Shorten the headline: a feature card never sets it below its cap height.';
+    expect(renderLayoutIssues(feature)).toMatchObject([
+      { check: 'feature-card-layout', sceneId: 'feature-mcp', owner: 'director' },
+    ]);
+  });
+
   it('keeps a failure to its first line and the line that names the error', () => {
     expect(briefFailure(LAYOUT_FAILURE)).toBe(
       'Chunk 4 failed on 2 computers: A command on cmp_1 exited with 1: SymbolicateableError [TypeCardLayoutError]: TYPE_CARD_LAYOUT at scene "name", text "name-descriptor": "Product development system" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.',
@@ -1101,5 +1109,72 @@ describe('FilmOrder', () => {
       state: 'failed',
       failure: expect.stringMatching(/stopped before it wrote a manifest/),
     });
+  });
+});
+
+describe('the copy measured before the script is shown', () => {
+  const campaign = {
+    scenes: [
+      { id: 'hook', type: 'word-slam', props: {}, text: [{ id: 'hook-line', role: 'headline' }] },
+      {
+        id: 'feature-mcp',
+        type: 'feature-card',
+        props: {},
+        text: [{ id: 'mcp-line', role: 'headline' }],
+      },
+      {
+        id: 'name',
+        type: 'type-card',
+        props: { variant: 'name' },
+        text: [
+          { id: 'name-line', role: 'headline' },
+          { id: 'name-descriptor', role: 'subhead' },
+        ],
+      },
+    ],
+  };
+  const card = (text: string, value: string) =>
+    `TYPE_CARD_LAYOUT at scene "name", text "${text}": "${value}" does not fit on one line of 1248 px at a cap height of 78 px. Shorten the copy: a type card never sets type below its cap height.`;
+  const feature =
+    'LAYOUT_UNFIT: Scene "feature-mcp", text "mcp-line": the feature-card headline "Let your AI agent use PostHog" does not fit on 2 lines of 849 px at the sentence cap height (78 px) at 1080x1920. Shorten the headline: a feature card never sets it below its cap height.';
+  const rejected = (...items: string[]) =>
+    `FilmRejected: This campaign cannot be rendered: laying out the copy found ${items.length} error(s). ${items.map((item, index) => `(${index + 1}) X at scenes[${index}].text[0].value: ${item} Shorten scenes[${index}].text[0].value.`).join(' ')}`;
+
+  it('sends each text back to the Director at its path, once, with every format it failed in', () => {
+    // posthog.com, 8 November: the descriptor that stopped two approved films at the render.
+    const descriptor = card('name-descriptor', 'Product and company data');
+    const issues = copyFitIssues(
+      [
+        { format: '16:9', refusal: rejected(descriptor) },
+        { format: '9:16', refusal: rejected(feature, descriptor) },
+      ],
+      campaign,
+    );
+    expect(issues.map((issue) => [issue.code, issue.path, issue.owner])).toEqual([
+      ['COPY_FIT', 'campaign.scenes[2].text[1].value', 'director'],
+      ['COPY_FIT', 'campaign.scenes[1].text[0].value', 'director'],
+    ]);
+    expect(issues[0]?.message).toBe(
+      `Measured in the film's fonts, in 16:9 and 9:16: ${descriptor}`,
+    );
+    expect(issues[1]?.message).toMatch(/^Measured in the film's fonts, in 9:16: LAYOUT_UNFIT/);
+    expect(issues[0]?.fix).toMatch(/^Shorten scenes\[2\]\.text\[1\]\.value/);
+  });
+
+  it('leaves the brand name on the name card to a person: the Director may not change it', () => {
+    const [issue] = copyFitIssues(
+      [{ format: '16:9', refusal: rejected(card('name-line', 'Extraordinarily Long Brand')) }],
+      campaign,
+    );
+    expect(issue).toMatchObject({ path: 'campaign.scenes[2].text[0].value', owner: 'researcher' });
+  });
+
+  it('sends nothing back for a check that could not measure', () => {
+    expect(
+      copyFitIssues(
+        [{ format: '16:9', refusal: 'FilmRejected: loading the brand fonts found 1 error(s).' }],
+        campaign,
+      ),
+    ).toEqual([]);
   });
 });

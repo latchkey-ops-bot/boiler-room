@@ -487,17 +487,73 @@ function checkVariants(
 
 /**
  * The most characters one line of a type-card can hold at the sentence cap height (78 spec px) in
- * each format: the line box is 1248 px at 16:9, 929 at 9:16 and 864 at 1:1. Measured by motion's
- * own gate in Inter, a 16:9 line held 22 and 23 characters and refused 25, 26, 28, 29 and 30, the
- * last three on real films. These limits leave a face 10% narrower than Inter room, so copy over
- * them does not fit in any usual brand font. motion measures the real font before rendering, so
- * copy under them can still come back as `type-card-layout`.
+ * each format: the line box is 1248 px at 16:9, 929 at 9:16 and 864 at 1:1. Inter is the common
+ * case, the face the Art Director falls back to for every brand font whose licence is not open.
+ * Measured by motion's own gate in Inter, every 16:9 line of 22 characters or fewer fitted, 23
+ * and 24 sometimes did, and 24, 25 and 26 refused the last three films ("Product and company
+ * data", "Devtools and product data", "Product development system"); at 9:16 every line of 16 or
+ * fewer fitted and some of 17 refused; at 1:1 every line of 15 or fewer fitted and some of 16
+ * refused. A count of characters is not a measure, so copy under these limits can still come
+ * back as `COPY_FIT`, which `pnpm film` measures in the film's own fonts before the script is
+ * shown to anyone.
  */
 export const CARD_LINE_CHARS: Record<'16:9' | '9:16' | '1:1', number> = {
-  '16:9': 26,
-  '9:16': 19,
-  '1:1': 18,
+  '16:9': 22,
+  '9:16': 16,
+  '1:1': 15,
 };
+
+/**
+ * The most characters one line of a feature-card headline holds at the sentence cap height, from
+ * director-scene-types: the headline is set on at most 2 lines of the line box less its drift
+ * (1141 px at 16:9), never smaller, or the render stops with `LAYOUT_UNFIT`.
+ */
+export const FEATURE_LINE_CHARS: Record<'16:9' | '9:16' | '1:1', number> = {
+  '16:9': 20,
+  '9:16': 14,
+  '1:1': 14,
+};
+
+/**
+ * The lines a headline takes when its words are set greedily, `perLine` characters a line at
+ * most: a word longer than a line takes a line of its own and does not fit on any.
+ */
+export function wrappedLines(value: string, perLine: number): { lines: number; tooLong: boolean } {
+  let lines = 0;
+  let used = 0;
+  let tooLong = false;
+  for (const word of value.trim().split(/\s+/).filter(Boolean)) {
+    const length = [...word].length;
+    if (length > perLine) tooLong = true;
+    if (lines > 0 && used + 1 + length <= perLine) used += 1 + length;
+    else {
+      lines += 1;
+      used = length;
+    }
+  }
+  return { lines, tooLong };
+}
+
+/** A feature-card headline too long for its 2 lines in every format the film is made in. */
+function checkFeatureFit(campaign: Campaign, scene: Scene, path: string, push: Push): void {
+  const formats = campaign.variants.formats.filter(
+    (format): format is keyof typeof FEATURE_LINE_CHARS => format in FEATURE_LINE_CHARS,
+  );
+  if (formats.length === 0) return;
+  const perLine = Math.min(...formats.map((format) => FEATURE_LINE_CHARS[format]));
+  const narrowest = formats.find((format) => FEATURE_LINE_CHARS[format] === perLine);
+  for (const [index, item] of scene.text.entries()) {
+    if (item.role !== 'headline') continue;
+    const { lines, tooLong } = wrappedLines(item.value, perLine);
+    if (lines <= 2 && !tooLong) continue;
+    push(
+      'CARD_FIT',
+      `${path}.text[${index}].value`,
+      `This feature-card headline "${item.value}" takes ${lines} lines of ${perLine} characters${tooLong ? ', with a word longer than a line,' : ''} and a feature card sets it on at most 2 lines at the sentence cap height, about ${perLine} characters a line at ${narrowest}. motion never sets type smaller to make copy fit, so it would refuse the film.`,
+      `Write it so it breaks into 2 lines of ${perLine} characters or fewer, about ${perLine * 2 - 4} characters in all, with no word over ${perLine}.`,
+    );
+  }
+}
 
 /**
  * Type-card copy too long for its lines in every format the film is made in. A headline takes one
@@ -579,6 +635,7 @@ function checkText(campaign: Campaign, template: Template, push: Push): void {
       }
     }
 
+    if (scene.type === 'feature-card') checkFeatureFit(campaign, scene, path, push);
     if (scene.type === 'type-card') {
       const total = scene.text.reduce((sum, item) => sum + words(item.value), 0);
       const frames = toFrame(scene.end, FPS) - toFrame(scene.start, FPS);
