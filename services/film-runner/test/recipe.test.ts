@@ -17,6 +17,7 @@ describe('the base snapshot recipe', () => {
       'libnss3',
       'fonts-noto-cjk',
       'git util-linux',
+      'ca-certificates ffmpeg',
       'mkswap /swapfile',
       "'/swapfile none swap sw 0 0'",
       'pnpm@10.30.3',
@@ -39,6 +40,9 @@ describe('the base snapshot recipe', () => {
     const check = readyCheck();
     expect(check).toContain("swapon --show=NAME --noheadings | grep -qx '/swapfile'");
     expect(check).toContain("r.openBrowser('chrome')");
+    // Quality Check reads the film with ffmpeg and ffprobe: a fork without them never reviews it.
+    expect(check).toContain('ffmpeg -hide_banner -version > /dev/null');
+    expect(check).toContain('ffprobe -hide_banner -version > /dev/null');
     expect(check).toContain('node src/main.ts --self-test');
     // A snapshot of the real film command checks it answers with the runner's contract.
     expect(check).toContain(`grep -q '"adapter": "film"' "$HOME/.film-runner.json"`);
