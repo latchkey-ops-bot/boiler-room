@@ -1,0 +1,1366 @@
+import { GTM_LEAD, SCOUT, SOCIAL_AGENT } from '../definitions/company/common.ts';
+import { GTM } from '../definitions/company/index.ts';
+import { findAction, runAction, skipAction } from './actions.ts';
+import { applySenderEvents } from './bounces.ts';
+import { newNonce, pickBrief, repairBrief, scoutBrief, socialBrief } from './brief.ts';
+import { canRunData, canSpend, cap, recordSpend, sessionBudget, settleSpend } from './caps.ts';
+import {
+  commentHead,
+  dayBody,
+  dayKey,
+  dayTitle,
+  definitionDrift,
+  founderBody,
+  founderKey,
+  founderTitle,
+} from './cards.ts';
+import {
+  BOT_USER_AGENT,
+  type FounderNeed,
+  type GtmAgentName,
+  KEY_ROTATION_DAY,
+  MAX_EMAIL_PICKS,
+  type PhaseName,
+  PRICES,
+  SCOUT_BATCH,
+  SCOUT_SESSIONS,
+} from './config.ts';
+import {
+  composeEmail,
+  emailProblems,
+  freshTemplates,
+  sourcePhrase,
+  type VerifiedQuote,
+} from './copy.ts';
+import {
+  checkPick,
+  checkScout,
+  checkSocial,
+  chosenAddress,
+  emailBlocker,
+  quotesOf,
+  xBlocker,
+} from './decide.ts';
+import { type DiscoverResult, discover } from './discover.ts';
+import { optOutToken, registrableDomain, stableId } from './domain.ts';
+import { brandFlags } from './extract.ts';
+import { type LaneState, resolveLanes } from './lanes.ts';
+import { DryRunFilmOrder, type FilmFile, type FilmOrder, LocalBoard } from './ports.ts';
+import {
+  type Holds,
+  planRemoval,
+  type RemovalPlan,
+  type RemovalRequest,
+  readCommands,
+} from './removal.ts';
+import { dayMetrics, reportText } from './report.ts';
+import { jsonSchema, pickOutputSchema, scoutOutputSchema, socialOutputSchema } from './schemas.ts';
+import type { SiteRead } from './site.ts';
+import type { GuardedDataRun } from './sources.ts';
+import { type LeadRow, phaseOf, recordPhase, type StoreData } from './store.ts';
+import { contactedWithin, pruneLeads, recordContact, suppressedBy } from './suppression.ts';
+import { type Clock, daysSince, pacific } from './time.ts';
+import type { Ports } from './wiring.ts';
+
+/**
+ * One GTM day as a sequence of phases: open, removals, discover, qualify, pick, order, films,
+ * compose, execute, report. `runDay` runs them in order from a terminal (`pnpm gtm:day`); the
+ * hosted executor will run each one when its time comes. Every phase is recorded per date, so a
+ * second run of the same day does nothing twice. Removals run first and in every mode.
+ */
+
+export interface DayOptions {
+  store: StoreData;
+  ports: Ports;
+  clock: Clock;
+  /** A Pacific date to run, default today. */
+  date?: string;
+  forcedDryRun: boolean;
+  gtmActive: boolean;
+  save: () => void | Promise<void>;
+  /** Writes one file into the day's folder. */
+  writeFile: (name: string, content: string) => void;
+  log: (line: string) => void;
+  /** How long to wait for real films. Dry-run films need three reads and no wait. */
+  filmWaitMs?: number;
+  filmPollMs?: number;
+  sessionWaitMs?: number;
+}
+
+export interface DayResult {
+  date: string;
+  lanes: LaneState;
+  report: string;
+  review: string;
+  needs: FounderNeed[];
+  phases: { phase: PhaseName; status: string; detail: string }[];
+}
+
+interface Picked {
+  x: string | null;
+  emails: { lead_id: string; subject: string; opener: string }[];
+  caption: { caption: string; variable: string; template_id: string } | null;
+}
+
+interface FilmState {
+  orderId: string;
+  port: FilmOrder;
+  ready: boolean;
+  usable: boolean;
+  pageUrl: string | null;
+  shareId: string | null;
+  file: FilmFile | null;
+  scriptFlags: string[];
+}
+
+interface Draft {
+  lead_id: string;
+  lane: 'x' | 'email';
+  text: string;
+  subject?: string;
+  to?: string;
+  headers?: Record<string, string>;
+  problems: string[];
+  usable: boolean;
+}
+
+class Day {
+  readonly o: DayOptions;
+  readonly store: StoreData;
+  readonly ports: Ports;
+  readonly date: string;
+  lanes: LaneState;
+  dayCard: string | null = null;
+  readonly ownComments = new Set<string>();
+  readonly needs = new Set<FounderNeed>();
+  readonly phases: DayResult['phases'] = [];
+  readonly review: string[] = [];
+  readonly reads = new Map<string, SiteRead>();
+  discovery: DiscoverResult | null = null;
+  picked: Picked = { x: null, emails: [], caption: null };
+  readonly films = new Map<string, FilmState>();
+  readonly drafts: Draft[] = [];
+  holds: Holds = { day: false, leads: new Set(), resumeEmail: false, removals: [], posted: [] };
+  ceoHalted: boolean | null = null;
+  lockdownOk: boolean | null = null;
+  untampered: boolean | null = null;
+  holdCards: string[] = [];
+  socialReady = false;
+
+  constructor(options: DayOptions) {
+    this.o = options;
+    this.store = options.store;
+    this.ports = options.ports;
+    this.date = options.date ?? pacific(options.clock.now()).date;
+    this.lanes = this.resolve();
+  }
+
+  now = () => this.o.clock.now();
+  iso = () => this.o.clock.now().toISOString();
+  save = async () => {
+    await this.o.save();
+  };
+  log = (line: string) => this.o.log(line);
+
+  resolve(): LaneState {
+    return resolveLanes({
+      store: this.store,
+      forcedDryRun: this.o.forcedDryRun,
+      gtmActive: this.o.gtmActive,
+      ceoHalted: this.ceoHalted,
+      held: this.holds.day || this.holdCards.length > 0,
+      lockdownOk: this.lockdownOk,
+      untampered: this.untampered,
+      film: this.ports.film,
+      social: this.ports.social,
+      socialReady: this.socialReady,
+      sender: this.ports.sender,
+      replyInbox: this.ports.replyInbox,
+      emailResumed: this.holds.resumeEmail,
+    });
+  }
+
+  async comment(type: string, id: string, state: string, lines: string[] = []) {
+    if (!this.dayCard) return;
+    try {
+      const comment = await this.ports.board.comment(
+        this.dayCard,
+        [commentHead(type, id, state), ...lines].join('\n'),
+      );
+      this.ownComments.add(comment.id);
+    } catch (error) {
+      this.log(
+        `board     comment failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async founder(need: FounderNeed, scope = 'open') {
+    this.needs.add(need);
+    try {
+      await this.ports.board.ensureCard({
+        title: founderTitle(need),
+        body: founderBody(need),
+        status: 'blocked',
+        key: founderKey(need, scope),
+      });
+    } catch (error) {
+      this.log(
+        `board     FOUNDER card failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  async phase(
+    name: PhaseName,
+    run: () => Promise<{
+      status: 'done' | 'skipped' | 'failed';
+      detail: string;
+      sessions?: string[];
+    }>,
+  ) {
+    const before = phaseOf(this.store, this.date, name);
+    if (before && name !== 'removals') {
+      this.phases.push({ phase: name, status: `already ${before.status}`, detail: before.detail });
+      return;
+    }
+    const started = this.iso();
+    let result: { status: 'done' | 'skipped' | 'failed'; detail: string; sessions?: string[] };
+    try {
+      result = await run();
+    } catch (error) {
+      result = {
+        status: 'failed',
+        detail: error instanceof Error ? error.message.slice(0, 300) : String(error),
+      };
+    }
+    if (name !== 'removals') {
+      recordPhase(this.store, {
+        date: this.date,
+        phase: name,
+        status: result.status,
+        detail: result.detail,
+        session_ids: result.sessions ?? [],
+        started_at: started,
+        finished_at: this.iso(),
+      });
+    }
+    await this.save();
+    this.phases.push({ phase: name, status: result.status, detail: result.detail });
+    this.log(`${name.padEnd(9)} ${result.status}: ${result.detail}`);
+  }
+
+  // -------------------------------------------------------------------------------------------
+
+  /**
+   * Runs on every tick, before any phase: the halt marker, the lockdown check, the tamper check,
+   * holds, and the day card (its create is keyed, so a second tick finds the same card).
+   */
+  async prepare() {
+    const naive = this.ports.naive;
+    if (naive) {
+      this.ceoHalted = await naive.ceoHalted().catch(() => null);
+      this.lockdownOk = await naive
+        .lockdownExposure()
+        .then((exposure) => exposure.length === 0)
+        .catch(() => null);
+      const drift: string[] = [];
+      for (const definition of GTM) {
+        try {
+          const stored = await naive.storedAgent(definition.name as GtmAgentName);
+          const differs = definitionDrift(stored, definition);
+          if (differs.length) drift.push(`${definition.name}: ${differs.join(', ')}`);
+        } catch {
+          drift.push(`${definition.name}: unreadable`);
+        }
+      }
+      this.untampered = drift.length === 0;
+      if (drift.length)
+        this.review.push(`## Tamper check\n\n${drift.map((line) => `- ${line}`).join('\n')}\n`);
+      this.socialReady = (await this.ports.social.ready().catch(() => ({ ok: false }))).ok;
+      this.holdCards = await this.ports.board.holdCards().catch(() => []);
+    }
+    this.lanes = this.resolve();
+    const card = await this.ports.board.ensureCard({
+      title: dayTitle(this.date),
+      body: dayBody(this.store, this.date, this.lanes),
+      status: 'todo',
+      key: dayKey(this.date),
+    });
+    this.dayCard = card.id;
+  }
+
+  /** Once a day: what a person must do, each as one `FOUNDER: gtm <need>` card. */
+  async open() {
+    const naive = this.ports.naive;
+    if (!naive) await this.founder('executor-key');
+    if (naive && this.untampered === false) await this.founder('tampered', this.date);
+    if (naive && this.lockdownOk === false) await this.founder('lockdown');
+    if (!this.store.flags.postal_address) await this.founder('postal-address');
+    if (this.ports.sender.kind === 'dry-run') await this.founder('cold-sender');
+    const minted = this.store.flags.executor_key_minted_at;
+    if (minted && daysSince(minted, this.now()) >= KEY_ROTATION_DAY)
+      await this.founder('rotate-key', minted.slice(0, 10));
+    return {
+      status: 'done' as const,
+      detail: `day card ${this.dayCard}; films ${this.lanes.film}, x ${this.lanes.x}, email ${this.lanes.email}`,
+    };
+  }
+
+  /** Opt-outs and removals from the app and the board. Runs in every mode, under halt and hold. */
+  async removals() {
+    const requests: RemovalRequest[] = [];
+    try {
+      const pulled = await this.ports.app.requests(this.store.flags.cursors.requests);
+      for (const item of pulled.requests) {
+        const token = item.token_hash
+          ? this.store.optout_tokens.find((row) => row.hash === item.token_hash)
+          : undefined;
+        const lead = token ? this.store.leads.find((row) => row.id === token.lead_id) : undefined;
+        requests.push({
+          kind: item.kind,
+          channel: item.channel,
+          domain: token?.domain ?? item.domain,
+          email: lead ? (chosenAddress(lead)?.address ?? null) : null,
+          share_id: item.share_id,
+          lead_id: lead?.id ?? null,
+          at: item.at,
+        });
+      }
+      this.store.flags.cursors.requests = pulled.cursor;
+    } catch (error) {
+      this.log(
+        `removals  app requests unreadable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (this.dayCard) {
+      const comments = await this.ports.board.comments(this.dayCard).catch(() => []);
+      this.holds = readCommands(comments, this.store.flags.founder_user_id, this.ownComments);
+      for (const removal of this.holds.removals) {
+        if (findAction(this.store, `removal:${removal.comment_id}`)) continue;
+        requests.push({
+          kind: 'removal',
+          channel: 'board',
+          domain: null,
+          email: null,
+          share_id: null,
+          lead_id: removal.lead_id,
+          at: this.iso(),
+          comment_id: removal.comment_id,
+        });
+      }
+    }
+    if (this.ports.sender.capabilities.bounceEvents) {
+      try {
+        const events = await this.ports.sender.events(this.store.flags.cursors.sender_events);
+        const applied = applySenderEvents(this.store, events.events, this.now());
+        this.store.flags.cursors.sender_events = events.cursor;
+        if (applied.paused) await this.founder('email-paused', this.date);
+      } catch (error) {
+        this.log(
+          `removals  sender events unreadable: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    const plans: RemovalPlan[] = [];
+    for (const request of requests) {
+      const plan = planRemoval(this.store, request);
+      plans.push(plan);
+      await this.takeDown(plan);
+      if (request.comment_id) {
+        skipAction(this.store, {
+          key: `removal:${request.comment_id}`,
+          kind: 'comment',
+          lead_id: request.lead_id,
+          reason: 'removal applied',
+          at: this.iso(),
+        });
+      }
+    }
+    return {
+      status: 'done' as const,
+      detail: `${plans.length} request(s), ${plans.filter((plan) => plan.unmatched).length} for domains GTM never touched`,
+    };
+  }
+
+  async takeDown(plan: RemovalPlan) {
+    // A second lock behind our own list: the provider refuses later sends to these addresses.
+    if (this.ports.blockList) {
+      const addresses = new Set(
+        [
+          plan.request.email,
+          ...plan.leads.flatMap((lead) => lead.addresses.map((item) => item.address)),
+        ].filter((item): item is string => Boolean(item)),
+      );
+      for (const address of addresses) {
+        await this.ports.blockList(address, plan.request.kind).catch((error: unknown) => {
+          this.log(
+            `removals  block list failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        });
+      }
+    }
+    if (plan.unmatched) {
+      this.store.unmatched_removals[this.date] =
+        (this.store.unmatched_removals[this.date] ?? 0) + 1;
+      return;
+    }
+    let liveDown = 0;
+    for (const post of plan.posts) {
+      if (this.ports.social.kind !== 'naive') continue;
+      try {
+        await this.ports.social.remove(post.provider_id);
+        skipAction(this.store, {
+          key: `x-delete:${post.provider_id}`,
+          kind: 'x-delete',
+          lead_id: plan.leads[0]?.id ?? null,
+          reason: 'deleted on removal',
+          at: this.iso(),
+        });
+        liveDown += 1;
+      } catch (error) {
+        this.log(
+          `removals  post delete failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    for (const film of plan.films) {
+      if (this.ports.film.kind !== 'app') continue;
+      try {
+        await this.ports.film.withdraw(
+          film.provider_id,
+          plan.request.kind === 'removal' ? 'removal' : 'opt_out',
+        );
+        liveDown += 1;
+      } catch (error) {
+        this.log(
+          `removals  film withdraw failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    for (const lead of plan.leads) {
+      this.picked.emails = this.picked.emails.filter((item) => item.lead_id !== lead.id);
+      if (this.picked.x === lead.id) this.picked.x = null;
+    }
+    // A removal that took a live asset down is a card; any other is a comment, which starts no digest.
+    if (liveDown > 0 && plan.domain) {
+      const card = await this.ports.board
+        .ensureCard({
+          title: `REMOVE: ${plan.id}`,
+          body: `Removal ${plan.id} by ${plan.request.channel}: ${plan.posts.length} X post(s) deleted, ${plan.films.length} film(s) withdrawn, ${plan.suppressed} suppression row(s). Written by the GTM executor.`,
+          status: 'done',
+          key: `gtm-remove:${plan.domain}:${this.date}`,
+        })
+        .catch(() => null);
+      if (card) this.log(`removals  REMOVE: ${plan.id}`);
+    }
+    await this.comment('REMOVAL', plan.id, 'done', [
+      `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${plan.posts.length} post(s), ${plan.films.length} film(s).`,
+    ]);
+  }
+
+  // -------------------------------------------------------------------------------------------
+
+  dataRun: GuardedDataRun = async (tool, input, price) => {
+    if (!this.ports.data) return null;
+    const check = canRunData(this.store, this.date, price);
+    if (!check.ok) return null;
+    const key = `data-run:${tool}:${stableId('dr', JSON.stringify(input))}:${this.date}`;
+    let data: unknown = null;
+    let cost = 0;
+    const outcome = await runAction(
+      this.store,
+      {
+        key,
+        kind: 'data-run',
+        lead_id: null,
+        detail: tool,
+        dryRun: false,
+        call: async () => {
+          const result = await (this.ports.data as NonNullable<Ports['data']>).run(tool, input);
+          data = result.data;
+          cost = result.costMicroUsd;
+          return { provider_id: null, cost_micro_usd: cost };
+        },
+      },
+      this.save,
+      this.iso,
+    );
+    if (outcome.state !== 'done' || data === null) return null;
+    recordSpend(this.store, { date: this.date, category: 'data', micro_usd: cost, ref: key });
+    return { data, costMicroUsd: cost };
+  };
+
+  async discover() {
+    const userAgent = BOT_USER_AGENT(this.ports.appBase);
+    const result = await discover({
+      store: this.store,
+      transport: this.ports.transport,
+      userAgent,
+      now: this.now(),
+      date: this.date,
+      dataRun: this.ports.data ? this.dataRun : null,
+      log: this.log,
+    });
+    this.discovery = result;
+    for (const candidate of result.candidates) {
+      this.store.leads.push(candidate.lead);
+      this.reads.set(candidate.lead.id, candidate.read);
+      this.o.writeFile(
+        `pages/${candidate.lead.id}.json`,
+        `${JSON.stringify(candidate.read.bundle)}\n`,
+      );
+    }
+    const sources = result.reports.map((report) => `${report.source} ${report.kept}`).join(', ');
+    this.review.push(
+      `## Candidates\n\n| Lead | Domain | Source | Product name | Addresses | Jurisdiction hint | Brand flags |\n| --- | --- | --- | --- | --- | --- | --- |\n${result.candidates
+        .map(
+          (candidate) =>
+            `| ${candidate.lead.id} | ${candidate.lead.domain} | ${candidate.lead.source} ${candidate.lead.hn_points ?? ''} | ${candidate.lead.product_name ?? '-'} | ${candidate.lead.addresses.map((item) => item.address).join(', ') || '-'} | ${candidate.lead.jurisdiction_hint} | ${candidate.lead.brand_flags.join(', ') || '-'} |`,
+        )
+        .join('\n')}\n\nDropped before the scout: ${JSON.stringify(result.dropped)}\n`,
+    );
+    return {
+      status: 'done' as const,
+      detail: `${result.candidates.length} candidates (${sources}); dropped ${JSON.stringify(result.dropped)}`,
+    };
+  }
+
+  agentsBlocked(): string | null {
+    if (!this.o.gtmActive) return 'agents inactive: GTM_ACTIVE is false and every GTM budget is $0';
+    if (!this.ports.agents) return 'no executor key: no agent session can start';
+    return null;
+  }
+
+  async session(
+    agent: GtmAgentName,
+    message: string,
+    schema: Record<string, unknown>,
+    purpose: string,
+  ) {
+    const runner = this.ports.agents;
+    if (!runner) return null;
+    const { budget } = sessionBudget(agent);
+    const check = canSpend(this.store, this.date, budget);
+    if (!check.ok) {
+      this.log(`${purpose.padEnd(9)} ${agent} skipped: ${check.reason}`);
+      return null;
+    }
+    const id = await runner.start({
+      agent,
+      message,
+      outputSchema: schema,
+      budgetMicroUsd: budget,
+      metadata: { phase: purpose, date: this.date },
+    });
+    const result = await runner.wait(id, this.o.sessionWaitMs ?? 8 * 60_000);
+    recordSpend(this.store, {
+      date: this.date,
+      category: 'agents',
+      micro_usd: result.consumedMicroUsd,
+      ref: id,
+    });
+    await this.save();
+    return result;
+  }
+
+  async qualify() {
+    const blocked = this.agentsBlocked();
+    if (blocked) return { status: 'skipped' as const, detail: blocked };
+    const candidates = this.discovery?.candidates ?? [];
+    if (!candidates.length) return { status: 'skipped' as const, detail: 'no candidates' };
+    const sessions: string[] = [];
+    const corrections: string[] = [];
+    for (let index = 0; index < SCOUT_SESSIONS; index++) {
+      const batch = candidates.slice(index * SCOUT_BATCH, (index + 1) * SCOUT_BATCH);
+      if (!batch.length) break;
+      const nonce = newNonce();
+      const brief = scoutBrief(
+        this.date,
+        batch.map((candidate) => ({
+          candidate_id: candidate.candidate_id,
+          source: candidate.lead.source,
+          source_points: candidate.lead.hn_points,
+          domain: candidate.lead.domain,
+          product_name: candidate.lead.product_name,
+          addresses: candidate.lead.addresses.map((item) => item.address ?? ''),
+          jurisdiction_hint: candidate.lead.jurisdiction_hint,
+          source_title: candidate.raw.title,
+          read: candidate.read,
+        })),
+        nonce,
+      );
+      const result = await this.session(SCOUT, brief, jsonSchema(scoutOutputSchema), 'qualify');
+      if (!result) break;
+      sessions.push(result.sessionId);
+      const check = checkScout(result.output, batch, result.sessionId);
+      corrections.push(...check.corrections);
+      if (check.error) corrections.push(`${result.sessionId}: ${check.error}`);
+      for (const candidate of batch) {
+        const lead = this.store.leads.find((row) => row.id === candidate.lead.id);
+        const verdict = check.verdicts.get(candidate.candidate_id);
+        if (lead) {
+          lead.verdict = verdict ?? {
+            verdict: 'rejected',
+            reject_reason: 'other',
+            category: 'other',
+            fit: 0,
+            line: null,
+            email_option: null,
+            jurisdiction: 'unknown',
+            session_id: result.sessionId,
+          };
+        }
+      }
+    }
+    // At most 15 qualified a day, best fit first.
+    const qualified = this.todayLeads().filter((lead) => lead.verdict?.verdict === 'qualified');
+    qualified.sort((a, b) => (b.verdict?.fit ?? 0) - (a.verdict?.fit ?? 0));
+    for (const lead of qualified.slice(cap(this.store, 'qualified_day'))) {
+      if (lead.verdict) {
+        lead.verdict.verdict = 'rejected';
+        lead.verdict.reject_reason = 'other';
+      }
+    }
+    const kept = qualified.slice(0, cap(this.store, 'qualified_day'));
+    await this.comment('LEADS', this.date, `${kept.length} qualified of ${candidates.length}`, [
+      `Qualified: ${kept.map((lead) => `${lead.id} (fit ${lead.verdict?.fit}, ${lead.verdict?.jurisdiction}, email ${emailBlocker(this.store, lead, this.now()) ? 'no' : 'yes'}, x ${xBlocker(this.store, lead, this.now()) ? 'no' : 'yes'})`).join(', ') || 'none'}`,
+      `Scout: br-scout ${sessions.join(', ')}`,
+    ]);
+    this.review.push(
+      `## Scout verdicts\n\n${this.todayLeads()
+        .map(
+          (lead) =>
+            `- ${lead.id} ${lead.domain}: ${lead.verdict?.verdict ?? 'none'} ${lead.verdict?.reject_reason ?? ''} fit ${lead.verdict?.fit ?? '-'}; line ${lead.verdict?.line ? JSON.stringify(lead.verdict.line.quote) : 'none'}`,
+        )
+        .join(
+          '\n',
+        )}\n\nCode corrections:\n${corrections.map((line) => `- ${line}`).join('\n') || '- none'}\n`,
+    );
+    return {
+      status: 'done' as const,
+      detail: `${kept.length} qualified of ${candidates.length}`,
+      sessions,
+    };
+  }
+
+  todayLeads(): LeadRow[] {
+    return this.store.leads.filter((lead) => lead.date === this.date);
+  }
+
+  quotes(lead: LeadRow): VerifiedQuote[] {
+    return quotesOf(lead, this.reads.get(lead.id) ?? null);
+  }
+
+  async pick() {
+    const blocked = this.agentsBlocked();
+    if (blocked) return { status: 'skipped' as const, detail: blocked };
+    const now = this.now();
+    const qualified = this.todayLeads().filter((lead) => lead.verdict?.verdict === 'qualified');
+    if (!qualified.length) return { status: 'skipped' as const, detail: 'no qualified leads' };
+    const xOpen = new Set(
+      this.lanes.x === 'off'
+        ? []
+        : qualified.filter((lead) => !xBlocker(this.store, lead, now)).map((lead) => lead.id),
+    );
+    const emailOpen = new Set(
+      this.lanes.email === 'off'
+        ? []
+        : qualified.filter((lead) => !emailBlocker(this.store, lead, now)).map((lead) => lead.id),
+    );
+    if (!xOpen.size && !emailOpen.size)
+      return { status: 'skipped' as const, detail: 'no lead is open on any lane' };
+    const nonce = newNonce();
+    const quotes = new Map(qualified.map((lead) => [lead.id, this.quotes(lead)]));
+    const recentSubjects = this.store.copy_history
+      .filter((row) => row.lane === 'email' && daysSince(`${row.date}T12:00:00Z`, now) < 14)
+      .map((row) => row.variable);
+    const brief = pickBrief({
+      date: this.date,
+      leads: qualified.map((lead) => ({
+        lead_id: lead.id,
+        product_name: lead.product_name ?? '',
+        source: lead.source,
+        category: lead.verdict?.category ?? 'other',
+        fit: lead.verdict?.fit ?? 0,
+        jurisdiction: lead.verdict?.jurisdiction ?? 'unknown',
+        x_allowed: xOpen.has(lead.id) ? 'allowed' : `closed (${xBlocker(this.store, lead, now)})`,
+        email_allowed: emailOpen.has(lead.id)
+          ? 'allowed'
+          : `closed (${emailBlocker(this.store, lead, now)})`,
+        quotes: quotes.get(lead.id) ?? [],
+      })),
+      xLane: this.lanes.x,
+      emailLane: this.lanes.email,
+      xToday: cap(this.store, 'x_posts_day'),
+      emailToday: Math.min(cap(this.store, 'cold_emails_day'), MAX_EMAIL_PICKS),
+      recentSubjects,
+      nonce,
+    });
+    const sessions: string[] = [];
+    let result = await this.session(GTM_LEAD, brief, jsonSchema(pickOutputSchema), 'pick');
+    if (!result)
+      return { status: 'skipped' as const, detail: 'the GTM lead could not start (spend cap)' };
+    sessions.push(result.sessionId);
+    const leads = new Map(qualified.map((lead) => [lead.id, lead]));
+    const pickInput = {
+      store: this.store,
+      leads,
+      xOpen,
+      emailOpen,
+      quotes,
+      xCap: cap(this.store, 'x_posts_day'),
+      emailCap: Math.min(cap(this.store, 'cold_emails_day'), MAX_EMAIL_PICKS),
+    };
+    let check = checkPick(result.output, pickInput);
+    if (check.problems.length && !check.error && this.ports.agents) {
+      await this.ports.agents.repair(result.sessionId, repairBrief(nonce, check.problems));
+      const repaired = await this.ports.agents.wait(
+        result.sessionId,
+        this.o.sessionWaitMs ?? 8 * 60_000,
+      );
+      recordSpend(this.store, {
+        date: this.date,
+        category: 'agents',
+        micro_usd: Math.max(0, repaired.consumedMicroUsd - result.consumedMicroUsd),
+        ref: `${result.sessionId}:repair`,
+      });
+      result = repaired;
+      check = checkPick(result.output, pickInput);
+    }
+    this.picked = { x: check.x, emails: check.emails, caption: null };
+    if (check.problems.length)
+      this.review.push(
+        `## Pick: refused by code\n\n${check.problems.map((line) => `- ${line}`).join('\n')}\n`,
+      );
+
+    if (this.picked.x) {
+      const lead = leads.get(this.picked.x) as LeadRow;
+      const templates = freshTemplates(this.store.copy_history, now);
+      const socialNonce = newNonce();
+      const social = await this.session(
+        SOCIAL_AGENT,
+        socialBrief({
+          date: this.date,
+          lead: {
+            lead_id: lead.id,
+            product_name: lead.product_name ?? '',
+            source_phrase: sourcePhrase(lead.source, lead.source_at),
+          },
+          quotes: quotes.get(lead.id) ?? [],
+          templates,
+          nonce: socialNonce,
+        }),
+        jsonSchema(socialOutputSchema),
+        'pick',
+      );
+      if (social) {
+        sessions.push(social.sessionId);
+        const input = {
+          lead,
+          quotes: quotes.get(lead.id) ?? [],
+          history: this.store.copy_history,
+          now,
+        };
+        let socialCheck = checkSocial(social.output, input);
+        if (!socialCheck.caption.ok && !socialCheck.error && this.ports.agents) {
+          await this.ports.agents.repair(
+            social.sessionId,
+            repairBrief(socialNonce, socialCheck.caption.problems),
+          );
+          const repaired = await this.ports.agents.wait(
+            social.sessionId,
+            this.o.sessionWaitMs ?? 8 * 60_000,
+          );
+          recordSpend(this.store, {
+            date: this.date,
+            category: 'agents',
+            micro_usd: Math.max(0, repaired.consumedMicroUsd - social.consumedMicroUsd),
+            ref: `${social.sessionId}:repair`,
+          });
+          socialCheck = checkSocial(repaired.output, input);
+        }
+        if (socialCheck.caption.ok) {
+          this.picked.caption = {
+            caption: socialCheck.caption.caption,
+            variable: socialCheck.caption.variable,
+            template_id: socialCheck.caption.template_id,
+          };
+        } else {
+          this.review.push(
+            `## Caption: refused by code\n\n${socialCheck.caption.problems.map((line) => `- ${line}`).join('\n') || `- ${socialCheck.error}`}\n`,
+          );
+          this.picked.x = null;
+        }
+      } else {
+        this.picked.x = null;
+      }
+    }
+    for (const lead of qualified) {
+      lead.picked = [
+        ...(this.picked.x === lead.id ? (['x'] as const) : []),
+        ...(this.picked.emails.some((item) => item.lead_id === lead.id)
+          ? (['email'] as const)
+          : []),
+      ];
+    }
+    if (this.picked.x)
+      await this.comment('PICK', this.picked.x, 'x', [
+        `By br-gtm-lead ${sessions[0]}. Lane x: ${this.lanes.x}. Caption template ${this.picked.caption?.template_id}.`,
+      ]);
+    await this.comment('PICK', this.date, 'email', [
+      `By br-gtm-lead ${sessions[0]}. Lane email: ${this.lanes.email}. Email picks: ${this.picked.emails.map((item) => item.lead_id).join(', ') || 'none'}.`,
+    ]);
+    return {
+      status: 'done' as const,
+      detail: `x ${this.picked.x ?? 'none'}, email ${this.picked.emails.length}`,
+      sessions,
+    };
+  }
+
+  pickedLeads(): LeadRow[] {
+    const ids = [
+      ...new Set([
+        ...(this.picked.x ? [this.picked.x] : []),
+        ...this.picked.emails.map((item) => item.lead_id),
+      ]),
+    ];
+    return ids
+      .map((id) => this.store.leads.find((lead) => lead.id === id))
+      .filter((lead): lead is LeadRow => Boolean(lead));
+  }
+
+  async order() {
+    const leads = this.pickedLeads();
+    if (!leads.length) return { status: 'skipped' as const, detail: 'nothing picked' };
+    const live = this.lanes.film === 'live';
+    // A film is ordered for real only while the film lane is live. Otherwise the dry-run pipeline simulates it.
+    const port: FilmOrder = live ? this.ports.film : new DryRunFilmOrder(this.ports.appBase);
+    let ordered = 0;
+    for (const lead of leads) {
+      const key = `film:${lead.domain}:${this.date}`;
+      if (ordered >= this.lanes.filmCap) {
+        skipAction(this.store, {
+          key,
+          kind: 'film',
+          lead_id: lead.id,
+          reason: 'film_cap',
+          at: this.iso(),
+        });
+        continue;
+      }
+      if (live && contactedWithin(this.store, lead.domain, 'film', this.now())) {
+        skipAction(this.store, {
+          key,
+          kind: 'film',
+          lead_id: lead.id,
+          reason: 'filmed_90d',
+          at: this.iso(),
+        });
+        continue;
+      }
+      const budget = cap(this.store, 'film_budget_micro');
+      if (live) {
+        const check = canSpend(this.store, this.date, budget, { keepReplyReserve: true });
+        if (!check.ok) {
+          skipAction(this.store, {
+            key,
+            kind: 'film',
+            lead_id: lead.id,
+            reason: check.reason ?? 'spend',
+            at: this.iso(),
+          });
+          continue;
+        }
+      }
+      let orderId: string | null = null;
+      const outcome = await runAction(
+        this.store,
+        {
+          key,
+          kind: 'film',
+          lead_id: lead.id,
+          detail: `${port.kind} order`,
+          dryRun: !live,
+          call: async () => {
+            const result = await port.order({
+              url: lead.site_url,
+              idempotencyKey: key,
+              budgetMicroUsd: budget,
+              leadRef: lead.id,
+            });
+            return { provider_id: result.orderId };
+          },
+        },
+        this.save,
+        this.iso,
+      );
+      if (!live)
+        orderId = (
+          await port.order({
+            url: lead.site_url,
+            idempotencyKey: key,
+            budgetMicroUsd: budget,
+            leadRef: lead.id,
+          })
+        ).orderId;
+      else if (outcome.state === 'done') orderId = outcome.row.provider_id;
+      if (!orderId) continue;
+      ordered += 1;
+      if (live) {
+        recordSpend(this.store, {
+          date: this.date,
+          category: 'films',
+          micro_usd: budget,
+          ref: key,
+          reserved: true,
+        });
+        recordContact(this.store, {
+          domain: lead.domain,
+          channel: 'film',
+          at: this.iso(),
+          lead_id: lead.id,
+        });
+      }
+      this.store.films.push({
+        key,
+        date: this.date,
+        lead_id: lead.id,
+        domain: lead.domain,
+        order_id: orderId,
+        kind: port.kind,
+        state: 'queued',
+        qc: 'pending',
+        simulated: !live,
+        cost_micro_usd: null,
+        page_url: null,
+        share_id: null,
+        duration_seconds: null,
+      });
+      this.films.set(lead.id, {
+        orderId,
+        port,
+        ready: false,
+        usable: false,
+        pageUrl: null,
+        shareId: null,
+        file: null,
+        scriptFlags: [],
+      });
+      await this.comment('FILM', lead.id, live ? 'ordered' : 'dry run', [
+        `Order ${orderId}. Short, 16:9, budget $${(budget / 1e6).toFixed(2)}, kind ${port.kind}.`,
+      ]);
+    }
+    await this.save();
+    return { status: 'done' as const, detail: `${ordered} film(s), ${live ? 'live' : 'dry run'}` };
+  }
+
+  async filmsPhase() {
+    if (!this.films.size) return { status: 'skipped' as const, detail: 'no films' };
+    const live = [...this.films.values()].some((film) => film.port.kind === 'app');
+    const deadline = this.now().getTime() + (live ? (this.o.filmWaitMs ?? 3 * 3_600_000) : 0);
+    const poll = live ? (this.o.filmPollMs ?? 60_000) : 0;
+    // Dry-run films are ready after three reads, so a dry run polls a few rounds without waiting.
+    for (let round = 0; ; round++) {
+      let waiting = 0;
+      for (const [leadId, film] of this.films) {
+        if (film.ready) continue;
+        const row = this.store.films.find((item) => item.order_id === film.orderId);
+        const status = await film.port.status(film.orderId);
+        if (row) {
+          row.state = status.state;
+          row.qc = status.qc;
+          row.simulated = status.simulated;
+          if (status.costMicroUsd !== null) {
+            row.cost_micro_usd = status.costMicroUsd;
+            if (film.port.kind === 'app') settleSpend(this.store, row.key, status.costMicroUsd);
+          }
+        }
+        if (status.state === 'failed' || status.state === 'withdrawn' || status.qc === 'fail') {
+          film.ready = true;
+          await this.comment('FILM', leadId, 'failed', [
+            `${status.qc === 'fail' ? 'QC fail' : status.state}. No outreach for ${leadId} today.`,
+          ]);
+          continue;
+        }
+        if (status.state !== 'ready') {
+          waiting += 1;
+          continue;
+        }
+        film.ready = true;
+        film.usable = status.qc === 'pass' && !status.simulated;
+        film.scriptFlags = brandFlags(status.script ?? '');
+        const shared = await film.port.share(film.orderId);
+        film.pageUrl = shared.pageUrl;
+        film.shareId = shared.shareId;
+        if (film.usable) film.file = await film.port.file(film.orderId).catch(() => null);
+        if (row) {
+          row.page_url = shared.pageUrl;
+          row.share_id = shared.shareId;
+          row.duration_seconds = film.file?.durationSeconds ?? null;
+        }
+        const action = findAction(this.store, row?.key ?? '');
+        if (action) action.detail = `${action.detail}; share=${shared.shareId}`;
+        await this.comment('FILM', leadId, film.usable ? 'ready' : 'dry run', [
+          `QC ${status.qc}. Page ${shared.pageUrl}${status.simulated ? ' (simulated, not real)' : ''}.`,
+        ]);
+      }
+      await this.save();
+      if (!waiting) break;
+      if (live ? this.now().getTime() >= deadline : round >= 5) {
+        // A late film is withdrawn, so it stops spending and does not count against tomorrow's orders.
+        for (const [leadId, film] of this.films) {
+          if (film.ready) continue;
+          await film.port.withdraw(film.orderId, 'failed').catch(() => undefined);
+          const row = this.store.films.find((item) => item.order_id === film.orderId);
+          if (row) row.state = 'late';
+          film.ready = true;
+          await this.comment('FILM', leadId, 'late', [
+            'Not ready by compose: withdrawn. No backfill.',
+          ]);
+        }
+        break;
+      }
+      if (poll) await new Promise((resolve) => setTimeout(resolve, poll));
+    }
+    await this.save();
+    return {
+      status: 'done' as const,
+      detail: `${[...this.films.values()].filter((film) => film.pageUrl).length} ready of ${this.films.size}`,
+    };
+  }
+
+  async compose() {
+    const now = this.now();
+    const appBase = this.ports.appBase;
+    if (this.picked.x && this.picked.caption) {
+      const lead = this.store.leads.find((row) => row.id === this.picked.x) as LeadRow;
+      const film = this.films.get(lead.id);
+      const problems: string[] = [];
+      const blocker = xBlocker(this.store, lead, now);
+      if (blocker) problems.push(blocker);
+      if (!film?.pageUrl) problems.push('no ready film');
+      if (film && !film.usable) problems.push('the film is simulated or did not pass QC');
+      if (film?.scriptFlags.length)
+        problems.push(`film script brand flags: ${film.scriptFlags.join(', ')}`);
+      if (film?.usable && !film.file) problems.push('no film file');
+      this.drafts.push({
+        lead_id: lead.id,
+        lane: 'x',
+        text: this.picked.caption.caption,
+        problems,
+        usable: problems.length === 0,
+      });
+      await this.comment('POST', lead.id, this.lanes.x === 'standalone' ? 'draft' : 'dry run', [
+        `Lane x: ${this.lanes.x}. Goes out at 10:30 unless someone comments HOLD or HOLD ${lead.id}. Caption by br-social, template ${this.picked.caption.template_id}, ${this.picked.caption.caption.length} characters. Checks: ${problems.length ? problems.join('; ') : 'passed'}.`,
+      ]);
+    }
+    for (const pick of this.picked.emails) {
+      const lead = this.store.leads.find((row) => row.id === pick.lead_id) as LeadRow;
+      const film = this.films.get(lead.id);
+      const address = chosenAddress(lead);
+      const problems: string[] = [];
+      const blocker = emailBlocker(this.store, lead, now);
+      if (blocker) problems.push(blocker);
+      if (!film?.pageUrl) problems.push('no ready film');
+      if (film && !film.usable) problems.push('the film is simulated or did not pass QC');
+      if (!address?.address) {
+        problems.push('no_address');
+        continue;
+      }
+      const { token, hash } = optOutToken();
+      try {
+        await this.ports.app.registerOptOutToken(hash, lead.id);
+        this.store.optout_tokens.push({
+          hash,
+          lead_id: lead.id,
+          domain: lead.domain,
+          created_at: this.iso(),
+        });
+      } catch {
+        problems.push('opt-out token not registered');
+      }
+      const draft = composeEmail({
+        lead,
+        address: { address: address.address, page_label: address.page_label },
+        subject: pick.subject,
+        opener: pick.opener,
+        filmPageUrl: film?.pageUrl ?? `${appBase}/f/not-ready`,
+        durationSeconds: film?.file?.durationSeconds ?? null,
+        optOutUrl: `${appBase}/u/${token}`,
+        postalAddress: this.store.flags.postal_address,
+      });
+      problems.push(...emailProblems(draft, this.store.flags.postal_address));
+      this.drafts.push({
+        lead_id: lead.id,
+        lane: 'email',
+        subject: draft.subject,
+        text: draft.text,
+        to: address.address,
+        headers: draft.headers,
+        problems,
+        usable: problems.length === 0,
+      });
+      await this.comment('EMAIL', lead.id, this.lanes.email === 'live' ? 'draft' : 'dry run', [
+        `To the published address at ${lead.domain} (a role address, from its ${address.page_label}). Jurisdiction ${lead.verdict?.jurisdiction}.`,
+        `Lines by br-gtm-lead. Checks: ${problems.length ? problems.join('; ') : 'suppression, 90 days, quote, numbers, links (2), footer'}.`,
+      ]);
+    }
+    this.review.push(
+      `## Drafts\n\n${this.drafts
+        .map(
+          (draft) =>
+            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n`,
+        )
+        .join('\n')}`,
+    );
+    return {
+      status: 'done' as const,
+      detail: `${this.drafts.length} draft(s), ${this.drafts.filter((draft) => draft.usable).length} sendable`,
+    };
+  }
+
+  async execute() {
+    // Re-read holds and re-resolve every lane right before anything goes out.
+    if (this.dayCard) {
+      const comments = await this.ports.board.comments(this.dayCard).catch(() => []);
+      this.holds = readCommands(comments, this.store.flags.founder_user_id, this.ownComments);
+    }
+    this.holdCards = this.ports.naive
+      ? await this.ports.board.holdCards().catch(() => ['unreadable'])
+      : [];
+    this.lanes = this.resolve();
+    const now = this.now();
+    let posts = 0;
+    let emails = 0;
+    for (const draft of this.drafts) {
+      const lead = this.store.leads.find((row) => row.id === draft.lead_id) as LeadRow;
+      if (draft.lane === 'x') {
+        const key = `x-post:${this.date}`;
+        const reasons = [...draft.problems];
+        if (this.holds.leads.has(lead.id)) reasons.push('held');
+        const blocker = xBlocker(this.store, lead, now);
+        if (blocker) reasons.push(blocker);
+        if (posts >= cap(this.store, 'x_posts_day')) reasons.push('x_cap');
+        if (!canSpend(this.store, this.date, PRICES.x_post).ok) reasons.push('spend');
+        const live = this.lanes.x === 'standalone' && reasons.length === 0;
+        if (this.lanes.x === 'standalone' && reasons.length) {
+          skipAction(this.store, {
+            key,
+            kind: 'x-post',
+            lead_id: lead.id,
+            reason: reasons.join('; '),
+            at: this.iso(),
+          });
+          await this.comment('POST', lead.id, 'skipped', [`Reason: ${reasons.join('; ')}.`]);
+          continue;
+        }
+        const film = this.films.get(lead.id);
+        const outcome = await runAction(
+          this.store,
+          {
+            key,
+            kind: 'x-post',
+            lead_id: lead.id,
+            detail: `lead ${lead.id}`,
+            dryRun: !live,
+            call: async () => {
+              const result = await this.ports.social.post({
+                caption: draft.text,
+                filmFileUrl: film?.file?.url ?? '',
+                idempotencyKey: key,
+              });
+              return { provider_id: result.postId, cost_micro_usd: PRICES.x_post };
+            },
+            reconcile: () => this.ports.social.find(key),
+          },
+          this.save,
+          this.iso,
+        );
+        if (outcome.state === 'unknown') await this.founder('unknown-send', key);
+        if (outcome.state === 'done') {
+          posts += 1;
+          recordSpend(this.store, {
+            date: this.date,
+            category: 'posts',
+            micro_usd: PRICES.x_post,
+            ref: key,
+          });
+          recordContact(this.store, {
+            domain: lead.domain,
+            channel: 'x_post',
+            at: this.iso(),
+            lead_id: lead.id,
+          });
+        }
+        if (outcome.state === 'done' || outcome.state === 'dry_run') {
+          this.store.copy_history.push({
+            date: this.date,
+            lane: 'x',
+            template_id: this.picked.caption?.template_id ?? null,
+            variable: this.picked.caption?.variable ?? '',
+            lead_id: lead.id,
+          });
+        }
+        await this.comment('POST', lead.id, outcome.state === 'done' ? 'live' : 'dry run', [
+          outcome.state === 'done'
+            ? `Posted as ${outcome.row.provider_id}.`
+            : `Not posted: ${reasons.join('; ') || this.lanes.reasons.x.slice(0, 3).join('; ')}.`,
+        ]);
+        continue;
+      }
+      const key = `email:${lead.domain}:${this.date}`;
+      const reasons = [...draft.problems];
+      if (this.holds.leads.has(lead.id)) reasons.push('held');
+      // Suppression and the 90-day rule are checked again here: an opt-out may have come in since compose.
+      if (draft.to && suppressedBy(this.store, { email: draft.to, domain: lead.domain }))
+        reasons.push('suppressed');
+      if (contactedWithin(this.store, lead.domain, 'email', now)) reasons.push('emailed_90d');
+      if (emails >= cap(this.store, 'cold_emails_day')) reasons.push('email_cap');
+      if (this.lanes.email === 'live' && !reasons.length && draft.to) {
+        const domain = registrableDomain(draft.to.split('@')[1] ?? '') ?? '';
+        if (!(await this.ports.mx(domain))) reasons.push('no_mx');
+      }
+      const live = this.lanes.email === 'live' && reasons.length === 0;
+      if (reasons.length && this.lanes.email === 'live') {
+        skipAction(this.store, {
+          key,
+          kind: 'email',
+          lead_id: lead.id,
+          reason: reasons.join('; '),
+          at: this.iso(),
+        });
+        await this.comment('EMAIL', lead.id, 'skipped', [`Reason: ${reasons.join('; ')}.`]);
+        continue;
+      }
+      const sender = this.ports.sender;
+      const outcome = await runAction(
+        this.store,
+        {
+          key,
+          kind: 'email',
+          lead_id: lead.id,
+          detail: `lead ${lead.id}`,
+          dryRun: !live,
+          call: async () => {
+            const result = await sender.send({
+              from: sender.from,
+              replyTo: sender.replyTo,
+              to: draft.to as string,
+              subject: draft.subject as string,
+              text: draft.text,
+              headers: sender.capabilities.customHeaders ? (draft.headers ?? {}) : {},
+              idempotencyKey: key,
+            });
+            return { provider_id: result.messageId };
+          },
+        },
+        this.save,
+        this.iso,
+      );
+      if (outcome.state === 'unknown') await this.founder('unknown-send', key);
+      if (outcome.state === 'done') {
+        emails += 1;
+        recordContact(this.store, {
+          domain: lead.domain,
+          channel: 'email',
+          at: this.iso(),
+          lead_id: lead.id,
+        });
+      }
+      if (outcome.state === 'done' || outcome.state === 'dry_run') {
+        this.store.copy_history.push({
+          date: this.date,
+          lane: 'email',
+          template_id: null,
+          variable: draft.subject ?? '',
+          lead_id: lead.id,
+        });
+      }
+      await this.comment('EMAIL', lead.id, outcome.state === 'done' ? 'sent' : 'dry run', [
+        outcome.state === 'done'
+          ? `Sent as ${outcome.row.provider_id} by ${sender.kind}.`
+          : `Not sent: ${reasons.join('; ') || this.lanes.reasons.email.slice(0, 3).join('; ')}.`,
+      ]);
+    }
+    return {
+      status: 'done' as const,
+      detail: `${posts} post(s), ${emails} email(s) live; the rest dry run`,
+    };
+  }
+
+  reviewText(): string {
+    const lanes = this.lanes;
+    return [
+      `# GTM review ${this.date}`,
+      '',
+      'This file holds text from outside the company (site quotes, captions, emails). It is for the founder only: never paste it on the board.',
+      '',
+      '## Lanes',
+      '',
+      `- films ${lanes.film}: ${lanes.reasons.film.join('; ') || 'live'}`,
+      `- x ${lanes.x}: ${lanes.reasons.x.join('; ') || 'live'}`,
+      `- email ${lanes.email}: ${lanes.reasons.email.join('; ') || 'live'}`,
+      `- replies ${lanes.reply}: ${lanes.reasons.reply.join('; ')}`,
+      '',
+      ...this.review,
+    ].join('\n');
+  }
+
+  async report() {
+    pruneLeads(this.store, this.now());
+    const metrics = dayMetrics(this.store, this.date);
+    const holds = [
+      ...(this.holds.day ? ['HOLD'] : []),
+      ...[...this.holds.leads].map((id) => `HOLD ${id}`),
+      ...this.holdCards,
+    ];
+    const text = reportText(metrics, {
+      mode: this.store.flags.mode,
+      lanes: this.lanes,
+      holds,
+      needs: [...this.needs],
+      review: null,
+    });
+    this.o.writeFile('report.txt', `${text}\n`);
+    this.o.writeFile('metrics.json', `${JSON.stringify(metrics, null, 2)}\n`);
+    this.o.writeFile('review.md', `${this.reviewText()}\n`);
+    if (this.dayCard) await this.ports.board.move(this.dayCard, 'done', text);
+    return { status: 'done' as const, detail: text.split('\n')[0] ?? '' };
+  }
+}
+
+/** Runs one whole GTM day from a terminal, in phase order. */
+export async function runDay(options: DayOptions): Promise<DayResult> {
+  const day = new Day(options);
+  await day.prepare();
+  await day.phase('open', () => day.open());
+  await day.phase('removals', () => day.removals());
+  await day.phase('discover', () => day.discover());
+  await day.phase('qualify', () => day.qualify());
+  await day.phase('pick', () => day.pick());
+  await day.phase('order', () => day.order());
+  await day.phase('films', () => day.filmsPhase());
+  await day.phase('compose', () => day.compose());
+  // Removals run again right before anything goes out, as they do on every tick of the hosted executor.
+  await day.phase('removals', () => day.removals());
+  await day.phase('execute', () => day.execute());
+  await day.phase('report', () => day.report());
+  if (options.ports.board instanceof LocalBoard)
+    options.writeFile('board.md', options.ports.board.markdown());
+  const report = reportText(dayMetrics(options.store, day.date), {
+    mode: options.store.flags.mode,
+    lanes: day.lanes,
+    holds: [],
+    needs: [...day.needs],
+    review: null,
+  });
+  return {
+    date: day.date,
+    lanes: day.lanes,
+    report,
+    review: day.reviewText(),
+    needs: [...day.needs],
+    phases: day.phases,
+  };
+}

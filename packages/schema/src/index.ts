@@ -10,6 +10,8 @@ export {
 export type { CampaignFrames, SceneFrames } from './frames.ts';
 export { sceneFrames, toFrame } from './frames.ts';
 export { campaignJsonSchema } from './json-schema.ts';
+export type { NumericKind, NumericToken } from './numbers.ts';
+export { extractNumericTokens, isBacked } from './numbers.ts';
 export type { ResearchParts, ResearchPartsResult } from './research.ts';
 export { researchPartsSchema, validateResearchParts } from './research.ts';
 export type {

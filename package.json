@@ -17,7 +17,12 @@
     "company:sync": "pnpm --filter @boiler-room/agents company:sync",
     "company:status": "pnpm --filter @boiler-room/agents company:status",
     "company:verify": "pnpm --filter @boiler-room/agents company:verify",
-    "company:halt": "pnpm --filter @boiler-room/agents company:halt"
+    "company:halt": "pnpm --filter @boiler-room/agents company:halt",
+    "gtm:day": "pnpm --filter @boiler-room/agents gtm:day",
+    "gtm:report": "pnpm --filter @boiler-room/agents gtm:report",
+    "gtm:halt": "pnpm --filter @boiler-room/agents gtm:halt",
+    "gtm:schedule": "pnpm --filter @boiler-room/agents gtm:schedule",
+    "gtm:flags": "pnpm --filter @boiler-room/agents gtm:flags"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

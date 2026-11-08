@@ -20,6 +20,7 @@ import {
 import {
   CEO_TOOLS_MESSAGE,
   judgeCeoTools,
+  judgeGtmStored,
   judgeVerify,
   verifySchema,
   verifySteps,
@@ -35,6 +36,7 @@ import {
   RELEASE_RULE,
   UNKNOWN_CARD_RULE,
 } from '../src/definitions/company/common.ts';
+import { GTM_ACTIVE, GTM_ACTIVE_BUDGETS, NOT_MY_TRIGGER } from '../src/definitions/company/gtm.ts';
 import {
   CEO_ROSTER,
   CEO_SWEEP,
@@ -171,34 +173,10 @@ describe('every company toolset', () => {
         'view_image',
       ]),
     );
-    const gtmBase = base.filter((name) => name !== 'board_write');
-    expect(allowedTools(gtmLead.tools)).toEqual(
-      sorted([
-        ...gtmBase,
-        'br-app.inbox_summaries',
-        'br-app.leads',
-        'br-app.leads_upsert',
-        'br-app.request_sample',
-        'br-app.send_email',
-        'data_describe',
-        'data_search',
-      ]),
-    );
-    expect(allowedTools(scout.tools)).toEqual(
-      sorted([
-        ...gtmBase,
-        'br-app.inbox_summaries',
-        'br-app.leads',
-        'br-app.leads_upsert',
-        'data_describe',
-        'data_run',
-        'data_search',
-      ]),
-    );
-    expect(allowedTools(social.tools)).toEqual(sorted([...gtmBase, ...SOCIAL]));
-    expect(allowedTools(inboxReader.tools)).toEqual(
-      sorted(['agentmail.get_message', 'read_skill', 'session_spend']),
-    );
+    // The GTM agents read outside content, so each may use its skill and its spend, and nothing else.
+    for (const agent of [gtmLead, scout, social, inboxReader]) {
+      expect(allowedTools(agent.tools), agent.name).toEqual(['read_skill', 'session_spend']);
+    }
   });
 
   it('keeps web search and browsing away from every builder', () => {
@@ -219,47 +197,102 @@ describe('every company toolset', () => {
 
 describe('GTM', () => {
   it.each(GTM.map((agent) => [agent.name, agent] as const))(
-    '%s has a $0 budget and starts no session that could spend',
+    '%s has a $0 budget and starts no session that could spend while GTM_ACTIVE is false',
     (_name, agent) => {
+      expect(GTM_ACTIVE).toBe(false);
       expect(agent.budget).toEqual({ cap_micro_usd: 0, max_task_micro_usd: 0, period: 'day' });
       expect(agent.session.budget_micro_usd).toBe(0);
     },
   );
 
   it.each(GTM.map((agent) => [agent.name, agent] as const))(
-    '%s has no bash, write, edit or file fetch',
+    '%s has its intended budget in code, behind the activation flag',
     (_name, agent) => {
-      for (const tool of ['bash', 'write', 'edit', 'read', 'fetch_file', 'browser', 'web_fetch']) {
-        expect(agent.tools.configs[tool], `${agent.name} ${tool}`).toEqual(OFF);
-      }
+      const intended = GTM_ACTIVE_BUDGETS[agent.name as keyof typeof GTM_ACTIVE_BUDGETS];
+      expect(intended.cap_micro_usd).toBeGreaterThan(0);
+      expect(intended.max_task_micro_usd).toBeLessThanOrEqual(intended.cap_micro_usd);
     },
   );
 
-  it('lets the inbox reader make one read and send nothing', () => {
-    const allowed = allowedTools(inboxReader.tools).filter((name) => name.startsWith('agentmail.'));
-    expect(allowed).toEqual(['agentmail.get_message']);
-    expect(inboxReader.tools.configs.board_read).toEqual(OFF);
-    expect(inboxReader.tools.configs.board_write).toEqual(OFF);
-    expect(inboxReader.structured_output_required).toBe(true);
+  it.each(GTM.map((agent) => [agent.name, agent] as const))(
+    '%s has no bash, write, edit, file fetch, web, social, data or app tool, and no board',
+    (_name, agent) => {
+      for (const tool of [
+        'bash',
+        'write',
+        'edit',
+        'read',
+        'fetch_file',
+        'browser',
+        'web_fetch',
+        'web_search',
+        'board_read',
+        'board_write',
+        'data_run',
+        ...SOCIAL,
+        ...APP_TOOLS.map(appTool),
+      ]) {
+        expect(agent.tools.configs[tool], `${agent.name} ${tool}`).toEqual(OFF);
+      }
+      expect(agent.mcp_servers ?? []).toEqual([]);
+      expect(agent.structured_output_required).toBe(true);
+      expect(agent.output_schema).not.toBeNull();
+    },
+  );
+
+  it.each(GTM.map((agent) => [agent.name, agent] as const))(
+    '%s refuses any first message that is not an executor brief',
+    (_name, agent) => {
+      expect(agent.system).toContain(NOT_MY_TRIGGER);
+      const skill = skillContent(agent.skills[0] as { slug: string; description: string });
+      expect(skill.split('\n').slice(0, 10).join('\n')).toContain('{"error":"not_my_trigger"}');
+    },
+  );
+
+  it('keeps the inbox reader off AgentMail: the executor fetches and fences the email', () => {
+    expect(allowedTools(inboxReader.tools).filter((name) => name.startsWith('agentmail.'))).toEqual(
+      [],
+    );
+    expect(inboxReader.mcp_servers).toBeUndefined();
+    const schema = JSON.stringify(inboxReader.output_schema);
+    expect(schema).not.toContain('"sender"');
+    for (const intent of ['removal', 'auto_reply', 'not_interested']) {
+      expect(schema).toContain(intent);
+    }
+    expect(AGENTMAIL_TOOLS).toContain('send_message');
+  });
+
+  it('passes the stored-agent GTM check with the toolsets this repo defines, and fails a widened one', () => {
+    const stored = GTM.map((agent) => ({ name: agent.name, tools: agent.tools }));
+    expect(judgeGtmStored(stored)).toEqual([]);
+    const widened = stored.map((agent) =>
+      agent.name === 'br-social'
+        ? {
+            ...agent,
+            tools: {
+              ...agent.tools,
+              configs: {
+                ...agent.tools.configs,
+                'social.post': { enabled: true, permission: 'allow' },
+              },
+            },
+          }
+        : agent,
+    );
+    expect(judgeGtmStored(widened)).toEqual([
+      expect.stringMatching(/^br-social allows read_skill, session_spend, social.post/),
+    ]);
   });
 });
 
 describe('the roster', () => {
-  it('seats every company agent except the inbox reader, on a board owned by br-ceo', () => {
+  it('puts the builders on the roster of a board owned by br-ceo, and no GTM agent', () => {
     expect([...CEO_ROSTER].sort()).toEqual(
-      [
-        'br-design',
-        'br-eng-lead',
-        'br-engineer-1',
-        'br-gtm-lead',
-        'br-product',
-        'br-scout',
-        'br-social',
-      ].sort(),
+      ['br-design', 'br-eng-lead', 'br-engineer-1', 'br-product'].sort(),
     );
     expect(ceo.roster).toEqual(CEO_ROSTER);
     expect(ceo.board).toBe(true);
-    expect(CEO_ROSTER).not.toContain('br-inbox-reader');
+    for (const agent of GTM) expect(CEO_ROSTER).not.toContain(agent.name);
   });
 
   it('makes br-ceo the only coordinator, one level deep', () => {
@@ -368,11 +401,11 @@ describe('the company board', () => {
     );
   });
 
-  it.each([gtmLead, scout, social].map((agent) => [agent.name, agent] as const))(
-    '%s names board_write off while GTM is inactive, and can still read the board',
+  it.each(GTM.map((agent) => [agent.name, agent] as const))(
+    '%s names both board tools off: it reads outside content, so it never reads or writes cards',
     (_name, agent) => {
       expect(agent.tools.configs.board_write).toEqual(OFF);
-      expect(agent.tools.configs.board_read?.permission).toBe('allow');
+      expect(agent.tools.configs.board_read).toEqual(OFF);
     },
   );
 
@@ -516,7 +549,9 @@ describe("the CEO's own cards", () => {
 });
 
 describe('main and production', () => {
-  const members = company.filter((agent) => agent !== ceo && agent !== inboxReader);
+  // The GTM agents are started only by the executor, never by a card, so they have no card rules.
+  const gtmNames = new Set(GTM.map((agent) => agent.name));
+  const members = company.filter((agent) => agent !== ceo && !gtmNames.has(agent.name));
 
   it.each(members.map((agent) => [agent.name, agent] as const))(
     '%s refuses any card that touches main or production, whatever its prefix',

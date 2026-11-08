@@ -1,8 +1,10 @@
+import { GTM_LEAD, INBOX_READER, SCOUT, SOCIAL_AGENT } from '../definitions/company/common.ts';
 import { company, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
 import { liveCatalogue, unnamedOn } from './control-plane.ts';
 import { GITHUB_OWNER, otherRepo, REPO_OF } from './github.ts';
 import { type BoardExposure, exposureLine, liveBoardExposure } from './seats.ts';
+import { allowedTools } from './tools.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -286,9 +288,54 @@ export async function verifyCeoTools(
   };
 }
 
+/**
+ * What a GTM agent may be offered: its skill, its spend, and the always-offered `submit_output`.
+ * Nothing that sends, posts, spends, writes or reads the board, or runs code, because each one
+ * reads text from outside the company.
+ */
+export const GTM_OFFERED = ['read_skill', 'session_spend', 'submit_output'] as const;
+const GTM_NAMES = [GTM_LEAD, SCOUT, SOCIAL_AGENT, INBOX_READER] as const;
+
+/**
+ * Judges the four GTM agents as Naive stores them: each allows only `read_skill` and
+ * `session_spend` (`submit_output` cannot be named), and connects no MCP server. An agent that is
+ * not synced yet is not judged.
+ */
+export function judgeGtmStored(
+  stored: readonly {
+    name: string;
+    tools?: { configs?: Record<string, unknown> } | null;
+    mcp_servers?: unknown;
+  }[],
+): string[] {
+  const failures: string[] = [];
+  const allowed = GTM_OFFERED.filter((name) => name !== 'submit_output').join(',');
+  for (const name of GTM_NAMES) {
+    const agent = stored.find((item) => item.name === name);
+    if (!agent) continue;
+    const tools = allowedTools({
+      default_config: { permission: 'deny' },
+      configs: (agent.tools?.configs ?? {}) as Parameters<typeof allowedTools>[0]['configs'],
+    });
+    if (tools.join(',') !== allowed) {
+      failures.push(
+        `${name} allows ${tools.join(', ') || 'nothing'}; a GTM agent may allow only ${allowed}. Sync it from this repo.`,
+      );
+    }
+    if (Array.isArray(agent.mcp_servers) && agent.mcp_servers.length) {
+      failures.push(
+        `${name} connects ${agent.mcp_servers.length} MCP server(s); a GTM agent connects none.`,
+      );
+    }
+  }
+  return failures;
+}
+
 export interface LockdownResult {
   /** Agents the company board offers a board tool their definition does not give them. */
   exposure: BoardExposure[];
+  /** GTM agents, as stored, that allow more than their skill and their spend. */
+  gtm: string[];
   /** Served control-plane tools that br-ceo, as stored, does not name off. */
   unnamed_on_ceo: string[];
   verdict: VerifyVerdict;
@@ -306,11 +353,18 @@ export async function verifyLockdown(
 ): Promise<LockdownResult> {
   const exposure = await liveBoardExposure(client);
   const existing = await listAll((query) => client.agents.list(query));
+  const gtmStored = [];
+  for (const agent of existing.filter((item) =>
+    (GTM_NAMES as readonly string[]).includes(item.name),
+  )) {
+    gtmStored.push(await client.agents.get(agent.id));
+  }
+  const gtm = judgeGtmStored(gtmStored as unknown as Parameters<typeof judgeGtmStored>[0]);
   const ceo = existing.filter((item) => item.name === 'br-ceo');
   if (ceo.length !== 1) throw new Error(`${ceo.length} agents are named br-ceo; expected one.`);
   const stored = (await client.agents.get((ceo[0] as { id: string }).id)).tools?.configs ?? {};
   const unnamed = unnamedOn(await catalogue(), stored);
-  const failures = exposure.map(exposureLine);
+  const failures = [...exposure.map(exposureLine), ...gtm];
   if (unnamed.length) {
     failures.push(
       `br-ceo is offered ${unnamed.length} control-plane tool(s) at "ask", because its stored toolset does not name them off: ${unnamed.join(', ')}. Add them to src/company/control-plane-tools.ts and run company:sync.`,
@@ -318,6 +372,7 @@ export async function verifyLockdown(
   }
   return {
     exposure,
+    gtm,
     unnamed_on_ceo: unnamed,
     verdict: { ok: failures.length === 0, failures },
   };

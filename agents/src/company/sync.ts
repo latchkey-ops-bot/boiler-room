@@ -12,7 +12,7 @@ import {
   liveCatalogue,
 } from './control-plane.ts';
 import { netrc, TOKENS, type TokenName } from './github.ts';
-import { interruptHeld, isHalted } from './halt.ts';
+import { GTM_HALTED, interruptHeld, isHalted } from './halt.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
 import { type BoardExposure, exposureLine, liveBoardExposure } from './seats.ts';
 
@@ -223,8 +223,13 @@ export async function syncCompany(
   }
   if (halted) {
     // Restoring the budget resumes every budget_paused session from its old context, so none is left.
-    const held = await interruptHeld(client, (line) => log(line), { only: ['br-ceo'] });
-    log(`unhalt    interrupted ${held.length} held br-ceo session(s) before restoring its budget`);
+    // The halt also zeroed the GTM agents, and syncing restores their budgets too.
+    const held = await interruptHeld(client, (line) => log(line), {
+      only: ['br-ceo', ...GTM_HALTED],
+    });
+    log(
+      `unhalt    interrupted ${held.length} held br-ceo and GTM session(s) before restoring budgets`,
+    );
   }
   const served = compareCatalogue(await catalogue());
   if (served.unnamed.length) {

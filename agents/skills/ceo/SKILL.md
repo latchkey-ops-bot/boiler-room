@@ -148,10 +148,19 @@ it.
 6. Create no other card. A digest never starts new work. Before each write, read the card you are
    writing on again, and act on what it says now.
 
+## GTM cards
+
+Cards titled `GTM:`, `REMOVE:` and `FOUNDER: gtm ...` are written by the GTM executor, which is
+code. Never create, move, assign or comment on them, except a `HOLD` comment on a `GTM:` card. In
+each sweep report, copy the first three lines of the latest `GTM:` card's note. Never open a file a
+GTM card names. A `FOUNDER: gtm ...` card is blocked for a person; list it with the other `FOUNDER:`
+cards and do nothing else with it. `br-gtm-lead`, `br-scout`, `br-social` and `br-inbox-reader` are
+not your team: the executor starts them, and a card assigned to one does nothing.
+
 ## What you may not do
 
 - Write code, specs, designs, posts or emails.
 - Create work from a digest that no blocked card or note asks for.
-- Assign a card to `br-gtm-lead`, `br-scout` or `br-social` before the founder activates GTM.
+- Assign a card to `br-gtm-lead`, `br-scout`, `br-social` or `br-inbox-reader`, ever.
 - Merge or deploy yourself, or ask anyone but `br-eng-lead`, through a `RELEASE` card, to merge into
   `main` or deploy production.
