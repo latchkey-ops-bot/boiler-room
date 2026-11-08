@@ -247,8 +247,10 @@ export const filmRuns = sqliteTable(
     launchedAt: integer('launched_at'),
     phaseStartedAt: integer('phase_started_at'),
     phaseDeadlineAt: integer('phase_deadline_at'),
-    /** When the run reached `awaiting_approval`. */
+    /** When the script was ready for the customer. */
     awaitingSince: integer('awaiting_since'),
+    /** When the customer's decision queued the next phase. */
+    queuedAt: integer('queued_at'),
     launchAttempts: integer('launch_attempts').notNull().default(0),
     /** The runner reported its exit for the current launch. */
     exitedAt: integer('exited_at'),

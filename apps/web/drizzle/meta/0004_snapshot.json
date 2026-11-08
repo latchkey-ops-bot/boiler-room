@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2c4372de-48df-4f2c-94a7-4e7135fb13fc",
+  "id": "64d1b777-45cb-40e3-8444-32560c375bc2",
   "prevId": "81aea5b2-5ca6-441f-86f5-32503cb57521",
   "tables": {
     "accounts": {
@@ -586,6 +586,13 @@
         },
         "awaiting_since": {
           "name": "awaiting_since",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "queued_at": {
+          "name": "queued_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,

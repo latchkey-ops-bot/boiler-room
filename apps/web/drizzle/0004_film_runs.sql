@@ -23,6 +23,7 @@ CREATE TABLE `film_runs` (
 	`phase_started_at` integer,
 	`phase_deadline_at` integer,
 	`awaiting_since` integer,
+	`queued_at` integer,
 	`launch_attempts` integer DEFAULT 0 NOT NULL,
 	`exited_at` integer,
 	`lease_until` integer,

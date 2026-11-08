@@ -4,6 +4,14 @@ import { type Account, accounts } from '../../db/schema.ts';
 import type { PipelineKind } from '../../lib/film.ts';
 import { newId } from '../ids.ts';
 import { createPipeline, type PipelineClient, pipelineKindFrom } from '../pipeline/index.ts';
+import {
+  type RunnerBindings,
+  type RunnerConfig,
+  realFilmsFor,
+  runnerConfig,
+} from '../runner/config.ts';
+import { HttpNaiveApi, type NaiveApi } from '../runner/naive-api.ts';
+import type { RunnerDeps } from '../runner/runs.ts';
 
 /** Who is asking, from Clerk. `orgId` is the active organisation, if any. */
 export interface Principal {
@@ -12,7 +20,7 @@ export interface Principal {
 }
 
 /** The Worker bindings and vars the API uses. See wrangler.jsonc. */
-export interface Bindings {
+export interface Bindings extends RunnerBindings {
   DB: D1Database;
   FILMS: R2Bucket;
   PIPELINE?: string;
@@ -21,13 +29,23 @@ export interface Bindings {
   BR_HOUSE_ACCOUNT_ID?: string;
 }
 
+/** What the request runs in, beyond the bindings. Tests pass a fake Naive and collect `waitUntil`. */
+export interface Runtime {
+  waitUntil?: (promise: Promise<unknown>) => void;
+  /** Overrides the Naive client built from `NAIVE_WEB_KEY`. */
+  naive?: NaiveApi | null;
+  log?: (line: string) => void;
+}
+
 export interface ApiContext {
   db: Db;
   principal: Principal;
   /** The account every query is scoped to. */
   account: Account;
-  /** The pipeline new films use here. */
+  /** The pipeline this caller's new films use: real for the founders in `REAL_FILM_USERS`. */
   pipelineKind: PipelineKind;
+  /** Real films' settings and caps. */
+  runnerConfig: RunnerConfig;
   /** The pipeline that makes an existing film, by the kind recorded on the film. */
   pipelineFor(kind: PipelineKind): PipelineClient;
   films: R2Bucket;
@@ -38,25 +56,67 @@ export async function createContext(
   principal: Principal,
   bindings: Bindings,
   clock: () => Date = () => new Date(),
+  runtime: Runtime = {},
 ): Promise<ApiContext> {
   const db = getDb(bindings.DB);
   const account = await resolveAccount(db, principal, clock());
   const pipelines = new Map<PipelineKind, PipelineClient>();
+  const runner = runnerDeps(bindings, db, clock, runtime);
   return {
     db,
     principal,
     account,
-    pipelineKind: pipelineKindFrom(bindings.PIPELINE),
+    pipelineKind: pipelineKindFor(bindings, principal),
+    runnerConfig: runner.config,
     pipelineFor(kind) {
       let client = pipelines.get(kind);
       if (!client) {
-        client = createPipeline(kind, db, clock);
+        client = createPipeline(kind, db, clock, runner);
         pipelines.set(kind, client);
       }
       return client;
     },
     films: bindings.FILMS,
     now: clock,
+  };
+}
+
+/**
+ * The pipeline this caller's new films use. A founder named in `REAL_FILM_USERS` gets real films
+ * once everything they need is configured; everyone else gets the environment's `PIPELINE`.
+ */
+export function pipelineKindFor(bindings: Bindings, principal: Principal): PipelineKind {
+  return realFilmsFor(runnerConfig(bindings), principal.userId)
+    ? 'naive'
+    : pipelineKindFrom(bindings.PIPELINE);
+}
+
+/** The runner's deps from the bindings: the Naive client is built only when the key is set. */
+export function runnerDeps(
+  bindings: Bindings,
+  db: Db,
+  clock: () => Date,
+  runtime: Runtime = {},
+): RunnerDeps {
+  const config = runnerConfig(bindings);
+  const naive =
+    runtime.naive !== undefined
+      ? runtime.naive
+      : config.naiveKey
+        ? new HttpNaiveApi({ key: config.naiveKey, baseUrl: config.naiveApiUrl })
+        : null;
+  return {
+    db,
+    films: bindings.FILMS,
+    naive,
+    config,
+    now: clock,
+    waitUntil:
+      runtime.waitUntil ??
+      ((promise) => {
+        promise.catch((error: unknown) => console.error('Background step failed', error));
+      }),
+    log: runtime.log,
   };
 }
 
