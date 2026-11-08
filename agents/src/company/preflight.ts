@@ -3,9 +3,10 @@ import { GITHUB_OWNER, REPO_OF, REPOS, TOKENS, type TokenName } from './github.t
 
 /**
  * What the spec needs from GitHub before the company runs on its own, checked from this machine:
- * each token writes to its own repo and no other (docs/company/README.md section 6), and `main` and
- * `dev` of both repos carry the section 5 C rules. Agents hold the tokens with bash and open egress,
- * so a token that reaches both repos, or a branch with no rules, is bounded by prompts alone.
+ * each token writes to its own repo (docs/company/README.md section 6), and `main` and `dev` of both
+ * repos carry the section 5 C rules. Agents hold the tokens with bash and open egress, so a token
+ * that reaches both repos, or a branch with no rules, is bounded by prompts alone. The first is an
+ * accepted risk (`OTHER_REPO_REACH_ACCEPTED`); the second is a gap.
  *
  * Nothing here changes GitHub. A token cannot fix either gap: re-minting a token and adding a ruleset
  * are the founder's, in GitHub's settings.
@@ -23,6 +24,15 @@ export const PROTECTED_BRANCHES = ['main', 'dev'] as const;
  * The `pull_request` rule still leaves a pull request behind for every change.
  */
 export const APPROVAL_BRANCHES = [] as const;
+
+/**
+ * Both tokens can push to both repos. The founder decided to accept that risk rather than re-mint
+ * the tokens per repo, so a token that reaches the other company repo is reported as accepted, not
+ * as a gap. It is still checked and still printed on every run: prompts are what keep engineering
+ * off the design repo and design off the code repo. A token that cannot reach its own repo, or
+ * whose reach GitHub does not prove, stays a gap.
+ */
+export const OTHER_REPO_REACH_ACCEPTED = true;
 
 export interface TokenReach {
   token: TokenName;
@@ -49,6 +59,8 @@ export interface GithubReport {
   rules: BranchRules[];
   /** One line per way GitHub differs from the spec. Empty means ready. */
   gaps: string[];
+  /** One line per known difference the founder accepted. Printed, never a gap. */
+  accepted: string[];
 }
 
 /**
@@ -138,14 +150,21 @@ export async function githubPreflight(
   }
 
   const gaps: string[] = [];
+  const accepted: string[] = [];
   for (const item of reach) {
     const name = TOKENS[item.token];
     if (item.can_push === null)
       gaps.push(`could not tell whether ${name} can push to ${item.repo}`);
     else if (item.can_push && !item.expected) {
-      gaps.push(
-        `${name} can push to ${item.repo}; it must reach ${REPO_OF[item.token].name} only. Re-mint it with "Only select repositories".`,
-      );
+      if (OTHER_REPO_REACH_ACCEPTED) {
+        accepted.push(
+          `${name} can push to ${item.repo} as well as ${REPO_OF[item.token].name}: an accepted risk, by the founder's decision. Prompts keep it off ${item.repo}.`,
+        );
+      } else {
+        gaps.push(
+          `${name} can push to ${item.repo}; it must reach ${REPO_OF[item.token].name} only. Re-mint it with "Only select repositories".`,
+        );
+      }
     } else if (!item.can_push && item.expected) gaps.push(`${name} cannot push to ${item.repo}`);
   }
   for (const item of rules) {
@@ -162,5 +181,5 @@ export async function githubPreflight(
       );
     }
   }
-  return { reach, rules, gaps };
+  return { reach, rules, gaps, accepted };
 }

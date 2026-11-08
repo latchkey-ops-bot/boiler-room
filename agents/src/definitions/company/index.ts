@@ -31,6 +31,14 @@ export const NETRC: Readonly<Record<string, TokenName>> = {
   [DESIGN]: 'design',
 };
 
+/**
+ * The computers that get the Cloudflare keys, in `~/.boiler-room.env` with mode 600, where the
+ * deploy scripts read them (`ENV_FILE` in apps/web/scripts/lib/env.mjs). Only the lead deploys, so
+ * only the lead's computer has them. Every other computer with a token must not have the file, and
+ * `company:sync` and `company:verify` check that it does not.
+ */
+export const DEPLOY_KEYS: readonly string[] = [ENGINEERING_LEAD];
+
 export const GTM = [gtmLead, scout, social, inboxReader] as const;
 
 export {

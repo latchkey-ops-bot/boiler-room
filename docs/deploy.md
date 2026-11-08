@@ -61,16 +61,21 @@ development instance.
 
 The token in the env file today could create the staging D1 database and R2 bucket, apply
 migrations, set secrets, deploy, list versions and tail logs. A Cloudflare token reaches the whole
-account, not one Worker, so it could deploy production too. What stops an agent today is the
-production guard: every production script waits for a person to type `production` at a terminal,
-and an agent has no terminal. Releases are the engineering lead's (see "How a change reaches
-customers"), so until the founder removes that guard, the lead's release stops at the merge into
-`main`.
+account, not one Worker, so it could deploy production too. What stands between an agent and
+production is the production guard (`guardProduction` in `scripts/lib/env.mjs`): every production
+script waits for a person to type `production` at a terminal. The release agent, `br-eng-lead`, has
+no terminal, so it passes `--release-card <crd_ id>`, naming the `RELEASE` card it is working.
+The scripts allow that only for a migration, a deploy or a rollback, and for the first two only
+from a clean tree at the tip of `origin/main`; a deploy also refuses pending migrations, and rolls
+back by itself when its smoke check fails. Provisioning and secrets never take a card: they are the
+founder's, at a terminal. No environment variable skips the guard.
 
-**For the engineering lead's computer (founder action, not done yet):** the lead needs the same
-file with `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the two Clerk keys, written by the
-provisioning script with mode 600, like the GitHub token in `~/.netrc`. Without it, the lead moves a
-`SHIP` card to `blocked` with `credential missing`.
+**On the engineering lead's computer:** `pnpm company:sync` writes `~/.boiler-room.env` with mode
+600, holding `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and nothing else, through Naive's
+file write, like the GitHub token in `~/.netrc`. No other agent's computer gets it, and
+`pnpm company:verify` checks both. The Clerk keys are not placed: the build reads
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, so until it is added there the lead's deploy stops at the build
+and its card goes to `blocked` with `credential missing`.
 
 ## Working on it locally
 
@@ -111,6 +116,8 @@ chromium`.
 | `pnpm web:logs:<env> [tail flags]`     | Streams the live Worker's logs, for example `--status error`                                        |
 
 `<env>` is `staging` or `production`. Every production command stops for you to type `production`.
+The release agent passes `--release-card <crd_ id>` to `web:db:migrate:production`,
+`web:deploy:production` and `web:rollback:production` instead (see "Credentials").
 
 ## How a change reaches customers
 
@@ -125,9 +132,12 @@ chromium`.
    # 1. Open a pull request from dev into main, and merge it with a merge commit.
    git fetch origin && git checkout --detach origin/main   # a clean tree
    pnpm install --frozen-lockfile
-   pnpm web:db:migrate:production    # only if the release has migrations
-   pnpm web:deploy:production        # builds, deploys, smoke-checks
+   pnpm web:db:migrate:production --release-card crd_...   # only if the release has migrations
+   pnpm web:deploy:production --release-card crd_...       # builds, deploys, smoke-checks, rolls back on failure
    ```
+
+   A person running these at a terminal leaves out `--release-card` and types `production` when
+   asked.
 
 A **bug fix** takes the same road: a `HOTFIX` card, a pull request into `dev` with a test that
 failed before the fix, staging, then a release.

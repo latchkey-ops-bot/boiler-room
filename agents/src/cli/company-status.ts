@@ -56,9 +56,12 @@ console.log('GitHub: rules on main and dev');
 console.table(
   status.github.rules.map((item) => ({ ...item, missing: item.missing?.join(', ') ?? 'unknown' })),
 );
+for (const line of status.github.accepted) console.log(`GitHub, accepted: ${line}`);
 if (status.github.gaps.length) {
   console.log('Not ready to resume the sweep. GitHub differs from the spec:');
   for (const gap of status.github.gaps) console.log(`- ${gap}`);
 } else {
-  console.log('GitHub matches the spec.');
+  console.log(
+    `GitHub matches the spec${status.github.accepted.length ? ', apart from the accepted risks above' : ''}.`,
+  );
 }

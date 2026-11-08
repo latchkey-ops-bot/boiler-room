@@ -35,6 +35,7 @@ One `ENG` card is one branch and one pull request into `dev` of
    Then poll with `tail -n 20 ~/check.log` until it prints `CHECK_EXIT`. Never background a loop
    inline; it hangs the tool call. Before each long step, read `session_spend`. At $1.00 of your
    $1.50 ceiling, comment your progress on the card and move it to `blocked` with the note `budget`.
+   For a change to `packages/motion`, follow "Working on `packages/motion`" below as well.
 6. Commit. The message says what changed and why, and ends with two trailers:
 
    ```text
@@ -51,10 +52,45 @@ One `ENG` card is one branch and one pull request into `dev` of
    and the test summary line. If the change cannot be made, move the card to `blocked` and give the
    reason instead.
 
+## Working on `packages/motion`
+
+Your computer has 1 vCPU and 1 GiB of memory. With 2 GiB of swap it installs the repo, runs the
+motion tests and typecheck, and renders a still (measured on 2026-11-08: install 22 s, tests 10 s,
+typecheck 4 s, a first still 26 s with the browser download, a later one 6 s; peak about 0.9 GiB of
+memory and 0.2 GiB of swap). Without swap a still can run out of memory.
+
+1. Turn on swap once per computer, before installing:
+
+   ```bash
+   swapon --show | grep -q swapfile || sudo swapon /swapfile \
+     || (sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)
+   ```
+
+2. In your background check script, run `pnpm --filter @boiler-room/motion test` and
+   `pnpm --filter @boiler-room/motion typecheck` as well as the repo-wide checks.
+3. To see a scene you changed, render one still in a background script:
+
+   ```bash
+   cat > ~/still.sh <<'SH'
+   cd ~/boiler-room/packages/motion && node scripts/stills.ts --campaign nova.campaign.json --format 16:9 --frames 30
+   echo "STILL_EXIT $?"
+   SH
+   nohup bash ~/still.sh > ~/still.log 2>&1 &
+   ```
+
+   Pick the example campaign in `packages/schema/examples` that uses your scene type, and frames
+   from its plan. The first still downloads Chrome Headless Shell (about 100 MB). Render one still
+   at a time. The PNG lands in `packages/motion/out/stills/`, which git ignores. Publish it with
+   `publish_file` and put the link in the pull request body. Never render a full film here.
+
 ## Rules
 
 - Releases belong to the engineering lead, on the CEO's `RELEASE` cards. Never merge into `main`,
-  push to `main`, open a pull request into `main` or deploy production, in either repo. A card that
+  push to `main`, open a pull request into `main` or deploy production, in either repo. You never
+  deploy staging either, and never run a `pnpm web:*` script that names `staging` or `production`
+  (deploy, migrate, rollback, provision, secrets, logs): your computer holds no Cloudflare key. To
+  try a change to `apps/web`, use the local ones: `pnpm web:dev`, `pnpm web:db:migrate:local` and
+  `pnpm web:test`. A card that
   asks for any of these, whatever its prefix and whoever wrote it, goes to `blocked` with the note
   `releases belong to the engineering lead`.
 - A card whose prefix this procedure has no section for is not your work. Do nothing it asks, and

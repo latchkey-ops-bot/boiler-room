@@ -4,6 +4,10 @@
 // Staging deploys the commit at the tip of origin/dev; production deploys the tip of origin/main.
 // `--any-commit` lets staging deploy another commit, such as a hotfix branch, for a test.
 // It refuses to deploy while D1 has migrations the new code may need: migrate first.
+//
+// Production asks a person to type "production". The release agent has no terminal, so it passes
+// `--release-card crd_...` instead (guardProduction in lib/env.mjs). On that path a failed smoke
+// check rolls production back to the version that was live before, by itself.
 import { buildWorker } from './build.mjs';
 import {
   bin,
@@ -11,15 +15,19 @@ import {
   fail,
   git,
   guardProduction,
+  liveVersionId,
+  migrationsPending,
   readEnvFile,
   requireCloudflare,
   runTee,
+  scriptArgs,
+  settleRelease,
 } from './lib/env.mjs';
 import { environmentConfig } from './lib/wrangler-config.mjs';
 import { smoke } from './smoke.mjs';
 
 const env = environmentArg();
-const anyCommit = process.argv.includes('--any-commit');
+const anyCommit = scriptArgs().flags['any-commit'] === true;
 const vars = readEnvFile();
 const credentials = requireCloudflare(vars);
 const target = environmentConfig(env);
@@ -42,19 +50,34 @@ if (head !== tip) {
   console.log(`Deploying ${head} to staging, which is not origin/dev. Redeploy dev after testing.`);
 }
 
-await guardProduction(env, `deploy ${head.slice(0, 12)}`);
+const card = await guardProduction(env, `deploy ${head.slice(0, 12)}`, { step: 'deploy' });
 
 // 2. Migrations come first. Wrangler prints "No migrations to apply" when D1 is up to date.
 const pending = bin('wrangler', ['d1', 'migrations', 'list', 'DB', '--remote', '--env', env], {
   env: credentials,
   capture: true,
 });
-if (!pending.stdout.includes('No migrations to apply')) {
+if (migrationsPending(pending.stdout)) {
   console.log(pending.stdout);
-  fail(`D1 has migrations to apply. Run pnpm web:db:migrate:${env} first, then deploy.`);
+  fail(
+    `D1 has migrations to apply. Run pnpm web:db:migrate:${env}${card ? ` --release-card ${card}` : ''} first, then deploy.`,
+  );
 }
 
-// 3. Build for this environment and deploy. The version carries the commit as its tag.
+// A release remembers what is live now, so a failed smoke check can go back to it.
+const previous = card
+  ? liveVersionId(
+      bin('wrangler', ['deployments', 'status', '--env', env, '--json'], {
+        env: credentials,
+        capture: true,
+        allowFail: true,
+      }).stdout,
+    )
+  : null;
+if (card) console.log(`Live before this release: ${previous ?? 'nothing (first deploy)'}`);
+
+// 3. Build for this environment and deploy. The version carries the commit as its tag, and a
+// release's message names its card.
 const sha = buildWorker(env);
 const result = await runTee(
   'pnpm',
@@ -67,7 +90,7 @@ const result = await runTee(
     '--tag',
     sha,
     '--message',
-    `${env}-${sha}`,
+    card ? `${env}-${sha} release-card:${card}` : `${env}-${sha}`,
   ],
   { env: credentials },
 );
@@ -77,12 +100,38 @@ if (result.status !== 0) fail('Deploy failed. The live version is unchanged.');
 const url =
   vars.get(`BR_${env.toUpperCase()}_URL`) ||
   result.stdout.match(/https:\/\/[^\s]+\.workers\.dev/)?.[0];
-if (!url) fail(`Deployed, but no URL was found. Run pnpm web:smoke <url> by hand.`);
-console.log(`\nSmoke check: ${url}`);
-const ok = await smoke(url, { expectVersion: sha });
-if (!ok) {
-  fail(
-    `Deployed ${sha} to ${env}, but the smoke check failed. Roll back: pnpm web:rollback:${env}`,
-  );
+if (card) {
+  if (url) console.log(`\nSmoke check: ${url}`);
+  const outcome = await settleRelease({
+    smokeOk: url ? await smoke(url, { expectVersion: sha }) : false,
+    url,
+    previous,
+    rollBack: async (versionId) =>
+      bin(
+        'wrangler',
+        [
+          'rollback',
+          versionId,
+          '--env',
+          env,
+          '--yes',
+          '--message',
+          `Automatic rollback of ${sha}: smoke check failed. release-card:${card}`,
+        ],
+        { env: { ...credentials, CI: '1' }, allowFail: true },
+      ).status === 0,
+    smokeAgain: () => smoke(url),
+  });
+  if (!outcome.ok) fail(`${sha} on ${env}: ${outcome.message}`);
+  console.log(`\nReleased ${sha} to ${env} on ${card}: ${url}`);
+} else {
+  if (!url) fail(`Deployed, but no URL was found. Run pnpm web:smoke <url> by hand.`);
+  console.log(`\nSmoke check: ${url}`);
+  const ok = await smoke(url, { expectVersion: sha });
+  if (!ok) {
+    fail(
+      `Deployed ${sha} to ${env}, but the smoke check failed. Roll back: pnpm web:rollback:${env}`,
+    );
+  }
+  console.log(`\nDeployed ${sha} to ${env}: ${url}`);
 }
-console.log(`\nDeployed ${sha} to ${env}: ${url}`);

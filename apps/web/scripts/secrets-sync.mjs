@@ -27,7 +27,7 @@ if (missing.length > 0) {
 }
 refuseDevelopmentKeys(env, values);
 
-await guardProduction(env, `replace ${WORKER_SECRETS.length} secrets`);
+await guardProduction(env, `replace ${WORKER_SECRETS.length} secrets`, { step: 'secrets' });
 for (const [name, value] of values) {
   console.log(`Setting ${name} on ${env}`);
   bin('wrangler', ['secret', 'put', name, '--env', env], { env: credentials, input: value });

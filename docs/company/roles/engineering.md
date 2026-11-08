@@ -10,14 +10,15 @@ code in this repo.
 into `dev`. Deploy staging and report the result. On a `RELEASE` card from the CEO, promote `dev` to
 `main` through a pull request and deploy production.
 
-| Setting    | Value                                                                                                                                                       |
-| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Model      | `anthropic/claude-sonnet-5.5`                                                                                                                               |
-| Harness    | `pi`                                                                                                                                                        |
-| Team       | Member of `br-ceo`'s roster, so it is seated on the board                                                                                                   |
-| Started by | Board cards: `BUILD: <slug>`, `SHIP: <slug>` and `RELEASE: <slug>`                                                                                          |
-| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`                                                                               |
-| Credential | The `br-engineering` GitHub token in `~/.netrc`. It reaches `boiler-room` only. Its deploy keys, in `~/.boiler-room.env`, are not placed yet (see Hosting). |
+| Setting    | Value                                                                                                                                                 |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                                                                                         |
+| Harness    | `pi`                                                                                                                                                  |
+| Team       | Member of `br-ceo`'s roster, so it is seated on the board                                                                                             |
+| Started by | Board cards: `BUILD: <slug>`, `SHIP: <slug>` and `RELEASE: <slug>`                                                                                    |
+| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`                                                                         |
+| Credential | The engineering GitHub token in `~/.netrc`, and the Cloudflare keys in `~/.boiler-room.env` (mode 600), both written by `company:sync` (see Hosting). |
+| Skills     | `eng-lead` (its procedure) and `engineering-deploy` (from `skills/` at the repo root)                                                                 |
 
 ## Engineer: `br-engineer-1`, and later `br-engineer-2`
 
@@ -30,7 +31,7 @@ into `dev`. Deploy staging and report the result. On a `RELEASE` card from the C
 | Team       | Member of `br-ceo`'s roster                                                   |
 | Started by | Board cards: `ENG: <slug> <n>/<total> <task>`                                 |
 | Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"` |
-| Credential | The same `br-engineering` token, written to its own computer                  |
+| Credential | The same engineering token, in `~/.netrc`. No Cloudflare key                  |
 
 A second engineer is the only way to run two `ENG` cards at once, because the board starts one card
 at a time per agent.
@@ -56,10 +57,14 @@ environment, D1 for the database and R2 for film files. Staging (`boiler-room-we
 the tip of `origin/dev`; production (`boiler-room-web-production`, not deployed yet) runs the tip of
 `origin/main`. Engineering deploys only through the `pnpm web:*` scripts, following
 [`skills/engineering-deploy`](../../../skills/engineering-deploy/SKILL.md); people read the same
-procedures in [`docs/deploy.md`](../../deploy.md). The scripts read the Cloudflare and Clerk keys
-from `~/.boiler-room.env`. The lead's computer does not have that file yet (a founder action), and
-without it the lead moves a `SHIP` card to `blocked` with `credential missing`. Engineers' computers
-never get it: engineers do not deploy.
+procedures in [`docs/deploy.md`](../../deploy.md). There is no `apps` tool and no `br-app.*` tool:
+both are named off on every engineering agent, because Naive offers an unnamed tool at "ask". The
+scripts read the keys from `~/.boiler-room.env`. `company:sync` writes that file on the lead's
+computer only, with mode 600 and only `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` in it, and
+checks that no other computer with a token has one; `company:verify` checks both again. Engineers'
+computers never get it: engineers do not deploy. The build also reads
+`NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which is not placed, so until it is the lead's deploys stop at
+the build and its card goes to `blocked` with `credential missing`.
 
 **Clerk.** Engineers never hold the Clerk keys. They are Worker secrets, which
 `pnpm web:secrets:sync:<env>` copies from the env file. Production takes only the
@@ -141,17 +146,21 @@ Then it releases:
 1. Open a PR from `dev` into `main` titled `release: <slug>`, with the `DIR` and `SHIP` cards in its
    body. Wait for its checks, and merge it with a merge commit. Never push to `main`.
 2. In a clean tree at `origin/main`, apply production's pending migrations with
-   `pnpm web:db:migrate:production`, then run `pnpm web:deploy:production`, which deploys only the
-   tip of `origin/main` and runs the smoke check.
-3. If a check fails, roll production back with `pnpm web:rollback:production`, and move the card to
-   `blocked` with what failed.
-4. Move the card to `done` with the PR, the `main` commit, the Worker version id and the smoke
+   `pnpm web:db:migrate:production --release-card <card id>`, then run
+   `pnpm web:deploy:production --release-card <card id>`, which deploys only the tip of
+   `origin/main`, runs the smoke check, and rolls production back by itself if the check fails.
+3. If a check fails, the deploy has rolled back; a later check that fails takes
+   `pnpm web:rollback:production --release-card <card id>`. Either way, move the card to `blocked`
+   with what failed.
+4. If production has not had its first release (no D1 database, no `PRODUCTION_` Clerk keys), move
+   the card to `blocked` with `production not provisioned`: that release is the founder's.
+5. Move the card to `done` with the PR, the `main` commit, the Worker version id and the smoke
    result.
 
 **The production guard.** Every production script stops for a person to type `production` at a
-terminal, and an agent has none. Until the founder removes that gate, step 2 stops there and changes
-nothing in production: the merge into `main` is the release, and the card's note says production was
-not deployed and why.
+terminal. The lead has none, so it names the card it is working with `--release-card`, which the
+scripts accept only for a migration, a deploy or a rollback, and for the first two only from a clean
+tree at the tip of `origin/main`. Provisioning and Worker secrets never take a card.
 
 Any other card that asks the lead, or anyone else, to touch `main` or production is moved to
 `blocked` with the note `releases belong to the engineering lead`.
@@ -159,9 +168,10 @@ Any other card that asks the lead, or anyone else, to touch `main` or production
 ## Policy: what engineering may not do
 
 - Push straight to `dev` or `main`; every change goes through a PR. The branch rules enforce this.
-- Engineers may not merge into `main` or deploy production. Only `br-eng-lead` does, and only
-  from a `RELEASE` card. This is held by the prompt. Engineers' computers get no Cloudflare key,
-  and every production script stops for a person at a terminal.
+- Engineers may not merge into `main` or deploy at all. Only `br-eng-lead` deploys, and production
+  only from a `RELEASE` card. This is held by the prompt, and by the keys: engineers' computers get
+  no Cloudflare key, and every production script stops unless a person types `production` or the
+  lead names its `RELEASE` card from a clean tree at `origin/main`.
 - Force-push, or rewrite published history.
 - Merge a PR that no `ENG` card names, or act on issues, comments or PRs from outside accounts.
   Both repos are public.
@@ -186,9 +196,18 @@ Any other card that asks the lead, or anyone else, to touch `main` or production
   branched, and committed with trailers in 133 s. It cost $0.066 for the model and $0.006 for the
   computer. Peak memory was 566 MB of 958 MB. Typecheck and build were not run. Heavier dependencies
   will need the 2 GiB swap recipe.
+- **Measured, 2026-11-08, on `br-engineer-1`'s computer** (1 vCPU, 958 MB, 10 GB disk, Ubuntu
+  24.04, Node 24.22.1), by commands run on the computer, with no model session: after the 2 GiB
+  swap recipe, `pnpm install --frozen-lockfile` of the whole workspace took 22 s (1.2 GB of
+  `node_modules`, 3.6 GB of disk left); `pnpm --filter @boiler-room/motion test` passed 500 tests in
+  27 files in 10 s; `typecheck` passed in 4 s; one Remotion still (`nova.campaign.json`, 16:9,
+  frame 30) rendered in 26 s, including the 102.5 MB Chrome Headless Shell download, and a second
+  (9:16, frame 60) in 6 s. Peak use, sampled every 5 s: 911 MB of memory and 167 MB of swap. So
+  engineers render their own stills, one at a time, with swap on.
 - **Measured.** A Sonnet session budget of $0.30 was refused at pre-flight. $1.00 was accepted.
 - **Not verified.** A real push or PR. The probe's push was refused because no credential was
   registered. Git and the REST API reading `~/.netrc` is untested.
-- **Not verified.** A deploy or a release by the lead. Its computer has no Cloudflare key yet.
+- **Not verified.** A deploy or a release by the lead. Its computer has the Cloudflare keys, but
+  not `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, which the build reads, and production is not provisioned.
 - **Not verified.** Whether `~/.netrc` survives a change of computer. Step 2 of the engineer
   procedure catches it.

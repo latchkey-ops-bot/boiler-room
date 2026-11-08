@@ -1,8 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { AgentDefinition } from '../define.ts';
-import { CEO_SWEEP, company, NETRC } from '../definitions/company/index.ts';
+import { CEO_SWEEP, company, DEPLOY_KEYS, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive, readSecret } from '../naive/client.ts';
 import { type SyncResult, syncAgents } from '../sync.ts';
+import { CLOUDFLARE_KEYS, DEPLOY_ENV_FILE, deployEnvFile } from './cloudflare.ts';
 import {
   bindCeo,
   type CatalogueReport,
@@ -26,15 +27,33 @@ export interface DeploymentResult {
   schedule_status: string;
 }
 
-export interface NetrcResult {
+/** One secret file placed on an agent's computer. */
+export interface PlacedFile {
   agent: string;
-  token: TokenName;
+  /** The file, relative to the home folder, such as `.netrc`. */
+  file: string;
   computer_id: string;
   computer_action: 'existing' | 'booted';
   boot_session_id: string | null;
   action: 'written' | 'unchanged';
   /** `owner:group mode` of the file, read back after the write. */
   stat: string;
+}
+
+export interface NetrcResult extends PlacedFile {
+  token: TokenName;
+}
+
+/** Whether a computer that must not hold the Cloudflare keys has the file anyway. */
+export interface DeployKeysElsewhere {
+  agent: string;
+  computer_id: string | null;
+  present: boolean;
+}
+
+export interface DeployKeysReport {
+  placed: PlacedFile[];
+  elsewhere: DeployKeysElsewhere[];
 }
 
 export interface CompanyReport {
@@ -46,6 +65,7 @@ export interface CompanyReport {
   exposure: BoardExposure[];
   deployment: DeploymentResult;
   netrc: NetrcResult[];
+  deploy_keys: DeployKeysReport;
   github: GithubReport;
 }
 
@@ -144,17 +164,18 @@ export async function ensureComputer(
 }
 
 /**
- * Writes `~/.netrc` with one GitHub token on an agent's computer. The token goes in through Naive's
- * file write only. Every shell command here holds only the path, because Naive keeps shell command
- * text for 30 days. An unchanged file, compared by SHA-256, is left alone.
+ * Writes one secret file into an agent's home folder, with mode 600. The content goes in through
+ * Naive's file write only. Every shell command here holds only the path, because Naive keeps shell
+ * command text for 30 days. An unchanged file, compared by SHA-256, is left alone.
  */
-export async function placeNetrc(
+export async function placeFile(
   client: Naive,
   agentId: string,
   definition: AgentDefinition,
-  token: TokenName,
-): Promise<NetrcResult> {
-  const content = netrc(readSecret(TOKENS[token]));
+  file: string,
+  content: string,
+): Promise<PlacedFile> {
+  if (!/^\.[A-Za-z0-9._-]+$/.test(file)) throw new Error(`Not a home dotfile: ${file}`);
   const computer = await ensureComputer(client, agentId, definition);
   const run = async (command: string) => {
     const result = await client.computers.exec(computer.id, command, 60_000);
@@ -163,22 +184,23 @@ export async function placeNetrc(
     }
     return String(result.stdout).trim();
   };
-  const check = 'chmod 600 ~/.netrc && stat -c "%U:%G %a" ~/.netrc && sha256sum ~/.netrc';
-  const before = await run('test -f ~/.netrc && sha256sum ~/.netrc || echo none');
-  let action: NetrcResult['action'] = 'unchanged';
+  const path = `~/${file}`;
+  const check = `chmod 600 ${path} && stat -c "%U:%G %a" ${path} && sha256sum ${path}`;
+  const before = await run(`test -f ${path} && sha256sum ${path} || echo none`);
+  let action: PlacedFile['action'] = 'unchanged';
   if (!before.startsWith(sha256(content))) {
     // `inspect` names the home the file API maps to the shell user's home.
     const home = (await client.computers.inspect(computer.id)).home ?? '/home/naive';
-    await client.computers.fs(computer.id, 'write', { path: `${home}/.netrc`, content });
+    await client.computers.fs(computer.id, 'write', { path: `${home}/${file}`, content });
     action = 'written';
   }
   const [stat = '', hash = ''] = (await run(check)).split('\n');
   if (!hash.startsWith(sha256(content))) {
-    throw new Error(`${definition.name}: ~/.netrc does not match after the write.`);
+    throw new Error(`${definition.name}: ${path} does not match after the write.`);
   }
   return {
     agent: definition.name,
-    token,
+    file,
     computer_id: computer.id,
     computer_action: computer.action,
     boot_session_id: computer.session,
@@ -187,12 +209,62 @@ export async function placeNetrc(
   };
 }
 
+/** Writes `~/.netrc` with one GitHub token on an agent's computer. */
+export async function placeNetrc(
+  client: Naive,
+  agentId: string,
+  definition: AgentDefinition,
+  token: TokenName,
+): Promise<NetrcResult> {
+  const content = netrc(readSecret(TOKENS[token]));
+  return { ...(await placeFile(client, agentId, definition, '.netrc', content)), token };
+}
+
+/**
+ * Writes `~/.boiler-room.env` with the two Cloudflare keys on a computer `DEPLOY_KEYS` names, where
+ * the deploy scripts read them.
+ */
+export async function placeDeployKeys(
+  client: Naive,
+  agentId: string,
+  definition: AgentDefinition,
+): Promise<PlacedFile> {
+  return placeFile(client, agentId, definition, DEPLOY_ENV_FILE, deployEnvFile());
+}
+
+/**
+ * Whether a computer that must not hold the Cloudflare keys has `~/.boiler-room.env`. Read only: a
+ * file found there is reported, never deleted, because sync did not write it. An agent with no
+ * computer yet has no file.
+ */
+export async function deployKeysOn(
+  client: Naive,
+  agentId: string,
+  name: string,
+): Promise<DeployKeysElsewhere> {
+  const computer = await client.agents.computer(agentId);
+  if (!computer || ['failed', 'destroyed'].includes(computer.status)) {
+    return { agent: name, computer_id: null, present: false };
+  }
+  const result = await client.computers.exec(
+    computer.id,
+    `test -e ~/${DEPLOY_ENV_FILE} && echo present || echo absent`,
+    60_000,
+  );
+  const out = String(result.stdout).trim();
+  if (result.exit_code !== 0 || !['present', 'absent'].includes(out)) {
+    throw new Error(`${name}: could not tell whether ~/${DEPLOY_ENV_FILE} is there.`);
+  }
+  return { agent: name, computer_id: computer.id, present: out === 'present' };
+}
+
 /**
  * `pnpm company:sync`: creates or versions every company agent, with br-ceo's roster and board,
- * binds br-ceo as the organization's CEO, ensures the board, creates the CEO's sweep paused, and
- * writes each GitHub token to the computers that need it. Running it again changes nothing that
- * already matches. It also checks GitHub against the spec and warns about each gap, but changes
- * nothing there.
+ * binds br-ceo as the organization's CEO, ensures the board, creates the CEO's sweep paused,
+ * writes each GitHub token to the computers that need it, and writes the Cloudflare keys to the
+ * engineering lead's computer only, checking that no other computer with a token has them. Running
+ * it again changes nothing that already matches. It also checks GitHub against the spec, warns about
+ * each gap and prints each accepted risk, but changes nothing there.
  *
  * br-ceo is bound only after its new version names every control-plane tool off, and sync stops
  * before changing anything while the control plane serves a tool that br-ceo does not name. A
@@ -241,9 +313,13 @@ export async function syncCompany(
     `control   ${served.count} control-plane tools served, every one named off on br-ceo${served.gone.length ? ` (${served.gone.length} named but no longer served)` : ''}`,
   );
   const github = await preflight();
+  for (const line of github.accepted) log(`github    ACCEPTED ${line}`);
   for (const gap of github.gaps) log(`github    WARNING ${gap}`);
-  if (!github.gaps.length)
-    log('github    each token reaches its own repo only; main and dev have their rules');
+  if (!github.gaps.length) {
+    log(
+      `github    each token reaches its own repo${github.accepted.length ? ' (and the other, accepted above)' : ' only'}; main and dev have their rules`,
+    );
+  }
 
   const agents = await syncAgents(client, company);
   for (const result of agents) {
@@ -295,9 +371,32 @@ export async function syncCompany(
       `netrc     ${result.action} ${name} ${token} on ${result.computer_id} (${result.computer_action}) ${result.stat}`,
     );
   }
+
+  const deployKeys: DeployKeysReport = { placed: [], elsewhere: [] };
+  for (const name of DEPLOY_KEYS) {
+    const definition = company.find((item) => item.name === name);
+    const agent = agents.find((item) => item.name === name);
+    if (!definition || !agent) throw new Error(`${name} is not a company agent.`);
+    const result = await placeDeployKeys(client, agent.id, definition);
+    deployKeys.placed.push(result);
+    log(
+      `deploy    ${result.action} ${name} ~/${result.file} (${CLOUDFLARE_KEYS.join(', ')}) on ${result.computer_id} (${result.computer_action}) ${result.stat}`,
+    );
+  }
+  for (const name of Object.keys(NETRC).filter((item) => !DEPLOY_KEYS.includes(item))) {
+    const agent = agents.find((item) => item.name === name);
+    if (!agent) throw new Error(`${name} is not a company agent.`);
+    const result = await deployKeysOn(client, agent.id, name);
+    deployKeys.elsewhere.push(result);
+    log(
+      result.present
+        ? `deploy    WARNING ${name} has ~/${DEPLOY_ENV_FILE} on ${result.computer_id}, and only ${DEPLOY_KEYS.join(', ')} may. Sync did not write it and does not delete it: remove it by hand.`
+        : `deploy    absent ${name} ~/${DEPLOY_ENV_FILE}`,
+    );
+  }
   if (github.gaps.length) {
     log(
-      `github    ${github.gaps.length} gap(s) above. Keep the sweep paused until they are fixed: until then only prompts keep agents off the other repo and off main and dev.`,
+      `github    ${github.gaps.length} gap(s) above. Keep the sweep paused until they are fixed: until then only prompts keep agents off main and dev.`,
     );
   }
   if (exposure.length) {
@@ -313,6 +412,7 @@ export async function syncCompany(
     exposure,
     deployment,
     netrc: netrcResults,
+    deploy_keys: deployKeys,
     github,
   };
 }

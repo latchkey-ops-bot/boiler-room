@@ -28,7 +28,7 @@ export function fail(message) {
 
 /** The environment named on the command line: staging or production. */
 export function environmentArg(argv = process.argv) {
-  const env = argv[2];
+  const env = scriptArgs(argv).positionals[0];
   if (!ENVIRONMENTS.includes(env)) fail(`Name an environment: ${ENVIRONMENTS.join(' or ')}.`);
   return env;
 }
@@ -175,13 +175,256 @@ export async function confirm(question, expected) {
   return answer.trim() === expected;
 }
 
+/** Flags that take a value. Every other `--flag` is a switch. */
+const VALUE_FLAGS = new Set(['--release-card']);
+
 /**
- * Production is the founder's: every production script stops here unless a person types
- * "production" at the terminal. No flag or variable skips it.
+ * The arguments after the script name: the positionals in order, and the flags. A value flag reads
+ * `--name value` or `--name=value`, and is `''` when no value follows it.
+ *
+ * @param {string[]} [argv]
+ * @returns {{ positionals: string[], flags: Record<string, string | true> }}
  */
-export async function guardProduction(env, action) {
-  if (env !== 'production') return;
+export function scriptArgs(argv = process.argv) {
+  const rest = argv.slice(2);
+  /** @type {string[]} */
+  const positionals = [];
+  /** @type {Record<string, string | true>} */
+  const flags = {};
+  for (let i = 0; i < rest.length; i++) {
+    const arg = rest[i];
+    if (!arg.startsWith('--')) {
+      positionals.push(arg);
+      continue;
+    }
+    const eq = arg.indexOf('=');
+    const name = eq === -1 ? arg : arg.slice(0, eq);
+    if (!VALUE_FLAGS.has(name)) {
+      flags[name.slice(2)] = true;
+    } else if (eq !== -1) {
+      flags[name.slice(2)] = arg.slice(eq + 1);
+    } else if (rest[i + 1] !== undefined && !rest[i + 1].startsWith('--')) {
+      flags[name.slice(2)] = rest[++i];
+    } else {
+      flags[name.slice(2)] = '';
+    }
+  }
+  return { positionals, flags };
+}
+
+/** A board card id, as `board_read` names it. */
+export const CARD_ID = /^crd_[a-z0-9]{8,64}$/;
+
+/**
+ * The `RELEASE` card named by `--release-card <crd_...>`: null when the flag is absent, and a
+ * refusal when it is there without a card id.
+ *
+ * @param {string[]} [argv]
+ * @returns {{ card: string | null, refusal?: string }}
+ */
+export function releaseCardArg(argv = process.argv) {
+  const { flags } = scriptArgs(argv);
+  if (!('release-card' in flags)) return { card: null };
+  const card = flags['release-card'];
+  if (typeof card !== 'string' || !CARD_ID.test(card)) {
+    return {
+      card: null,
+      refusal: `--release-card needs the RELEASE card's id (crd_ and lowercase letters or digits), not "${String(card).slice(0, 40)}".`,
+    };
+  }
+  return { card };
+}
+
+/**
+ * @typedef {{ dirty: boolean, head: string | null, mainTip: string | null }} Tree
+ */
+
+/**
+ * The git state a release is judged on: whether the tree is clean, HEAD, and the tip of main.
+ *
+ * @returns {Tree}
+ */
+export function readTree() {
+  git(['fetch', 'origin', '--quiet']);
+  return {
+    dirty: git(['status', '--porcelain']) !== '',
+    head: git(['rev-parse', 'HEAD']),
+    mainTip: git(['rev-parse', 'origin/main']),
+  };
+}
+
+/**
+ * The production scripts a `RELEASE` card may run without a terminal, and whether each must run
+ * from the tip of `origin/main`. Provisioning and secrets stay the founder's, at a terminal.
+ */
+export const RELEASE_ACTIONS = { deploy: true, migrate: true, rollback: false };
+
+/**
+ * Decides how a production step may go on. Pure, so every refusal is tested:
+ *
+ * - `none`: not production, nothing to ask.
+ * - `confirm`: a person at a terminal, who must type "production".
+ * - `release`: the release agent, which has no terminal, on the `RELEASE` card it names with
+ *   `--release-card`. Only for `RELEASE_ACTIONS`, and for deploy and migrate only from a clean tree
+ *   at the tip of `origin/main`.
+ * - `refuse`, with the reason.
+ *
+ * No environment variable turns on the release path: only the flag does, so it shows in the
+ * command and in the version's message.
+ *
+ * @param {{ env: string, step?: string, card?: string | null, refusal?: string, tree?: Tree,
+ *   isTTY?: boolean }} input
+ * @returns {{ mode: 'none' | 'confirm' } | { mode: 'release', card: string } |
+ *   { mode: 'refuse', reason: string }}
+ */
+export function productionDecision({ env, step, card, refusal, tree, isTTY }) {
+  if (refusal) return { mode: 'refuse', reason: refusal };
+  if (env !== 'production') {
+    if (card) {
+      return {
+        mode: 'refuse',
+        reason: `--release-card is for production only. ${env} needs no card.`,
+      };
+    }
+    return { mode: 'none' };
+  }
+  if (!card) {
+    if (isTTY) return { mode: 'confirm' };
+    return {
+      mode: 'refuse',
+      reason:
+        'Production needs a person to type "production" at a terminal, or the release agent\'s --release-card <crd_...>. There is no terminal and no card. Nothing in production was changed.',
+    };
+  }
+  if (step === undefined || !Object.hasOwn(RELEASE_ACTIONS, step)) {
+    return {
+      mode: 'refuse',
+      reason: `--release-card covers ${Object.keys(RELEASE_ACTIONS).join(', ')} only. This step is the founder's, at a terminal. Nothing in production was changed.`,
+    };
+  }
+  if (RELEASE_ACTIONS[/** @type {keyof typeof RELEASE_ACTIONS} */ (step)]) {
+    if (!tree) return { mode: 'refuse', reason: 'The git state was not read.' };
+    if (!tree.mainTip) {
+      return { mode: 'refuse', reason: 'origin/main could not be read. Fetch it and try again.' };
+    }
+    if (tree.dirty) {
+      return {
+        mode: 'refuse',
+        reason: 'The working tree has changes. A release runs only from a clean tree.',
+      };
+    }
+    if (tree.head !== tree.mainTip) {
+      return {
+        mode: 'refuse',
+        reason: `HEAD (${String(tree.head).slice(0, 12)}) is not origin/main (${tree.mainTip.slice(0, 12)}). A release runs only from the tip of origin/main: git checkout --detach origin/main.`,
+      };
+    }
+  }
+  return { mode: 'release', card };
+}
+
+/**
+ * Production is guarded. A person goes on only by typing "production" at the terminal. The release
+ * agent has no terminal, so it names its `RELEASE` card with `--release-card crd_...` instead, and
+ * `productionDecision` allows that only for a deploy, a migration or a rollback, and for the first
+ * two only from a clean tree at the tip of `origin/main`. The deploy then also refuses pending
+ * migrations, and rolls back by itself when the smoke check fails. Returns the card, or null.
+ *
+ * @param {string} env
+ * @param {string} action
+ * @param {{ step?: string, argv?: string[] }} [options]
+ * @returns {Promise<string | null>}
+ */
+export async function guardProduction(env, action, { step, argv = process.argv } = {}) {
+  const { card, refusal } = releaseCardArg(argv);
+  const needsTree =
+    env === 'production' &&
+    card !== null &&
+    step !== undefined &&
+    RELEASE_ACTIONS[/** @type {keyof typeof RELEASE_ACTIONS} */ (step)] === true;
+  const decision = productionDecision({
+    env,
+    step,
+    card,
+    refusal,
+    tree: needsTree ? readTree() : undefined,
+    isTTY: Boolean(process.stdin.isTTY),
+  });
+  if (decision.mode === 'refuse') fail(decision.reason);
+  if (decision.mode === 'none') return null;
+  if (decision.mode === 'release') {
+    console.log(
+      `\nRelease card ${decision.card}: about to ${action} in PRODUCTION, with no terminal.`,
+    );
+    return decision.card;
+  }
   console.log(`\nYou are about to ${action} in PRODUCTION.`);
-  const ok = await confirm('Only the founder releases to production.', 'production');
+  const ok = await confirm('This changes production for every customer.', 'production');
   if (!ok) fail('Stopped. Nothing in production was changed.');
+  return null;
+}
+
+/**
+ * Whether `wrangler d1 migrations list` says the database has migrations it has not run.
+ *
+ * @param {string} listOutput
+ */
+export function migrationsPending(listOutput) {
+  return !String(listOutput).includes('No migrations to apply');
+}
+
+/**
+ * The version serving the most traffic, from `wrangler deployments status --json`: the one a
+ * rollback goes back to. Null when there is no deployment yet or the output is not that JSON.
+ *
+ * @param {string} statusJson
+ * @returns {string | null}
+ */
+export function liveVersionId(statusJson) {
+  try {
+    const status = JSON.parse(statusJson);
+    const versions = Array.isArray(status?.versions) ? status.versions : [];
+    const top = [...versions]
+      .filter((item) => typeof item?.version_id === 'string')
+      .sort((a, b) => (b.percentage ?? 0) - (a.percentage ?? 0))[0];
+    return top?.version_id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What a release deploy does after its smoke check. A pass ends it. A failure, or no URL to check,
+ * rolls production back to the version that was live before the deploy and checks that one, and
+ * the release fails either way. With no earlier version there is nothing to go back to, which the
+ * failure says. The rollback and smoke check are passed in, so every outcome is tested.
+ *
+ * @param {{ smokeOk: boolean, url: string | undefined, previous: string | null,
+ *   rollBack: (versionId: string) => Promise<boolean>, smokeAgain: () => Promise<boolean> }} input
+ * @returns {Promise<{ ok: boolean, rolledBack: boolean, message: string }>}
+ */
+export async function settleRelease({ smokeOk, url, previous, rollBack, smokeAgain }) {
+  if (smokeOk && url) return { ok: true, rolledBack: false, message: 'Smoke check passed.' };
+  const why = url ? 'the smoke check failed' : 'no URL was found to smoke check';
+  if (!previous) {
+    return {
+      ok: false,
+      rolledBack: false,
+      message: `Deployed, but ${why}, and production had no earlier version to roll back to. The new version is live: fix it or deploy again.`,
+    };
+  }
+  const rolled = await rollBack(previous);
+  if (!rolled) {
+    return {
+      ok: false,
+      rolledBack: false,
+      message: `Deployed, but ${why}, and the rollback to ${previous} failed. Run pnpm web:rollback:production ${previous} --release-card <card> now.`,
+    };
+  }
+  const healthy = url ? await smokeAgain() : false;
+  return {
+    ok: false,
+    rolledBack: true,
+    message: `Deployed, but ${why}. Rolled production back to ${previous}${url ? `, whose smoke check ${healthy ? 'passed' : 'also failed'}` : ''}.`,
+  };
 }

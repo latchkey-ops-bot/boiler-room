@@ -19,9 +19,12 @@ import {
 } from '../src/company/tools.ts';
 import {
   CEO_TOOLS_MESSAGE,
+  DEPLOY_KEYS_STEPS,
   judgeCeoTools,
+  judgeDeployKeys,
   judgeGtmStored,
   judgeVerify,
+  verifyMessage,
   verifySchema,
   verifySteps,
 } from '../src/company/verify.ts';
@@ -187,10 +190,14 @@ describe('every company toolset', () => {
     }
   });
 
-  it('gives the CEO no computer and no deploy, and only the lead the apps tool', () => {
+  it('gives the CEO no computer and no deploy, and nobody the apps tool: the web app is on Cloudflare', () => {
     for (const tool of SANDBOX) expect(ceo.tools.configs[tool], tool).toEqual(OFF);
-    for (const agent of company.filter((item) => item !== engineeringLead)) {
+    for (const agent of company) {
       expect(agent.tools.configs.apps, agent.name).toMatchObject(OFF);
+    }
+    for (const agent of [engineeringLead, engineer]) {
+      expect(agent.tools.configs.apps?.config, agent.name).toEqual({ allowed_apps: [] });
+      for (const tool of APP_TOOLS) expect(agent.tools.configs[appTool(tool)], tool).toEqual(OFF);
     }
   });
 });
@@ -611,9 +618,28 @@ describe('skills', () => {
 
   it('keeps each prompt short, with the procedure in the skill', () => {
     for (const agent of company) {
-      expect(agent.skills.length, agent.name).toBe(1);
-      expect(agent.system, agent.name).toContain(`"${agent.skills[0]?.slug}"`);
+      expect(agent.skills.length, agent.name).toBe(agent === engineeringLead ? 2 : 1);
+      for (const skill of agent.skills) {
+        expect(agent.system, `${agent.name} ${skill.slug}`).toContain(`"${skill.slug}"`);
+      }
       expect(agent.system.length, agent.name).toBeLessThan(4500);
+    }
+  });
+
+  it('gives the engineering lead, and only the lead, the deploy skill from the repo root', () => {
+    expect(engineeringLead.skills.map((skill) => [skill.slug, skill.root ?? 'agents'])).toEqual([
+      ['eng-lead', 'agents'],
+      ['engineering-deploy', 'repo'],
+    ]);
+    for (const agent of company.filter((item) => item !== engineeringLead)) {
+      expect(agent.skills.map((skill) => skill.slug)).not.toContain('engineering-deploy');
+    }
+  });
+
+  it('describes each skill on Naive as its own front matter does', () => {
+    for (const skill of company.flatMap((agent) => agent.skills)) {
+      const front = /^---\nname: [^\n]+\ndescription: ([^\n]+)\n/.exec(skillContent(skill));
+      expect(front?.[1], skill.slug).toBe(skill.description);
     }
   });
 });
@@ -682,7 +708,7 @@ describe('GitHub credentials', () => {
     expect(verifySteps('boiler-room', 'boiler-room-design')[1]).toContain('git ls-remote');
   });
 
-  it('checks that each token is refused by the other repo, not only accepted by its own', () => {
+  it('checks each token against the other repo too, not only its own', () => {
     const steps = verifySteps('boiler-room', 'boiler-room-design');
     const own = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room `;
     const other = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room-design `;
@@ -705,18 +731,37 @@ describe('judging a verification', () => {
   };
 
   it('passes a token that pushes to its own repo and is refused by the other', () => {
-    expect(judgeVerify(pass)).toEqual({ ok: true, failures: [] });
+    expect(judgeVerify(pass)).toEqual({ ok: true, failures: [], accepted: [] });
   });
 
-  it('fails a token that the other repo accepts', () => {
+  it('reports a token the other repo accepts as the accepted risk, not a failure', () => {
     const verdict = judgeVerify({ ...pass, other_push_dry_run: pass.push_dry_run });
+    expect(verdict.ok).toBe(true);
+    expect(verdict.failures).toEqual([]);
+    expect(verdict.accepted?.join()).toMatch(/reaches both repos, an accepted risk/);
+  });
+
+  it('records the other repo either way while the risk is accepted', () => {
+    expect(judgeVerify({ ...pass, other_push_dry_run: '' }).ok).toBe(true);
+    expect(judgeVerify({ ...pass, other_push_dry_run: undefined }).ok).toBe(true);
+  });
+
+  it('fails a token the other repo accepts, or an unclear answer, once the risk is no longer accepted', () => {
+    const verdict = judgeVerify({ ...pass, other_push_dry_run: pass.push_dry_run }, false);
     expect(verdict.ok).toBe(false);
     expect(verdict.failures.join()).toMatch(/reaches both repos/);
+    expect(judgeVerify({ ...pass, other_push_dry_run: '' }, false).ok).toBe(false);
   });
 
-  it('fails when the negative step is missing or unclear', () => {
-    expect(judgeVerify({ ...pass, other_push_dry_run: '' }).ok).toBe(false);
-    expect(judgeVerify({ ...pass, other_push_dry_run: undefined }).ok).toBe(false);
+  it('tells the verifying agent that either answer from the other repo is correct', () => {
+    const steps = verifySteps('boiler-room', 'boiler-room-design');
+    expect(steps).toHaveLength(5);
+    expect(verifyMessage('boiler-room', 'boiler-room-design')).toMatch(
+      /Step 5 may be accepted or refused, and either is a correct result to record/,
+    );
+    expect(verifyMessage('boiler-room', 'boiler-room-design')).not.toMatch(
+      /expected to be refused/,
+    );
   });
 
   it('fails a refused own push, a failed auth, a missing file and no output', () => {
@@ -807,5 +852,39 @@ describe('the sweep deployment', () => {
     const patch = resumed.deployments.update.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(patch).not.toHaveProperty('enabled');
     expect(patch.budget_micro_usd).toBe(CEO_SWEEP.budget_micro_usd);
+  });
+});
+
+describe('judging the Cloudflare keys on a computer', () => {
+  const names = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN ';
+
+  it('passes the lead with mode 600 and exactly the two keys', () => {
+    expect(judgeDeployKeys(true, 'mode 600 size 211', names)).toEqual({ ok: true, failures: [] });
+  });
+
+  it('fails the lead with no file, a loose mode, or other keys', () => {
+    expect(judgeDeployKeys(true, 'absent', '').failures).toEqual(['~/.boiler-room.env is missing']);
+    expect(judgeDeployKeys(true, 'mode 644 size 211', names).failures).toEqual([
+      '~/.boiler-room.env is not mode 600',
+    ]);
+    expect(
+      judgeDeployKeys(true, 'mode 600 size 300', `${names}CLERK_SECRET_KEY`).failures.join(),
+    ).toMatch(/not exactly CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN/);
+    expect(judgeDeployKeys(true, 'mode 600 size 40', 'CLOUDFLARE_API_TOKEN').ok).toBe(false);
+  });
+
+  it('passes any other computer only without the file', () => {
+    expect(judgeDeployKeys(false, 'absent', '')).toEqual({ ok: true, failures: [] });
+    expect(judgeDeployKeys(false, 'mode 600 size 211', names).failures).toEqual([
+      '~/.boiler-room.env is there, and only br-eng-lead may hold it',
+    ]);
+  });
+
+  it('reads with commands that print the mode and the key names, never a value', () => {
+    for (const command of DEPLOY_KEYS_STEPS) {
+      expect(command).not.toMatch(/\bcat\b|\bsource\b|\becho \$|printenv|(^|\s)env\b/);
+      expect(command).toContain('~/.boiler-room.env');
+    }
+    expect(DEPLOY_KEYS_STEPS[1]).toContain('cut -d= -f1');
   });
 });

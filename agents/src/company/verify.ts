@@ -1,8 +1,10 @@
 import { GTM_LEAD, INBOX_READER, SCOUT, SOCIAL_AGENT } from '../definitions/company/common.ts';
-import { company, NETRC } from '../definitions/company/index.ts';
+import { company, DEPLOY_KEYS, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
+import { CLOUDFLARE_KEYS, cloudflareTokenActive, DEPLOY_ENV_FILE } from './cloudflare.ts';
 import { liveCatalogue, unnamedOn } from './control-plane.ts';
 import { GITHUB_OWNER, otherRepo, REPO_OF } from './github.ts';
+import { OTHER_REPO_REACH_ACCEPTED } from './preflight.ts';
 import { type BoardExposure, exposureLine, liveBoardExposure } from './seats.ts';
 import { allowedTools } from './tools.ts';
 
@@ -33,8 +35,9 @@ function dryRunPush(repoName: string): string {
  * none prints the file. Step 1 prints the file's mode and size. Step 3 prints only the HTTP status
  * of `GET /user`: 200 proves the token authenticates, nothing more. A repo's `"push"` permission
  * reports the user's role, not the token's grant, so it proves nothing about reach. Step 4 must be
- * accepted by the token's own repo, and step 5 must be refused by the other repo, because each token
- * is meant to write to one repo only.
+ * accepted by the token's own repo. Step 5 records whether the other repo accepts it too: the
+ * founder accepted that both tokens reach both repos (`OTHER_REPO_REACH_ACCEPTED`), so either answer
+ * is recorded and neither fails.
  */
 export function verifySteps(repoName: string, otherRepoName: string): string[] {
   const url = `https://github.com/${GITHUB_OWNER}/${repoName}`;
@@ -47,11 +50,11 @@ export function verifySteps(repoName: string, otherRepoName: string): string[] {
   ];
 }
 
-function verifyMessage(repoName: string, otherRepoName: string): string {
+export function verifyMessage(repoName: string, otherRepoName: string): string {
   const steps = verifySteps(repoName, otherRepoName)
     .map((command, index) => `Step ${index + 1}. Run with bash, exactly: ${command}`)
     .join('\n');
-  return `This session checks that your GitHub credential works on ${repoName} and is refused on ${otherRepoName}. It is not a card, so there is nothing to claim. Run each step as one bash call, in order, exactly once, and copy its output verbatim. Never print, cat or copy ~/.netrc, and never add -v, --verbose or GIT_TRACE to any command. Steps 4 and 5 are dry runs: they push nothing. Step 5 is expected to be refused; record the refusal and do not retry it or try another way.
+  return `This session checks that your GitHub credential works on ${repoName}, and records whether ${otherRepoName} accepts it too. It is not a card, so there is nothing to claim. Run each step as one bash call, in order, exactly once, and copy its output verbatim. Never print, cat or copy ~/.netrc, and never add -v, --verbose or GIT_TRACE to any command. Steps 4 and 5 are dry runs: they push nothing. Step 5 may be accepted or refused, and either is a correct result to record: do not retry it, try another way, or report it as an error.
 ${steps}
 Step 6. Call submit_output with the five outputs and any errors.`;
 }
@@ -60,6 +63,8 @@ Step 6. Call submit_output with the five outputs and any errors.`;
 export interface VerifyVerdict {
   ok: boolean;
   failures: string[];
+  /** Results the founder accepted, printed but not failed. */
+  accepted?: string[];
 }
 
 const PUSHED = /\[new branch\]|->\s*netrc-check/;
@@ -68,10 +73,13 @@ const REFUSED =
 
 /**
  * Judges a verification session's outputs. It passes only when the file is there with mode 600,
- * the token authenticates, a dry-run push to its own repo is accepted, and a dry-run push to the
- * other repo is refused.
+ * the token authenticates, and a dry-run push to its own repo is accepted. A dry-run push the other
+ * repo accepts is reported as an accepted risk while `acceptOtherRepo` holds, and fails otherwise.
  */
-export function judgeVerify(output: Record<string, unknown> | null): VerifyVerdict {
+export function judgeVerify(
+  output: Record<string, unknown> | null,
+  acceptOtherRepo: boolean = OTHER_REPO_REACH_ACCEPTED,
+): VerifyVerdict {
   if (!output) return { ok: false, failures: ['the session returned no output'] };
   const text = (key: string) => (typeof output[key] === 'string' ? (output[key] as string) : '');
   const failures: string[] = [];
@@ -84,12 +92,19 @@ export function judgeVerify(output: Record<string, unknown> | null): VerifyVerdi
     failures.push('a dry-run push to its own repo was not accepted');
   }
   const other = text('other_push_dry_run');
+  const accepted: string[] = [];
   if (PUSHED.test(other)) {
-    failures.push('a dry-run push to the other repo was accepted: the token reaches both repos');
-  } else if (!REFUSED.test(other)) {
+    if (acceptOtherRepo) {
+      accepted.push(
+        "a dry-run push to the other repo was accepted: the token reaches both repos, an accepted risk by the founder's decision",
+      );
+    } else {
+      failures.push('a dry-run push to the other repo was accepted: the token reaches both repos');
+    }
+  } else if (!REFUSED.test(other) && !acceptOtherRepo) {
     failures.push('a dry-run push to the other repo was not clearly refused');
   }
-  return { ok: failures.length === 0, failures };
+  return { ok: failures.length === 0, failures, accepted };
 }
 
 export interface VerifyResult {
@@ -176,6 +191,115 @@ export async function verifyNetrc(
       };
     }),
   );
+}
+
+/**
+ * The commands that check `~/.boiler-room.env` on one computer. They hold only the path: the first
+ * prints the mode and size, the second only the names of the keys (everything before each `=`),
+ * never a value.
+ */
+export const DEPLOY_KEYS_STEPS = [
+  `test -f ~/${DEPLOY_ENV_FILE} && stat -c "mode %a size %s" ~/${DEPLOY_ENV_FILE} || echo absent`,
+  `test -f ~/${DEPLOY_ENV_FILE} && grep -v '^#' ~/${DEPLOY_ENV_FILE} | cut -d= -f1 | sort | tr '\\n' ' ' || echo absent`,
+] as const;
+
+/**
+ * Judges one computer's `~/.boiler-room.env`. A computer `DEPLOY_KEYS` names must have it, with mode
+ * 600 and exactly the Cloudflare keys. Every other one must not have it at all.
+ */
+export function judgeDeployKeys(wanted: boolean, stat: string, names: string): VerifyVerdict {
+  const failures: string[] = [];
+  const present = !/^absent$/.test(stat.trim());
+  if (!wanted) {
+    if (present)
+      failures.push(
+        `~/${DEPLOY_ENV_FILE} is there, and only ${DEPLOY_KEYS.join(', ')} may hold it`,
+      );
+    return { ok: failures.length === 0, failures };
+  }
+  if (!present) return { ok: false, failures: [`~/${DEPLOY_ENV_FILE} is missing`] };
+  if (!/^mode 600\b/.test(stat.trim())) failures.push(`~/${DEPLOY_ENV_FILE} is not mode 600`);
+  const found = names.trim().split(/\s+/).filter(Boolean).sort();
+  const expected = [...CLOUDFLARE_KEYS].sort();
+  if (found.join(',') !== expected.join(',')) {
+    failures.push(
+      `~/${DEPLOY_ENV_FILE} holds ${found.join(', ') || 'nothing'}, not exactly ${expected.join(', ')}`,
+    );
+  }
+  return { ok: failures.length === 0, failures };
+}
+
+export interface DeployKeysVerify {
+  agent: string;
+  wanted: boolean;
+  computer: string | null;
+  stat: string;
+  names: string;
+  verdict: VerifyVerdict;
+}
+
+/**
+ * `pnpm company:verify`, the Cloudflare part: Cloudflare says the token is active (checked from
+ * this machine), the engineering lead's computer has `~/.boiler-room.env` with mode 600 and exactly
+ * the two keys, and no other computer with a token has the file. It reads with shell commands that
+ * hold only the path, and starts no session, so it costs no model spend.
+ */
+export async function verifyDeployKeys(
+  client: Naive,
+  active: () => Promise<boolean | null> = () => cloudflareTokenActive(),
+): Promise<{
+  token_active: boolean | null;
+  computers: DeployKeysVerify[];
+  verdict: VerifyVerdict;
+}> {
+  const existing = await listAll((query) => client.agents.list(query));
+  const computers: DeployKeysVerify[] = [];
+  for (const name of Object.keys(NETRC)) {
+    const wanted = DEPLOY_KEYS.includes(name);
+    const agent = existing.find((item) => item.name === name);
+    const computer = agent ? await client.agents.computer(agent.id) : null;
+    if (!computer || ['failed', 'destroyed'].includes(computer.status)) {
+      computers.push({
+        agent: name,
+        wanted,
+        computer: null,
+        stat: 'absent',
+        names: '',
+        verdict: judgeDeployKeys(wanted, 'absent', ''),
+      });
+      continue;
+    }
+    const outputs: string[] = [];
+    for (const command of DEPLOY_KEYS_STEPS) {
+      const result = await client.computers.exec(computer.id, command, 60_000);
+      outputs.push(String(result.stdout ?? '').trim());
+    }
+    const [stat = '', names = ''] = outputs;
+    computers.push({
+      agent: name,
+      wanted,
+      computer: `${computer.id} ${computer.status}`,
+      stat,
+      names,
+      verdict: judgeDeployKeys(wanted, stat, names),
+    });
+  }
+  const tokenActive = await active();
+  const failures = computers.flatMap((item) =>
+    item.verdict.failures.map((failure) => `${item.agent}: ${failure}`),
+  );
+  if (tokenActive !== true) {
+    failures.push(
+      tokenActive === false
+        ? 'Cloudflare says CLOUDFLARE_API_TOKEN is not active'
+        : 'could not tell whether CLOUDFLARE_API_TOKEN is active',
+    );
+  }
+  return {
+    token_active: tokenActive,
+    computers,
+    verdict: { ok: failures.length === 0, failures },
+  };
 }
 
 /**

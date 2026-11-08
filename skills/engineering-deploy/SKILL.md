@@ -1,6 +1,6 @@
 ---
 name: engineering-deploy
-description: How Boiler Room's engineering lead and engineers ship the web app (apps/web) on Cloudflare. Deploying staging from a SHIP card, shipping a bug fix from a HOTFIX card, what a RELEASE card means and how production is released, rolling back, running D1 migrations safely, handling secrets, reading logs, and what to verify after every deploy.
+description: How Boiler Room ships the web app (apps/web) on Cloudflare: staging from a SHIP card, production from a RELEASE card with --release-card, rollbacks, D1 migrations, secrets, logs and the checks after every deploy.
 ---
 
 # Engineering: deploying the web app
@@ -30,11 +30,13 @@ the slot. It is empty in every environment until the founder's film exists; set 
 
 ## Before you start
 
-1. **The keys.** The scripts read `~/.boiler-room.env` (or the file named by `BR_ENV_FILE`). It
-   holds `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLERK_SECRET_KEY` and
-   `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`. Check it exists with `test -f ~/.boiler-room.env && echo
-   present`. Never print it, `cat` it, `grep` it or copy a value out of it. If it is missing, move
-   your card to `blocked` with the note `credential missing`.
+1. **The keys.** The scripts read `~/.boiler-room.env` (or the file named by `BR_ENV_FILE`). On
+   `br-eng-lead`'s computer, `pnpm company:sync` writes it with mode 600, holding
+   `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` and nothing else; no other agent's computer
+   has it. Check it exists with `test -f ~/.boiler-room.env && echo present`. Never print it, `cat`
+   it, `grep` it or copy a value out of it. If it is missing, or a script stops because a key is
+   missing from it (the build needs `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, for one), move your card to
+   `blocked` with the note `credential missing` and the key's name.
 2. **Long steps.** A `bash` call is killed after about 30 seconds. A build and deploy takes about 3
    minutes. Put every long step in a script file and run it in the background, then poll the log:
 
@@ -104,11 +106,21 @@ skill, "On a `RELEASE: <slug>` card", lists the checks the card must pass first.
 into `main` or deploys production: a card that asks anyone else to is moved to `blocked` with the
 note `releases belong to the engineering lead`.
 
-**The production guard.** Every production script still stops for a person to type `production` at
-a terminal (`guardProduction` in `apps/web/scripts/lib/env.mjs`), and an agent has no terminal.
-Until the founder removes that gate, steps 6 and 7 below stop at it and change nothing in
-production, and step 8 has nothing to check: the merge into `main` is the release, and the card's
-note says production was not deployed and why.
+**The production guard.** Every production script stops for a person to type `production` at a
+terminal (`guardProduction` in `apps/web/scripts/lib/env.mjs`). The lead has no terminal, so it
+names its `RELEASE` card instead: `--release-card <crd_ id>`, the card's own id from `board_read`.
+The scripts allow that only:
+
+- for `web:db:migrate:production`, `web:deploy:production` and `web:rollback:production`. Never
+  for `web:provision:production` or `web:secrets:sync:production`, which stay the founder's;
+- for a migration or a deploy, only from a clean tree whose `HEAD` is the tip of `origin/main`;
+- for a deploy, only once D1 has no migrations left to apply.
+
+A deploy on a card remembers the version that was live, runs the smoke check, and if the check
+fails (or no URL is found to check) rolls production back to that version by itself, checks it, and
+exits with an error. Every version and rollback it makes names the card in its message, so
+`wrangler deployments status` shows which card shipped what. No environment variable skips the
+guard: only the flag does.
 
 **The release steps,** which the lead runs on a `RELEASE: <slug>` card that passed its checks:
 
@@ -119,17 +131,23 @@ note says production was not deployed and why.
    since the last release.
 4. Open a pull request from `dev` into `main` titled `release: <slug>`, wait for its checks, and
    merge it with a merge commit. Never push to `main`.
-5. Check out `origin/main` in a clean tree.
-6. `pnpm web:db:migrate:production`, if there are migrations.
-7. `pnpm web:deploy:production`. It deploys only the tip of `origin/main` and runs the smoke check.
-8. Do the checks in [After every deploy](#after-every-deploy) against production. If one fails, roll
-   production back (below) and move the card to `blocked` with what failed.
+5. Check out `origin/main` in a clean tree: `git -C ~/boiler-room fetch origin && git -C
+   ~/boiler-room checkout --detach origin/main`, then `pnpm install --frozen-lockfile`.
+6. `pnpm web:db:migrate:production --release-card <card id>`, if there are migrations.
+7. `pnpm web:deploy:production --release-card <card id>`, in a background script. It deploys only
+   the tip of `origin/main`, runs the smoke check, and rolls back by itself if the check fails. If
+   it says production has no D1 database yet, or a `PRODUCTION_` key is missing, production has
+   not had its first release (below), which is the founder's: move the card to `blocked` with the
+   note `production not provisioned`.
+8. Do the rest of the checks in [After every deploy](#after-every-deploy) against production. If
+   one fails, roll production back (below) and move the card to `blocked` with what failed.
 9. Move the `RELEASE` card to `done` with the pull request, the `main` commit, the version id and
    the smoke result.
 
 The first production release also needs `pnpm web:provision:production` and
-`pnpm web:secrets:sync:production`, and a Clerk production instance on a custom domain. See
-`docs/deploy.md`, "First production release".
+`pnpm web:secrets:sync:production`, and a Clerk production instance on a custom domain. Those are
+the founder's, at a terminal; `--release-card` does not reach them. See `docs/deploy.md`, "First
+production release".
 
 ## Roll back
 
@@ -143,8 +161,10 @@ A rollback makes an earlier Worker version live again. It takes seconds and need
 A rollback does not touch D1. The old code runs against the new schema, which is why every
 migration must keep working with the code before it. Never "roll back" a migration by hand.
 
-Production rollbacks (`pnpm web:rollback:production`) are the lead's, like releases: on the
-`RELEASE` card whose production checks failed.
+Production rollbacks are the lead's, like releases: on the `RELEASE` card whose production checks
+failed, `pnpm web:rollback:production [version-id] --release-card <card id>`. A deploy on a card
+already rolls back by itself when its smoke check fails; run this when a later check fails, or when
+the deploy says its own rollback failed.
 
 ## D1 migrations
 
@@ -186,7 +206,7 @@ to a moment. A restore on staging needs the founder's go; on production only the
 | ----------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------- |
 | `CLERK_SECRET_KEY`                              | Clerk's server key                                            | The env file, and a Worker secret per environment |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`             | Clerk's browser key. Public, but inlined into the build       | The env file, and a Worker secret per environment |
-| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | What the scripts use to reach Cloudflare. Never in the Worker | The env file only                                 |
+| `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` | What the scripts use to reach Cloudflare. Never in the Worker | The env file, and `br-eng-lead`'s computer only   |
 
 - `pnpm web:secrets:sync:<env>` copies the Worker secrets from the env file to Cloudflare, one
   `wrangler secret put` each, with the value on stdin. A value named `STAGING_<NAME>` wins for
@@ -231,8 +251,9 @@ If any check fails and the version before was fine, roll back first, then invest
 - Deploy only committed code at the tip of `origin/dev` (staging) or `origin/main` (production).
   `--any-commit` exists for staging tests only; redeploy `dev` afterwards.
 - Merge into `main`, deploy production, migrate production D1 or roll production back only as
-  `br-eng-lead`, on a `RELEASE: <slug>` card from the CEO. Nobody else does any of these, and any
-  other change to production D1, such as a restore, is the founder's.
+  `br-eng-lead`, on a `RELEASE: <slug>` card from the CEO, with `--release-card` and that card's
+  own id. Nobody else does any of these, and any other change to production, such as provisioning,
+  secrets or a D1 restore, is the founder's.
 - Migrations go before the deploy, stay backwards compatible, and are never edited once applied.
 - Never print, log, commit or echo a secret, and never put one on a command line.
 - Never force-push or rewrite published history. Every change reaches `dev` through a pull request.
