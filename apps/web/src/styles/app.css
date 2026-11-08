@@ -707,7 +707,8 @@
 .callout .text {
   display: grid;
   gap: 2px;
-  flex: 1;
+  /* A basis, so on a phone the button wraps under the words instead of squeezing them. */
+  flex: 1 1 220px;
 }
 .callout h3 {
   font-size: 21px;

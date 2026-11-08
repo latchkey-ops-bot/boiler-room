@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import { sendJson } from '../lib/api-client.ts';
 
@@ -40,13 +41,18 @@ export function ShowcaseToggle({
           disabled={busy}
           onChange={(event) => void change(event.target.checked)}
         />
-        <span>Show this video on the Boiler Room showcase</span>
+        <span>Show my video on the Boiler Room showcase</span>
       </label>
       <p className="hint">
         {simulated
           ? 'Simulated videos never appear on the showcase, even with this on.'
-          : 'Other founders see your video, your product name and your website. Turn it off at any time.'}
+          : 'Anyone can see your video, your product name and your website there. Turn it off at any time.'}
       </p>
+      {on && !simulated ? (
+        <p className="hint">
+          <Link href="/showcase">See the showcase</Link>
+        </p>
+      ) : null}
       {error ? (
         <p className="field-error" role="alert">
           {error}
