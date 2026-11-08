@@ -216,6 +216,22 @@ Until both of these are true, only prompts keep an agent off the other repo and 
    reads `required_approving_review_count` from GitHub's public rules endpoint; it cannot see the
    bypass list.
 
+### Before you raise a budget or approve a call
+
+A session that stops on its budget is `budget_paused`, and raising its agent's budget resumes it from
+its old context: a clone of `br-ceo` paused after it had closed its standing card, and once its cap
+was raised it read cards made since, commented `Delivered` and created a `FOUNDER: release` card. One
+`br-ceo` cap is shared by the sweep, the digests and the founder's chats, so one raise can resume
+several. An `awaiting_approval` session holds a tool call that runs if anyone approves it.
+
+1. Run `pnpm company:status`. It lists every company agent's sessions that are `budget_paused` or
+   `awaiting_approval`, and every title that more than one card on the board carries.
+2. Interrupt each listed session of that agent first.
+3. Then raise the budget, or approve.
+
+The `ceo` skill also holds a sweep to its standing card: it reads the card first and before every
+write, and stops writing the moment the card is not `doing`.
+
 ### Where the build differs from the spec
 
 Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
@@ -229,9 +245,13 @@ Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
   `Delivered` or `Not delivered` on its `DIR` card, or its last `SHIP` card is done. Product moves
   `DIR` to `done` when the spec PR opens, so counting cards limited nothing.
 - **Duplicate cards.** Section 2: a retried write with the same title is a no-op. Build: only within
-  one session, because card ids derive from the board, the writing session and the title. The CEO
-  checks the board before it creates `FOUNDER: release`, `FOUNDER: stalled cards` or a retried
-  `DIR`, which is titled `DIR: <slug> r2`.
+  one session, because card ids derive from the board, the writing session and the title, and
+  `board_write` takes no idempotency key (the REST create does). Two sweeps started 90 ms apart each
+  created `FOUNDER: release zz-probe-4`. So the CEO lists the board before it creates
+  `FOUNDER: release`, `FOUNDER: stalled cards` or a retried `DIR` (titled `DIR: <slug> r2`), lists
+  it again right before a `FOUNDER: release`, writes only while its standing card is `doing`, and
+  closes a duplicate with the note `duplicate of <id>`. That narrows the race to about a second;
+  it does not close it. `company:status` lists every duplicate title.
 - **Token reach.** Sections 5 and 6: each token reaches one repo. Live: both tokens can push to both
   repos (checked 2026-11-07). Re-minting them is the founder's (above).
 - **Branch rules.** Section 5 C: rules on `main` and `dev`, with 0 approvals. Build: `main` needs at

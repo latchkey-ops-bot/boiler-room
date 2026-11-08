@@ -17,6 +17,67 @@ export interface StatusAgent {
   spent_total: string;
 }
 
+/**
+ * Stop reasons that wait for a person. A raised budget resumes a `budget_paused` session from its
+ * old context, and an approval runs the call an `awaiting_approval` session holds, so each one is
+ * listed before anyone raises a budget or approves anything.
+ */
+export const HELD_STOP_REASONS = ['budget_paused', 'awaiting_approval'] as const;
+export type HeldStopReason = (typeof HELD_STOP_REASONS)[number];
+
+export interface HeldSession {
+  agent: string;
+  id: string;
+  stop_reason: HeldStopReason;
+  deployment_id: string | null;
+  created_at: string;
+}
+
+/** Every session of these agents that is waiting for a person, oldest first. */
+export async function heldSessions(
+  client: Naive,
+  agents: readonly { name: string; id: string }[],
+): Promise<HeldSession[]> {
+  const held: HeldSession[] = [];
+  for (const agent of agents) {
+    for (const stop_reason of HELD_STOP_REASONS) {
+      const sessions = await listAll((query) =>
+        client.sessions.list({ ...query, agent_id: agent.id, stop_reason }),
+      );
+      for (const session of sessions) {
+        held.push({
+          agent: agent.name,
+          id: session.id,
+          stop_reason,
+          deployment_id: session.deployment_id ?? null,
+          created_at: session.created_at,
+        });
+      }
+    }
+  }
+  return held.sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
+/**
+ * Titles that more than one card carries, each with its cards oldest first. Card ids derive from the
+ * writing session, so two sessions that create one title make two cards.
+ */
+export function duplicateTitles(
+  cards: readonly { id: string; title: string; status: string; created_at: string }[],
+): { title: string; cards: string[] }[] {
+  const byTitle = new Map<string, { id: string; status: string; created_at: string }[]>();
+  for (const card of cards) byTitle.set(card.title, [...(byTitle.get(card.title) ?? []), card]);
+  return [...byTitle.entries()]
+    .filter(([, group]) => group.length > 1)
+    .map(([title, group]) => ({
+      title,
+      cards: [...group]
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((card) => `${card.id} ${card.status}`),
+    }))
+    .sort((a, b) => a.title.localeCompare(b.title));
+}
+
 /** The sum of the ledger's debits for one agent. */
 async function ledgerTotal(client: Naive, agentId: string): Promise<number> {
   const entries = await listAll((query) => client.credits.ledger({ ...query, agent_id: agentId }));
@@ -27,7 +88,8 @@ async function ledgerTotal(client: Naive, agentId: string): Promise<number> {
 
 /**
  * What `pnpm company:status` prints: the agents, whether br-ceo is the organization's CEO, br-ceo's
- * roster, the board, the sweep, spend, and how GitHub differs from the spec.
+ * roster, the board and any duplicate titles on it, the sweep, the sessions waiting for a person,
+ * spend, and how GitHub differs from the spec.
  */
 export async function companyStatus(
   client: Naive,
@@ -85,6 +147,10 @@ export async function companyStatus(
     ? await listAll((query) => client.vaults.credentials.list(vault.id, query))
     : [];
   const served = compareCatalogue(await catalogue());
+  const held = await heldSessions(
+    client,
+    agents.flatMap((agent) => (agent.id ? [{ name: agent.name, id: agent.id }] : [])),
+  );
 
   return {
     agents,
@@ -109,8 +175,10 @@ export async function companyStatus(
             reported_status: card.reported_status,
             woken_session_id: card.woken_session_id,
           })),
+          duplicates: duplicateTitles(cards),
         }
       : null,
+    held,
     deployments: deployments.map((deployment) => ({
       id: deployment.id,
       cron: `${deployment.cron} ${deployment.timezone}`,

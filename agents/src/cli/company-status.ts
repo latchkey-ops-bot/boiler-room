@@ -19,8 +19,21 @@ console.table(status.roster.members);
 if (status.board) {
   console.log(`Board ${status.board.id} ${JSON.stringify(status.board.counts)}`);
   if (status.board.cards.length) console.table(status.board.cards);
+  for (const duplicate of status.board.duplicates) {
+    console.log(
+      `Duplicate title "${duplicate.title}": ${duplicate.cards.join(', ')}. Keep the oldest; close the rest with "duplicate of <id>".`,
+    );
+  }
 } else {
   console.log('Board: none');
+}
+if (status.held.length) {
+  console.log(
+    "Sessions waiting for a person. Interrupt each one before you raise its agent's budget or approve anything: a raised budget resumes a budget_paused session from its old context.",
+  );
+  console.table(status.held);
+} else {
+  console.log('Sessions waiting for a person: none');
 }
 console.log('Sweep');
 console.table(status.deployments);
