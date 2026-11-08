@@ -1,7 +1,17 @@
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { FILM_EXIT } from '@boiler-room/film-runner/contract';
+import {
+  CONTRACT_USAGE,
+  type ContractArgs,
+  isContractCall,
+  parseContractArgs,
+  runFilmCommand,
+  stopOnSignals,
+} from '../film/command.ts';
 import { NaiveCrew } from '../film/crew.ts';
+import { EventLog } from '../film/events.ts';
 import { FILM_FORMATS, FILM_LENGTHS, type FilmFormat, type FilmLength } from '../film/order.ts';
 import {
   DEFAULT_MAX_MICRO_USD,
@@ -15,6 +25,7 @@ import {
 } from '../film/run.ts';
 import { naiveClient, scrub, usd } from '../naive/client.ts';
 import { siteHost } from '../researcher/text.ts';
+import { checkAgents } from '../sync.ts';
 
 const usage = `Usage: pnpm film <url> [--length short|standard] [--format 16:9] [--sample] [--max-usd 5]
 
@@ -32,7 +43,67 @@ Everything goes in out/films/<host>/<run-id>/: research/, round-<n>/, film.mp4, 
 qc-report.json, manifest.json and decisions.json.
 
 Exit codes: 0 the film passed Quality Check, 3 a film was made but did not pass, 1 no film, 2 a
-usage error.`;
+usage error.
+
+The film runner calls it with --phase instead (src/film/command.ts):
+
+${CONTRACT_USAGE}`;
+
+const out = fileURLToPath(new URL('../../../out/', import.meta.url));
+const say = (line: string) =>
+  console.log(scrub(`${new Date().toISOString().slice(11, 19)} ${line}`));
+
+/**
+ * The film runner's call: one phase of a film in a run dir, reported to `--events`. SIGTERM and
+ * SIGINT stop every live session and exit 143 within 60 s, whatever the crew is doing.
+ */
+async function contract(argv: string[]): Promise<never> {
+  const args = parseContractArgs(argv);
+  if ('problem' in args) {
+    console.error(`${args.problem}\n\n${CONTRACT_USAGE}`);
+    process.exit(FILM_EXIT.badInput);
+  }
+  const controller = new AbortController();
+  stopOnSignals(controller, say);
+  let client: ReturnType<typeof naiveClient>;
+  try {
+    // The key is read from BOILER_ROOM_ENV when it is set, and never printed or passed in argv.
+    client = naiveClient();
+  } catch (cause) {
+    noKey(args, cause);
+  }
+  const crew = new NaiveCrew({
+    outRoot: out,
+    signal: controller.signal,
+    log: say,
+    renderRunner: args.render,
+    agentSync: args.sync ? 'sync' : 'verify',
+  });
+  const code = await runFilmCommand(args, {
+    crew,
+    sessions: client,
+    checkAgents: async (definitions) => (await checkAgents(client, definitions)).drift,
+    log: say,
+    signal: controller.signal,
+  });
+  say(`exit ${code}`);
+  process.exit(code);
+}
+
+function noKey(args: ContractArgs, cause: unknown): never {
+  const events = new EventLog(args.eventsFile, args.runDir);
+  events.error(
+    'no_naive_key',
+    'The film computer has no Naive key for the crew, so nothing was started.',
+    null,
+    false,
+  );
+  events.close();
+  console.error(cause instanceof Error ? cause.message : String(cause));
+  process.exit(FILM_EXIT.failed);
+}
+
+if (isContractCall(process.argv.slice(2))) await contract(process.argv.slice(2));
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -75,10 +146,7 @@ const maxMicroUsd = Math.round(maxUsd * 1e6);
 const problem = orderProblem({ url, length, sample, maxMicroUsd });
 if (problem) fail(problem);
 
-const out = fileURLToPath(new URL('../../../out/', import.meta.url));
 const controller = new AbortController();
-const say = (line: string) =>
-  console.log(scrub(`${new Date().toISOString().slice(11, 19)} ${line}`));
 const crew = new NaiveCrew({ outRoot: out, signal: controller.signal, log: say });
 
 // Ctrl-C or SIGTERM (a withdrawn order): stop the render, close every session, mark the film.

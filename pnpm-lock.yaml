@@ -14,6 +14,9 @@ importers:
 
   agents:
     dependencies:
+      '@boiler-room/film-runner':
+        specifier: workspace:*
+        version: link:../services/film-runner
       '@boiler-room/motion':
         specifier: workspace:*
         version: link:../packages/motion

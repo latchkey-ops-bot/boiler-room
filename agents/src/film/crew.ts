@@ -18,6 +18,7 @@ import { closeSession } from '../naive/session.ts';
 import type { QcIssue, QcReport } from '../quality/output.ts';
 import { qualityCheckRender } from '../quality/run.ts';
 import { research } from '../researcher/run.ts';
+import type { AgentSync } from '../sync.ts';
 import { localizeCampaign } from './assets.ts';
 import { type Capped, capNaive, MIN_SESSION_MICRO_USD } from './cap.ts';
 import { artDecisions, directorDecisions, qcDecisions, researchDecisions } from './decisions.ts';
@@ -152,6 +153,8 @@ export function rejectedBy(error: FilmRejected): string {
 export async function gateFilm(input: {
   campaignFile: string;
   format: '16:9' | '9:16' | '1:1';
+  hookId?: string | null;
+  ctaId?: string | null;
 }): Promise<GateOutcome> {
   let campaign: unknown;
   try {
@@ -164,7 +167,11 @@ export async function gateFilm(input: {
     };
   }
   try {
-    const gated = await gateCampaign(campaign, { format: input.format });
+    const gated = await gateCampaign(campaign, {
+      format: input.format,
+      ...(input.hookId ? { hookId: input.hookId } : {}),
+      ...(input.ctaId ? { ctaId: input.ctaId } : {}),
+    });
     return {
       ok: true,
       warnings: gated.warnings.map((issue) => `${issue.code} at ${issue.path}: ${issue.message}`),
@@ -190,6 +197,10 @@ export interface NaiveCrewOptions {
   outRoot: string;
   signal?: AbortSignal;
   log?: (line: string) => void;
+  /** `naive` renders on Naive computers; `local` on this computer, as the film computer does. */
+  renderRunner?: 'naive' | 'local';
+  /** `verify` never creates or changes an agent or pushes a skill (`--no-sync`). */
+  agentSync?: AgentSync;
 }
 
 export class NaiveCrew implements FilmCrew {
@@ -197,9 +208,13 @@ export class NaiveCrew implements FilmCrew {
   readonly started = new Set<string>();
   private readonly options: NaiveCrewOptions;
   private readonly capped: Capped<ReturnType<typeof naiveClient>>[] = [];
+  /** Clean-ups a stage handed over, such as the Researcher pausing its computer. */
+  private readonly stoppers = new Set<() => Promise<void>>();
+  private readonly sync: { agentSync?: AgentSync };
 
   constructor(options: NaiveCrewOptions) {
     this.options = options;
+    this.sync = options.agentSync ? { agentSync: options.agentSync } : {};
   }
 
   private cap(limits: StageLimits) {
@@ -213,13 +228,14 @@ export class NaiveCrew implements FilmCrew {
     return [...capped.sessions];
   }
 
-  /** Interrupts or cancels every session the crew started. For Ctrl-C. */
+  /** Interrupts or cancels every session the crew started, and runs each stage's clean-up. */
   async stop(): Promise<void> {
     const client = naiveClient();
     for (const capped of this.capped) for (const id of capped.sessions) this.started.add(id);
-    await Promise.all(
-      [...this.started].map((id) => closeSession(client, id).catch(() => undefined)),
-    );
+    await Promise.all([
+      ...[...this.started].map((id) => closeSession(client, id).catch(() => undefined)),
+      ...[...this.stoppers].map((stop) => stop().catch(() => undefined)),
+    ]);
   }
 
   async research(input: { url: string; dir: string } & StageLimits) {
@@ -233,6 +249,10 @@ export class NaiveCrew implements FilmCrew {
       drillRepair: false,
       outRoot: this.options.outRoot,
       outDir: input.dir,
+      ...this.sync,
+      // The film owns SIGINT and SIGTERM; it calls the research's clean-up through stop().
+      ownSignals: false,
+      onStop: (stop) => this.stoppers.add(stop),
     });
     const report = readJson(join(input.dir, 'report.json')) ?? {};
     const researchFile = join(input.dir, 'research.json');
@@ -283,6 +303,7 @@ export class NaiveCrew implements FilmCrew {
         maxRepairs: 3,
         outDir: input.dir,
         client: capped.client,
+        ...this.sync,
         ...(revise ? { revise } : {}),
       });
     } catch (cause) {
@@ -345,6 +366,7 @@ export class NaiveCrew implements FilmCrew {
         agent,
         issues: input.issues.map(artIssueOf),
         client: capped.client,
+        ...this.sync,
       });
     } catch (cause) {
       failure = message(cause);
@@ -405,9 +427,12 @@ export class NaiveCrew implements FilmCrew {
       const result = await renderCampaign({
         campaignFile: local.campaignFile,
         format: input.format,
+        ...(input.hookId ? { hookId: input.hookId } : {}),
+        ...(input.ctaId ? { ctaId: input.ctaId } : {}),
         output,
         maxCostUsd: input.ceilingMicroUsd / 1e6,
-        runner: 'naive',
+        // `local` draws on this computer and starts none, so it costs the crew nothing.
+        runner: this.options.renderRunner ?? 'naive',
         ...(this.options.signal ? { signal: this.options.signal } : {}),
         log: (line) => this.options.log?.(`render: ${line}`),
       });
@@ -474,6 +499,7 @@ export class NaiveCrew implements FilmCrew {
         model: true,
         budgetUsd: Math.min(1.5, Math.max(1, input.ceilingMicroUsd / 1e6)),
         client: capped.client,
+        ...this.sync,
         say: (line) => this.options.log?.(`qc: ${line}`),
       });
       const reportFile = join(input.renderDir, `${report.campaignId}.qc`, 'qc-report.json');

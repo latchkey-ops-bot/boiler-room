@@ -172,7 +172,11 @@ command, the key file's mode, swap, no run dir, and signing.
   `secrets:sync` checks with Naive. Naive keys have no resource binding, so `computers:write` reaches
   every computer and snapshot in the organization: keep no secret on any other computer there.
 
-## The film command: what `feat/crew-agents` must add
+## The film command
+
+The film command on `feat/crew-agents` (`agents/src/film/command.ts`, documented in
+`agents/README.md`) does 1 to 9 below and refuses `--revise` as bad input; 10 and 11 are still to
+do. Its test runs it with a fake crew and parses every event it writes with `parseFilmEvent`.
 
 The runner calls the film command as `pnpm run --silent film <args>` in the crew checkout, with
 `filmCommandArgs`:
@@ -245,8 +249,9 @@ since the computer clones the public repo.
 The snapshot holds no Naive key: every fork and checkpoint of it would hold the same long-lived
 key. The website sends the runner's key with each launch instead (`naiveKey` above).
 
-Pass `--adapter standin` until the film command has the contract: `feat/crew-agents` now has a
-`film` script, so `--adapter auto` would pick `film` for a command that cannot yet run a phase.
+The film command now has the contract. Rebuild with `--adapter film` at a crew commit whose agents
+are synced (`pnpm agents:sync` from that commit): the command runs `--no-sync`, so a deployed agent
+that is not that commit's stops every film with `agent_drift` before anything is spent.
 
 ### The current snapshot
 

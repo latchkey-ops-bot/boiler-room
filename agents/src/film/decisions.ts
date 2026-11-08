@@ -21,8 +21,10 @@ export interface DecisionDraft {
 export class DecisionLog {
   readonly entries: FilmDecision[] = [];
   private readonly clock: () => Date;
-  constructor(clock: () => Date = () => new Date()) {
+  /** `earlier` are an earlier phase's decisions of the same film, which this log goes on from. */
+  constructor(clock: () => Date = () => new Date(), earlier: readonly FilmDecision[] = []) {
     this.clock = clock;
+    this.entries.push(...earlier);
   }
   add(draft: DecisionDraft, round: number): FilmDecision {
     const seq = this.entries.length;

@@ -18,6 +18,12 @@ agent to that exact skill version, and then creates or versions each agent by na
 SHA-256 of the definition in the agent's metadata, so an unchanged agent is left alone and a
 changed one gets a new version. Two agents with one name is an error, never a guess.
 
+A run with `agentSync: 'verify'` (the film computer's `pnpm film --no-sync`) changes nothing on
+Naive: `checkAgents` in `src/sync.ts` reads each deployed agent, hashes the config this checkout
+would write with the skill versions that agent pins, checks each pinned skill version's content
+against the skill file here, and refuses with `AgentDrift` on any difference. So after a change to
+a definition or a skill, `pnpm agents:sync` must run before the film computer can make films.
+
 Every toolset denies by default and names `vetta.tools_search`, `vetta.tools_execute`,
 `ask_operator`, `request_tools`, `propose_plan`, `board_read` and `board_write` as off, because a
 deny default still offers the first two until they are named, and the company board seats every
@@ -745,10 +751,21 @@ $0.0150 more.
 Exit codes: 0 written, 1 refused (an invalid input, or a result that fails `validateCampaign`), 3
 written with a `tile-wall` sent back to the Director for want of 6 distinct captured tiles.
 
-Two things about `view_image` on the `pi` harness, seen in live runs: its tool result is captions
-and links only, and the pictures follow as images in the conversation; and after submitting, the
-agent sometimes writes that the pictures never arrived, though its submitted reasons describe
-detail only the pixels hold. The structured result, with its `seen` field, is what code reads.
+**`seen` is proven by the session's events, not by the agent.** On the `pi` harness the
+`view_image` tool result is captions and links only, with an `[image] <file id>` line for each
+picture it attached; the pictures follow as images in the conversation. On 8 November three scene
+reviews (`ses_gwshmye25aef0eme127hehcjty`, `ses_n21fhfzqryakj7mjytafdt6bzd`,
+`ses_amj1nvfzxg0awmwm4f86334vt5`) submitted `seen: true` with specific reasons and then wrote that
+the pictures never reached them and the reasons were made up; this checkout's logs hold 27 more
+sessions that say the same. In all three the events show `view_image` succeeding for every id, so
+the retraction is the signal. `ViewEvidence` (`src/naive/evidence.ts`) takes a picture as seen only
+when a successful `view_image` result in that session lists its file id before the
+`submit_output` that carried the review, and the agent did not say afterwards, in words like those
+sessions', that the pictures did not arrive. A review not proven seen, or one that says
+`seen: false`, is not a review: the batch runs once more in a fresh session, told why and with its
+pictures attached again, and if that one is not proven seen either, the code's choice stands as
+source `rule`, and `decisions.json` says "chosen by rule, not reviewed" for the scene, wall or
+generated image.
 
 ## Quality Check
 
@@ -766,6 +783,18 @@ of the same run beside it, and the bundle's SHA-256 in `report.json`'s `capture_
 campaign is the file the manifest names, or `--campaign`. The report is printed and written to
 `<render-dir>/<campaign id>.qc/qc-report.json`, with the agent's own review and its events beside
 it. Exit 0 is pass, 1 is fail, 2 is an input error.
+
+### Every frame it reports on was shown to it
+
+The same `ViewEvidence` follows each Quality Check session. What the agent reports on a frame
+stands only when that session opened the image the frame is in: an issue on a frame of an image
+its events do not show it opened, a check resting only on such frames (made `n/a`), and an
+`inspected` entry for a file it never opened are taken out of its review and listed in the
+report's `review.notReviewed`. A review that leaves any image unseen, or whose agent says the
+images did not arrive, is asked for once more in a fresh session with every image attached again;
+the review that saw more stands, the rest is chosen by rule and not reviewed (a decision says so),
+and an image nobody opened still blocks the verdict. A model pass rests only on frames of images
+that were viewed.
 
 ### Code first
 
@@ -1018,6 +1047,59 @@ gate, route-backs, budget pauses, the cap, the delivery).
 Exit codes: 0 the film passed Quality Check, 3 a film was made and did not pass, 1 no film, 2 a
 usage error. Ctrl-C or SIGTERM stops the render, which destroys its computers, closes every
 session the crew started, and marks the film.
+
+### The film runner's contract: `pnpm film --phase`
+
+On a film's own computer the film runner (`services/film-runner`) calls the command in two
+launches with the website's approval between them, exactly as `filmCommandArgs` in its
+`src/contract.ts` builds the arguments:
+
+```sh
+pnpm film <url> --phase script|render|all --run-dir <abs dir> --events <file> --max-usd <n> \
+  --render local --no-sync [--approval <file>]
+```
+
+`src/film/command.ts` runs it; `--phase` is what selects it, so `pnpm film <url>` alone is as
+above.
+
+| Flag                | What it does                                                                                                                                                                                                                                             |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--phase script`    | The Researcher and the Director with its checks. The script goes to the top of the run dir as `campaign.json`, version 1, with `script.json` for the render phase; `script_ready` names it and the cited claims nobody has confirmed. Exit 0             |
+| `--phase render`    | The Art Director, the render, Quality Check and delivery of the approved cut, from that run dir. The Director changes nothing: Quality Check issues it owns go to a person, since the customer approved this version. The Art Director may be sent back  |
+| `--phase all`       | Both, with no approval between: a GTM sample film, Short, 16:9, the main opening and no CTA label. `script_ready` comes before any film                                                                                                                  |
+| `--run-dir <abs>`   | The film's folder across both phases, in place of `out/films/<host>/<run-id>/`. The render phase's files go to `round-<n>/` and `delivered/`, so the approved script at the top is never written over                                                    |
+| `--approval <file>` | `{ version, hookId, ctaId, formats, confirmedClaimIds }`. Exactly that hook, CTA and those formats are rendered; the confirmed claims are marked `approved` in `approved/campaign.v<n>.json` before the gate. Exit 2 when `version` is not the run dir's |
+| `--events <file>`   | One flushed JSON line per event, each checked with `parseFilmEvent` before it is written (`src/film/events.ts`). Messages are plain sentences: keys, links (only the site is kept), paths (only the file name) and Naive ids are taken out               |
+| `--render local`    | `renderCampaign({ runner: 'local' })`: drawn on the film computer, so the render needs no crew budget                                                                                                                                                    |
+| `--no-sync`         | Agents are checked, never created or changed, and no skill is pushed. A deployed agent that is not this checkout's stops the phase with `agent_drift`, exit 1, before anything is spent                                                                  |
+| `--max-usd <n>`     | This phase's cap. The script phase needs $1.30 (Researcher and Director), the render phase $1.00 per format with a local render; under that, `cost_cap`, exit 4                                                                                          |
+
+The Naive key is read only from `BOILER_ROOM_ENV` when it is set (the runner's launch key file),
+and a missing key stops with `no_naive_key`. SIGTERM or SIGINT writes `error stopped`, interrupts
+or cancels every live session, runs the Researcher's clean-up (which pauses its computer), and
+exits 143, at most 55 s later whatever the crew is doing. `--revise` is refused as bad input for
+now: a send-back cannot be rewritten from a note yet.
+
+What the runner is told, in order: `stage` as each step starts (never `approval`), each crew
+`decision` with the agent it belongs to (a route-back is Quality Check's), `session` and `cost`
+after each step, the research as an `artifact` (version 0) in the script phase, `qc` per format
+with Quality Check's verdict, then per format the MP4 (with its variant key, such as
+`16:9.main.none`), a poster, the contact sheet and the QC report, then `decisions.json` and
+`manifest.json`, and `delivered`. A format Quality Check failed is still delivered, with its `qc` saying so: once the route-backs
+are spent the approved script cannot change, and the website shows the verdict beside the film. A
+phase that delivers no film writes one `error` and exits 1 or 4.
+
+| Exit | Meaning                                                               |
+| ---- | --------------------------------------------------------------------- |
+| 0    | `script_ready` (script), or `delivered` (render, all)                 |
+| 1    | The crew failed or refused: no script, no film, `agent_drift`, no key |
+| 2    | Bad input: the flags, the approval, a version mismatch, `--revise`    |
+| 4    | The cost cap                                                          |
+| 143  | Stopped by SIGTERM or SIGINT                                          |
+
+`test/film-command.test.ts` runs both phases, the sample, a version mismatch, drift, the cap and
+a stop with a fake crew, parses every line it writes with the contract's `parseFilmEvent`, and
+sends SIGTERM to the command as a process.
 
 ### Measured: an outreach sample of linear.app
 
