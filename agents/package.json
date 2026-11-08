@@ -12,6 +12,7 @@
     "direct": "node src/cli/direct.ts",
     "injection": "node src/cli/injection.ts",
     "art": "node src/cli/art.ts",
+    "qc": "node src/cli/qc.ts",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },

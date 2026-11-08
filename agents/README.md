@@ -6,7 +6,8 @@ The company's agents, defined in code and run on Naive through `@usenaive-sdk/ma
 
 Each agent is an `AgentDefinition` in `src/definitions/`: name, model, system prompt, tools,
 skills, budget and output schema. Skills live in `agents/skills/<slug>/SKILL.md`, or in the repo's
-top-level `skills/<slug>/SKILL.md` for a definition that sets `root: 'repo'`, as the Director's do.
+top-level `skills/<slug>/SKILL.md` for a definition that sets `root: 'repo'`. The Director, Art
+Director and Quality Check skills live there, because people and agents share them.
 
 ```sh
 pnpm agents:sync
@@ -259,6 +260,106 @@ Two things about `view_image` on the `pi` harness, seen in live runs: its tool r
 and links only, and the pictures follow as images in the conversation; and after submitting, the
 agent sometimes writes that the pictures never arrived, though its submitted reasons describe
 detail only the pixels hold. The structured result, with its `seen` field, is what code reads.
+
+## Quality Check
+
+```sh
+pnpm qc <render-dir>                                   # code checks, then br-quality-check
+pnpm qc <render-dir> --research out/research/<host>/research.json
+pnpm qc <render-dir> --no-model                        # code checks only; always blocked
+```
+
+`<render-dir>` is what the render service writes: `film.mp4`, `film.manifest.json` and
+`film.quality/` (contact sheet, transition stills and sheet, phone sheet, `index.json`). The
+campaign is the file the manifest names, or `--campaign`. The report is printed and written to
+`<render-dir>/<campaign id>.qc/qc-report.json`, with the agent's own review and its events beside
+it. Exit 0 is pass, 1 is fail, 2 is an input error.
+
+### Code first
+
+`src/quality/` measures the film itself before any model looks. Every check is a pure function of
+measurements, and is tested in `test/quality.test.ts`.
+
+| Check              | Pass                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
+| `film-hash`        | The film's SHA-256 is the one the manifest records                                                                   |
+| `campaign-hash`    | The campaign file's SHA-256 is the one the film was rendered from                                                    |
+| `stills-from-film` | Contact and transition stills match the same frames decoded from the film, within 3 levels                           |
+| `gate`             | `validateCampaign` ok                                                                                                |
+| `claims-cited`     | No `CLAIM_UNBACKED`, `CLAIM_UNKNOWN` or `CLAIM_SUPERLATIVE`: no text states a number or superlative it does not cite |
+| `scene-registry`   | Scene types from the 15-type `sceneRegistry`, within its limits. Unknown types are a minor note for motion           |
+| `size`             | 1920 x 1080 or 4K for 16:9, and the same for 9:16 and 1:1: the aspect ratio of the format                            |
+| `fps`              | The campaign's fps                                                                                                   |
+| `frame-count`      | Exactly `sceneFrames(cut).durationInFrames` decoded frames                                                           |
+| `duration`         | `durationSeconds`, within one frame                                                                                  |
+| `audio-stream`     | An audio stream, unless the manifest says the render is muted                                                        |
+| `black-frames`     | No frame with every channel at 12 or below, outside a `t16` dip                                                      |
+| `frame-0`          | Pixel variance above 0, not black                                                                                    |
+| `static-runs`      | No run of more than 30 identical frames (MAD under 0.02 at 320 x 180) outside the end card                           |
+| `ground`           | A 20 x 20 ground patch within 3 levels of `brand.colors.background` on every scene's rest frame                      |
+| `claims-research`  | Every campaign claim is a research claim: the same quote, word for word, from the same page                          |
+| `brand-research`   | Background, primary and foreground are colours the Researcher measured (foreground may be black or white)            |
+
+The hook and CTA the manifest names are applied first, as the render step cut the film. A film
+whose hashes or stills do not match is blocked before any money is spent on a review.
+
+### Then the agent
+
+`br-quality-check` runs Sonnet 5.5 with `view_image`, `read_skill` and `session_spend` and nothing
+else: no shell, no files, no web, no computer. Its skill is `skills/quality-check`, pushed from the
+repo root. Code uploads the contact sheet, transitions sheet, phone sheet and every scene's rest
+frame (full size, decoded here from the film) as Naive files, starts one session with
+`output_schema`, and deletes the files afterwards. The agent reads the skill, opens every image,
+and submits a typed review: `pass` or `fail`, what each image showed, one entry per visual check,
+and issues with severity, scene, frame, owner (`director`, `art-director` or `motion`) and a fix.
+Timecodes are worked out in code from the frame.
+
+### The verdict is code's
+
+A review passes only when every code check passed, the agent passed it with no blocker or major
+issue, and the event stream shows a successful `view_image` on every image it was given. A review
+without the agent (`--no-model`), without a typed result, or with an image left unopened is
+blocked, whatever the agent said. Nothing passes without real rendered frames.
+
+### Drill: does it catch broken films?
+
+Run on 7 November 2026. Each broken film was rendered locally (`pnpm render --local` on a scratch
+export of `feat/motion-render`, so no computer was billed) or edited after rendering and then given
+fresh quality artifacts by the render service's own `writeQualityArtifacts`. The Linear campaign
+was written by hand from the Researcher's real `linear.app` result, standing in for the Director,
+with motion's scene types so the renderer can draw it.
+
+| Film                                             | How it was broken                                                                                                                                              | Code found                                                       | Agent found                                                                                                                | Verdict | Review cost |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------- | ----------- |
+| Nova 16:9, rendered on Naive (the "good" render) | Not broken                                                                                                                                                     | Everything passes                                                | Frame 0 is empty ground; subhead and labels at 25-40 px cap height against the skill's 78 px                               | fail    | $0.1647     |
+| Linear 16:9, local                               | Not broken                                                                                                                                                     | Everything passes, including claims and colours against research | Frame 0 empty; 3-line headlines; lines over 65% of the width; labels far smaller than headlines                            | fail    | $0.1630     |
+| Linear, text overflowing its box                 | Template defect, in the scratch copy only: the text box measured 2.5 times too wide                                                                            | Everything passes                                                | `inside-frame` major for motion in 3 scenes: headline cropped at both edges, clipped by the screenshot, off the right edge | fail    | $0.1537     |
+| Linear, wrong brand colour                       | `primary` and `accent` set to `#FF3B30`, which the site never uses                                                                                             | `brand-research` major for art-director: measured `#828FFF`      | Did not flag it: the campaign says the primary is red, so the film matches the campaign                                    | fail    | $0.1785     |
+| Linear, a number with no claim                   | Claim `ship-speed` ("Teams ship 2x faster with Linear.") added to the campaign and cited by "Ship 2x faster", so `validateCampaign` and the render gate passed | `claims-research` blocker for director, scene `workflow`, F270   | Raised the same blocker                                                                                                    | fail    | $0.1683     |
+| Linear, black frames                             | Frames 330-339 painted black after rendering, as a chunk that drew nothing would                                                                               | `black-frames` major for motion, 330-339, scene `workflow`       | `no-blank-flash` major at F330                                                                                             | fail    | $0.1819     |
+| Linear, frozen frames                            | Frames 161-210 replaced by frame 160 after rendering, as repeated frames would                                                                                 | `static-runs` major for motion, 160-210 (51 frames)              | Repeated the code finding                                                                                                  | fail    | $0.1610     |
+| Linear, campaign edited after render             | "Trusted by 90,000 teams", citing nothing, added to the campaign the film was rendered from                                                                    | `campaign-hash` blocker and `CLAIM_UNBACKED` blocker             | Not started: blocked before any spend                                                                                      | blocked | $0          |
+
+Every defect was caught, and by code wherever code can measure it; overflow is the one only the
+agent can see. Total review spend: $1.17 over seven sessions; the agent never had a computer.
+
+What the drill also showed:
+
+- **No current render passes.** Both unbroken films fail on thresholds in the skill: an empty
+  frame 0, story labels far under 78 px cap height, and headlines over 2 lines or 65% of the width.
+  These come from motion's placeholder scenes, which are being reconciled with the scene registry,
+  and they recur in every Linear review, so each broken film's finding is the one added on top.
+- **The agent varies on taste.** `accent-ration` failed in two of the six Linear reviews and passed
+  in four; the owner of the empty frame 0 was given as director in some reviews and motion in
+  others. The code checks do not vary.
+- **Wrong colours are code's to catch.** The agent judges the film against the campaign, and a
+  wrong colour in the campaign renders faithfully. `brand-research` catches it against what the
+  Researcher measured on the site.
+- **The agent's arithmetic is not trusted.** It once wrote frame 80 as 0:02.80, so timecodes are
+  now worked out in code from the frame it read off the labelled still.
+- The first three Linear reviews read the Researcher's `out/research/linear.app/research.json`;
+  a new Researcher run replaced it mid-drill, so the rest read a saved copy with the same brand and
+  the same six claims.
 
 ## Testing the capture tool locally
 

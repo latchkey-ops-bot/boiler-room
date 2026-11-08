@@ -15,7 +15,8 @@
     "agents:sync": "pnpm --filter @boiler-room/agents sync",
     "research": "pnpm --filter @boiler-room/agents research",
     "direct": "pnpm --filter @boiler-room/agents direct",
-    "art": "pnpm --filter @boiler-room/agents art"
+    "art": "pnpm --filter @boiler-room/agents art",
+    "qc": "pnpm --filter @boiler-room/agents qc"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"

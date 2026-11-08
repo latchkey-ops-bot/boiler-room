@@ -7,13 +7,14 @@ scenes render it, and the dashboard edits it. `campaign.json` is the contract be
 
 ## Layout
 
-| Path              | Contents                                                                                                                     |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `agents`          | `@boiler-room/agents`: every agent as a definition in code, `agents:sync`, and the Researcher with its capture tool and gate |
-| `packages/schema` | `@boiler-room/schema`: the campaign contract, `validateCampaign`, `sceneFrames`, and the JSON Schema agents write against    |
-| `apps/*`          | Deployable apps                                                                                                              |
-| `packages/*`      | Shared libraries                                                                                                             |
-| `services/*`      | Long-running services                                                                                                        |
+| Path              | Contents                                                                                                                                    |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agents`          | `@boiler-room/agents`: every agent as a definition in code, `agents:sync`, the Researcher with its capture tool and gate, and Quality Check |
+| `packages/schema` | `@boiler-room/schema`: the campaign contract, `validateCampaign`, `sceneFrames`, and the JSON Schema agents write against                   |
+| `apps/*`          | Deployable apps                                                                                                                             |
+| `skills`          | Company skills shared by people and agents, such as `quality-check`                                                                         |
+| `packages/*`      | Shared libraries                                                                                                                            |
+| `services/*`      | Long-running services                                                                                                                       |
 
 Workspace packages export TypeScript source directly. Nothing is built ahead of time, because
 Remotion and Next both transpile it.
@@ -34,6 +35,7 @@ Agents run on Naive. The API key is read from `~/.boiler-room.env` (`NAIVE_API_K
 ```sh
 pnpm agents:sync                      # create or version the agents on Naive from agents/
 pnpm research https://example.com     # research a site; the result lands in out/research/<host>/
+pnpm qc <render-dir> --research out/research/<host>/research.json   # review a rendered film
 ```
 
 See [`agents/README.md`](agents/README.md).
