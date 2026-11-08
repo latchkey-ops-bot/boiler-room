@@ -108,7 +108,7 @@
         {
           "id": "features-headline",
           "role": "headline",
-          "value": "Revise without losing a word",
+          "value": "Revise and lose nothing",
           "claimIds": []
         },
         { "id": "features-cause", "role": "label", "value": "Every change", "claimIds": [] },
@@ -127,7 +127,7 @@
         {
           "id": "compare-headline",
           "role": "headline",
-          "value": "Compare drafts at a glance",
+          "value": "See drafts side by side",
           "claimIds": []
         },
         { "id": "compare-cause", "role": "label", "value": "Old draft", "claimIds": [] },

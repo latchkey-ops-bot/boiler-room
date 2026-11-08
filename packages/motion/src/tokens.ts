@@ -195,12 +195,19 @@ export const hero = {
 export const card = {
   /** Cap top of the headline slot, as a share of the height. */
   headlineTop: { landscape: 0.16, portrait: 0.14, square: 0.14 },
-  /** The demo panel: width and height as shares of the frame, centred at `centreY` of the height. */
+  /** The headline is set at `capS` on at most this many lines, the sentence cards' limit. */
+  headlineLines: 2,
+  /**
+   * The demo panel: width and height as shares of the frame, centred at `centreY` of the height,
+   * unless that would bring its top within `slotGap` spec px of the headline slot.
+   */
   panel: {
     landscape: { width: 0.56, height: 0.5, centreY: 0.62 },
     portrait: { width: 0.86, height: 0.46, centreY: 0.56 },
     square: { width: 0.8, height: 0.52, centreY: 0.62 },
   },
+  /** The least space between the bottom of the two-line headline slot and the panel's top. */
+  slotGap: 36,
   panelTravel: 40,
   /** Node labels, as a share of the sentence cap height. */
   labelCap: 0.6,

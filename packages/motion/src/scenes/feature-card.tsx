@@ -6,10 +6,12 @@ import { RisingWords } from '../components/rising-words.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import {
   baselineOffset,
+  type FontMetrics,
+  fontMetrics,
   lineBox,
   type SpecFit,
   type SpecTypeStyle,
-  specFit,
+  specFitAtCap,
   specPx,
   useSpecFit,
 } from '../components/type.tsx';
@@ -52,15 +54,26 @@ export interface CardLayout {
   axis: 'x' | 'y';
 }
 
-/** The panel, and a node at each end of it: thirds side by side, or in a tall frame halves. */
-export function cardLayout(stage: Stage): CardLayout {
+/**
+ * The panel, and a node at each end of it: thirds side by side, or in a tall frame halves. The
+ * panel sits where the scene file puts it, or lower where the headline slot, `slot` from
+ * `slotBottom`, would come within `card.slotGap` of its top. It keeps its size as it moves down,
+ * so its nodes and crops are the size the render gate sized them at, and it is shortened only if
+ * it would otherwise leave the safe area.
+ */
+export function cardLayout(stage: Stage, slot?: number): CardLayout {
   const { width: W, height: H, orientation } = stage;
   const share = card.panel[orientation];
+  const height = H * share.height;
+  const top = Math.max(
+    H * share.centreY - height / 2,
+    slot === undefined ? 0 : slot + specPx(stage, card.slotGap),
+  );
   const panel = {
     x: (W - W * share.width) / 2,
-    y: H * share.centreY - (H * share.height) / 2,
+    y: top,
     width: W * share.width,
-    height: H * share.height,
+    height: Math.min(height, stage.safe.y + stage.safe.height - top),
   };
   const pad = specPx(stage, 36);
   const labelHeight = specPx(stage, 150);
@@ -161,25 +174,80 @@ const headlineStyle: SpecTypeStyle = {
 };
 
 /**
- * The widest the headline is set: the line box, or less where its drift would carry it past the
- * safe area. It drifts larger about the frame centre on every frame, to `dur` at the latest, so at
- * this width it is inside the safe area on the scene's last frame, however long the card runs. In
- * 16:9 a card would have to run over 9 s for that to be narrower than the line box.
+ * The widest a line of the headline is set: the line box, or the safe area where that is narrower,
+ * made narrower again by the drift. The headline drifts larger about its centre on every frame, to
+ * `dur` at the latest, so at this width no line is wider than the line box, 0.65 W in 16:9, or
+ * outside the safe area on any frame of the scene, however long the card runs.
  */
 export const headlineWidth = (stage: Stage, dur: number): number =>
-  Math.min(lineBox(stage), stage.safe.width / typeDrift(dur));
-
-/** The top of the headline's line box: its cap top sits on the slot, the same on every card. */
-const headlineLineTop = (fit: SpecFit, top: number) =>
-  top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
+  Math.min(lineBox(stage), stage.safe.width) / typeDrift(dur);
 
 /**
- * The headline anchor's box at a spec frame: the fitted line, centred in the slot, as it drifts
- * larger about its centre. Its rack offset is an entry move, not part of the box.
+ * The headline at the sentence cap height, `capS`, on at most two lines of `headlineWidth`: fit or
+ * fail, as `docs/motion/scenes/README.md` sets it. It is never set smaller to fit, so `fits` is
+ * false for copy that needs a smaller size or more lines, and the scene refuses to render it.
+ */
+export const fitCardHeadline = (
+  value: string,
+  stage: Stage,
+  dur: number,
+  fonts: { display: string; body: string },
+): { fit: SpecFit; size: number; fits: boolean } =>
+  specFitAtCap(
+    value,
+    headlineStyle,
+    stage,
+    { width: headlineWidth(stage, dur), maxLines: card.headlineLines },
+    fonts,
+  );
+
+/** Why a headline that did not fit cannot be set, naming the scene and the text id. */
+export const headlineProblem = (
+  sceneId: string,
+  headline: { id: string; value: string },
+  stage: Pick<Stage, 'width' | 'height'>,
+  width: number,
+): string =>
+  `Scene "${sceneId}", text "${headline.id}": the feature-card headline "${headline.value}" does not fit on ${card.headlineLines} lines of ${Math.round(width)} px at the sentence cap height (${specType.capS} px) at ${stage.width}x${stage.height}. Shorten the headline: a feature card never sets it below its cap height.`;
+
+/** Thrown while rendering a feature-card whose headline cannot be set at its cap height. */
+export class FeatureCardLayoutError extends Error {
+  constructor(problem: string) {
+    super(`LAYOUT_UNFIT: ${problem}`);
+    this.name = 'FeatureCardLayoutError';
+  }
+}
+
+/** The top of the headline's first line box: its cap top sits on the slot, the same on every card. */
+const headlineLineTop = (
+  fit: Pick<SpecFit, 'fontSize' | 'lineHeight' | 'metrics'>,
+  top: number,
+): number => top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
+
+/**
+ * The lowest the headline slot reaches: the bottom of two line boxes at `capS` in the display
+ * font, line 1's cap top on the slot, as they drift larger about their centre to the scene's last
+ * frame. A one-line headline stays above it too, so the panel under it is in one place on every
+ * card of a group, whatever each card's headline.
+ */
+export function slotBottom(stage: Stage, metrics: FontMetrics, dur: number): number {
+  const fontSize = Math.ceil(specPx(stage, specType.capS) / metrics.cap - 1e-9);
+  const lineHeight = specType.lineHeight;
+  const lineTop = headlineLineTop(
+    { fontSize, lineHeight, metrics },
+    stage.height * card.headlineTop[stage.orientation],
+  );
+  const height = card.headlineLines * fontSize * lineHeight;
+  return lineTop + (height * (1 + typeDrift(dur))) / 2;
+}
+
+/**
+ * The headline anchor's box at a spec frame: the fitted lines, centred in the slot, as they drift
+ * larger about their centre. Its rack offset is an entry move, not part of the box.
  */
 export function headlineBox(fit: SpecFit, stage: Stage, top: number, f: number): Rect {
   const scale = typeDrift(f);
-  const height = fit.fontSize * fit.lineHeight;
+  const height = fit.fontSize * fit.lineHeight * Math.max(1, fit.lines.length);
   const lineTop = headlineLineTop(fit, top);
   const centreY = lineTop + height / 2;
   return {
@@ -192,25 +260,21 @@ export function headlineBox(fit: SpecFit, stage: Stage, top: number, f: number):
 
 const Headline = ({
   id,
-  value,
+  fit,
   top,
   f,
   rack,
   accent,
 }: {
   id: string;
-  value: string;
+  fit: SpecFit;
   top: number;
   f: number;
   rack: { blur: number; y: number };
   accent: Accent | undefined;
 }) => {
-  const { stage, dur } = useScene();
+  const { stage } = useScene();
   const { colors, fonts } = useBrand();
-  const fit = useSpecFit(value, headlineStyle, stage, {
-    width: headlineWidth(stage, dur),
-    maxLines: 1,
-  });
   const lineTop = headlineLineTop(fit, top);
   const { blur, y } = rack;
   let index = -1;
@@ -324,16 +388,26 @@ const NodeLabel = ({
 };
 
 const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
-  const { stage, images } = useScene();
+  const { stage, images, dur } = useScene();
   const { f, b, inT } = useSceneClock();
-  const { colors, radius } = useBrand();
+  const { colors, radius, fonts } = useBrand();
   const headline = scene.text.find(({ role }) => role === 'headline');
   if (!headline) throw new Error(`Scene "${scene.id}" has no headline. validateFilm checks this.`);
+  const fitted = fitCardHeadline(headline.value, stage, dur, fonts);
+  if (!fitted.fits) {
+    throw new FeatureCardLayoutError(
+      headlineProblem(scene.id, headline, stage, headlineWidth(stage, dur)),
+    );
+  }
   const labels = scene.text.filter(({ role }) => role === 'label');
-  const layout = cardLayout(stage);
+  const metrics = fontMetrics(fonts.display, headlineStyle.weight);
+  const layout = cardLayout(stage, slotBottom(stage, metrics, dur));
   const demo = demoOf(props, images.length);
-  // On T1 the headline and panel enter together on the seam. After T3 and T5 the headline is at
-  // full ink from its first frame, racking into focus, and the panel rises on frame 6.
+  // On T1 the headline and panel enter together on the seam, as the scene file says, never on the
+  // anchor carry the resolver names when the outgoing scene has a headline too: a carry between two
+  // different headlines is a morph, drawn at the outgoing headline's place and size, which put this
+  // headline mid-frame under the panel. After T3 and T5 the headline is at full ink from its first
+  // frame, racking into focus, and the panel rises on frame 6.
   const seamedIn = inT === 't1';
   const racked = seamedIn ? { blur: 0, y: 0 } : blink(f, b);
   const panelShown = seamedIn || f >= card.beats.panel;
@@ -363,19 +437,11 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
   const light = (f - beats.causeLight) / beats.lightFrames;
 
   // No corner mark: the scene file has none, and in 9:16 the headline slot sits just under the
-  // corner, where the mark would crowd it.
+  // corner, where the mark would crowd it. The headline is drawn last, above the panel, so nothing
+  // the scene draws can cover it, and its layer has no anchor id, so a T1 moves it on `seamIn`
+  // with the panel rather than carrying it.
   return (
     <>
-      <SeamLayer anchor="headline">
-        <Headline
-          id={headline.id}
-          value={headline.value}
-          top={layout.headlineTop}
-          f={f}
-          rack={racked}
-          accent={props.accent}
-        />
-      </SeamLayer>
       {panelShown ? (
         <SeamLayer>
           <div style={{ inset: 0, position: 'absolute', transform: `translateY(${down}px)` }}>
@@ -455,6 +521,16 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
           </div>
         </SeamLayer>
       ) : null}
+      <SeamLayer>
+        <Headline
+          id={headline.id}
+          fit={fitted.fit}
+          top={layout.headlineTop}
+          f={f}
+          rack={racked}
+          accent={props.accent}
+        />
+      </SeamLayer>
     </>
   );
 };
@@ -482,13 +558,7 @@ export const featureCard = defineScene<FeatureCardProps>({
       exit: anchorVelocity.x,
       box: (f, { stage, text, theme, dur }) => {
         const value = text.find(({ role }) => role === 'headline')?.value ?? '';
-        const fit = specFit(
-          value,
-          headlineStyle,
-          stage,
-          { width: headlineWidth(stage, dur), maxLines: 1 },
-          theme.fonts,
-        );
+        const { fit } = fitCardHeadline(value, stage, dur, theme.fonts);
         return headlineBox(fit, stage, cardLayout(stage).headlineTop, f);
       },
     },
