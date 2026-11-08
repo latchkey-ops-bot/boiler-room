@@ -1,6 +1,8 @@
+import { sceneRegistry } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
 import { planFilm } from '../src/film/plan.ts';
 import { FilmRejected, prepareFilm } from '../src/film/prepare.ts';
+import { IMPLEMENTED_SCENE_TYPES } from '../src/scenes/registry.ts';
 import { at, exampleProbe, novaCopy, quillhavenCopy } from './fixtures.ts';
 
 const novaPlan = () =>
@@ -92,10 +94,13 @@ describe('prepareFilm', () => {
 
   it('refuses a scene type that has no template yet, by name', async () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 1).type = 'proof-bars';
+    const unbuilt = Object.keys(sceneRegistry).find(
+      (type) => !IMPLEMENTED_SCENE_TYPES.includes(type),
+    ) as string;
+    at(campaign.scenes, 1).type = unbuilt;
     const rejection = prepareFilm({ campaign, format: '16:9' }, exampleProbe());
     await expect(rejection).rejects.toThrow(
-      /SCENE_TYPE_UNBUILT at scenes\[1\]\.type: Scene type "proof-bars" is in the scene library, but motion has no template for it yet/,
+      `SCENE_TYPE_UNBUILT at scenes[1].type: Scene type "${unbuilt}" is in the scene library, but motion has no template for it yet`,
     );
   });
 
