@@ -37,6 +37,7 @@ function setup(primary = '#5850EC') {
 const keepAll = (proposals: ReturnType<typeof setup>['proposals']): ArtDecision['scenes'] =>
   proposals.map((proposal) => ({
     scene_id: proposal.sceneId,
+    seen: true,
     asset_ids: proposal.assetIds,
     reason: 'The default fits.',
   }));
@@ -50,7 +51,9 @@ describe('gateDecision', () => {
     const gate = gateDecision(
       {
         scenes,
-        generated: [{ asset_id: 'hero-texture', accept: true, reason: 'Abstract, no glyphs.' }],
+        generated: [
+          { asset_id: 'hero-texture', seen: true, accept: true, reason: 'Abstract, no glyphs.' },
+        ],
         flags: [],
       },
       proposals,
@@ -67,7 +70,7 @@ describe('gateDecision', () => {
     const scenes = keepAll(proposals)
       .filter((entry) => entry.scene_id !== 'queue')
       .map((entry) => (entry.scene_id === 'hero' ? { ...entry, asset_ids: ['logo'] } : entry));
-    scenes.push({ scene_id: 'event', asset_ids: [], reason: 'x' });
+    scenes.push({ scene_id: 'event', seen: true, asset_ids: [], reason: 'x' });
     const gate = gateDecision({ scenes, generated: [], flags: [] }, proposals, infos, generated);
     const messages = gate.problems.map((problem) => `${problem.sceneId}: ${problem.message}`);
     expect(messages).toEqual([
@@ -78,6 +81,28 @@ describe('gateDecision', () => {
     ]);
     expect(gate.picks.get('hero')).toMatchObject({ assetIds: ['home-screen'], source: 'default' });
     expect(gate.rejected.get('hero-texture')).toMatch(/Not inspected/);
+  });
+
+  it('keeps the ranking for a scene and declares no image that the agent did not see', () => {
+    const { proposals, infos, generated } = setup();
+    const scenes = keepAll(proposals).map((entry) =>
+      entry.scene_id === 'team' ? { ...entry, seen: false, asset_ids: ['about-screen'] } : entry,
+    );
+    const gate = gateDecision(
+      {
+        scenes,
+        generated: [{ asset_id: 'hero-texture', seen: false, accept: true, reason: 'Looks fine.' }],
+        flags: [],
+      },
+      proposals,
+      infos,
+      generated,
+    );
+    expect(gate.problems).toEqual([]);
+    expect(gate.picks.get('team')).toMatchObject({ source: 'default' });
+    expect(gate.picks.get('team')?.reason).toMatch(/could not see every candidate/);
+    expect(gate.accepted.size).toBe(0);
+    expect(gate.rejected.get('hero-texture')).toMatch(/^Not seen/);
   });
 
   it('declares nothing generated without a decision', () => {
@@ -94,8 +119,8 @@ describe('applyArt', () => {
     const decision = artDecisionSchema.parse({
       scenes: keepAll(proposals),
       generated: [
-        { asset_id: 'event-field', accept: true, reason: 'A clean gradient.' },
-        { asset_id: 'hero-texture', accept: false, reason: 'Letters in the corner.' },
+        { asset_id: 'event-field', seen: true, accept: true, reason: 'A clean gradient.' },
+        { asset_id: 'hero-texture', seen: true, accept: false, reason: 'Letters in the corner.' },
       ],
       flags: [],
     });

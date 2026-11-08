@@ -113,7 +113,7 @@ export function generationNeeds(campaign: Campaign, style: StyleDecision): Gener
       purpose: 'hero-texture',
       sceneIds: [chain.id],
       aspectRatio: '1:1',
-      prompt: `Seamless abstract surface texture for the faces of a cube, seen straight on. Matte, softly lit, a fine regular geometric pattern in ${colors.primary} on ${colors.background}, low contrast, evenly filling the square to every edge. ${NEVER}`,
+      prompt: `Flat, full-bleed, seamless abstract surface texture, seen straight on: a fine regular geometric pattern in ${colors.primary} on ${colors.background}, matte, low contrast. The pattern runs off all four edges of the square. No border, no frame, no tile, no slab, no object, no shadow, no perspective. ${NEVER}`,
     });
   }
   return needs;

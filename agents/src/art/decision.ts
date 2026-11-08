@@ -15,6 +15,11 @@ export const artDecisionSchema = z.strictObject({
     .array(
       z.strictObject({
         scene_id: slug,
+        seen: z
+          .boolean()
+          .describe(
+            "True only if every one of this scene's candidate pictures arrived and you looked at it.",
+          ),
         asset_ids: z
           .array(slug)
           .describe("In order. Only ids from this scene's candidates, within its min and max."),
@@ -29,10 +34,11 @@ export const artDecisionSchema = z.strictObject({
     .array(
       z.strictObject({
         asset_id: slug,
+        seen: z.boolean().describe('True only if the picture arrived and you looked at all of it.'),
         accept: z
           .boolean()
           .describe(
-            'True only if the image is abstract: no text, letters, digits, logos, interface, people, or anything that could pass for a screenshot or proof.',
+            'True only if the image is abstract (no text, letters, digits, logos, interface, people, or anything that could pass for a screenshot or proof) and fills the frame edge to edge.',
           ),
         reason: z.string().min(1).describe('What you saw.'),
       }),

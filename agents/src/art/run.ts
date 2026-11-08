@@ -522,7 +522,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
   for (const back of sentBack)
     say(`sent back: ${back.scene_id}: ${back.substitution}. ${back.why}`);
   say(
-    `cost: session ${usd(sessionMicro)}, images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `, balance change ${usd(report.cost.balance_delta_micro_usd)}` : ''}.`,
+    `cost: session ${usd(sessionMicro)}, images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `. Org balance moved ${usd(report.cost.balance_delta_micro_usd)} meanwhile, which includes any other agent running in the org` : ''}.`,
   );
   if (!validation.ok) return 1;
   return sentBack.length > 0 ? 3 : 0;

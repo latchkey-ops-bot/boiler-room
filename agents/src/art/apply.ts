@@ -51,12 +51,19 @@ export function gateDecision(
     }
     const found = checkPick(proposal, entry.asset_ids, infos);
     problems.push(...found);
-    picks.set(
-      proposal.sceneId,
-      found.length === 0
-        ? { assetIds: entry.asset_ids, source: 'agent', reason: entry.reason }
-        : fallback,
-    );
+    if (found.length > 0) picks.set(proposal.sceneId, fallback);
+    else if (!entry.seen) {
+      // A choice made without seeing every candidate is no better than the ranking.
+      picks.set(proposal.sceneId, {
+        ...fallback,
+        reason: `The agent could not see every candidate, so the code ranking stands. ${entry.reason}`,
+      });
+    } else
+      picks.set(proposal.sceneId, {
+        assetIds: entry.asset_ids,
+        source: 'agent',
+        reason: entry.reason,
+      });
   }
   for (const id of entries.keys()) {
     if (!reviewed.has(id)) {
@@ -80,6 +87,8 @@ export function gateDecision(
         });
       }
       rejected.set(image.need.assetId, 'Not inspected, so not declared.');
+    } else if (!verdict.seen) {
+      rejected.set(image.need.assetId, `Not seen, so not declared. ${verdict.reason}`);
     } else if (verdict.accept) accepted.set(image.need.assetId, verdict.reason);
     else rejected.set(image.need.assetId, verdict.reason);
   }
