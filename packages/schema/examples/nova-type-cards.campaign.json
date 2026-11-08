@@ -60,7 +60,7 @@
         {
           "id": "problem-line",
           "role": "headline",
-          "value": "Every build waits in one line.",
+          "value": "Every build waits its turn.",
           "claimIds": []
         }
       ],

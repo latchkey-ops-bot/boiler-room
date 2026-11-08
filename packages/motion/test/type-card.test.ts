@@ -21,6 +21,7 @@ import {
   typeCardEntry,
   typeCardState,
 } from '../src/scenes/type-card.tsx';
+import { seamTransform } from '../src/transitions/seam-layer.tsx';
 import { buildTimeline } from '../src/transitions/timeline.ts';
 
 const landscape = stageFor(1920, 1080);
@@ -233,7 +234,7 @@ describe('type-card frames', () => {
 
   it('shows every word at rest from frame 0 on a T1, each moving seamIn times its word-gap gain', () => {
     const layout = twoLines();
-    const entry: TypeCardEntry = { kind: 't1', seam: seamX, carried: false };
+    const entry: TypeCardEntry = { kind: 't1', seam: seamX };
     for (const f of [0, 1, 5, 13, 14]) {
       const state = typeCardState(f, layout, entry);
       for (const row of state.lines) {
@@ -256,9 +257,24 @@ describe('type-card frames', () => {
     expect(first[0]?.x).toBeGreaterThan(0);
   });
 
-  it('leaves the move to the carry when a T1 carries the headline anchor', () => {
-    const state = typeCardState(0, twoLines(), { kind: 't1', seam: seamX, carried: true });
-    expect(state.lines.flatMap(({ words }) => words.map(({ x }) => x))).toEqual([0, 0, 0, 0, 0, 0]);
+  it('moves its block on the seam even where the resolver names a carry, at full size', () => {
+    // The block's layer has no anchor id, so the carry the resolver names is not drawn: the layer
+    // takes seamIn, displaced against the seam and moving with it, never a box-to-box scale.
+    const into = { name: 't1', seam: seamX, carry: 'headline' } as never;
+    const box = { x: 0, y: 0, width: 100, height: 100 };
+    const transform = (f: number) =>
+      seamTransform({
+        f,
+        dur: 48,
+        in: into,
+        out: undefined,
+        anchors: [{ id: 'headline', box: () => box }],
+        carryFrom: { x: 0, y: 0, width: 50, height: 50 },
+        stage: landscape,
+      });
+    expect(transform(0)).toBe(`translateX(${seamIn(0, seamX)}px)`);
+    expect(transform(0)).not.toContain('scale');
+    expect(transform(14)).toBeUndefined();
   });
 
   it('racks every word in at full ink after a T5: blur 6, 3, 1.2, 0 and y 13, 7, 4, 1, 0', () => {
@@ -308,7 +324,7 @@ describe('type-card frames', () => {
     for (const entry of [
       native,
       { kind: 't5', blank: 2 } as const,
-      { kind: 't1', seam: seamX, carried: false } as const,
+      { kind: 't1', seam: seamX } as const,
     ]) {
       const inOrder = frames(0, 60).map((f) => typeCardState(f, layout, entry));
       const backwards = frames(0, 60)
@@ -321,27 +337,10 @@ describe('type-card frames', () => {
 
   it('chooses the entry from the transition the resolver chose', () => {
     const t1 = { name: 't1', seam: seamX, carry: 'headline' } as const;
-    expect(typeCardEntry({ in: undefined, carryFrom: undefined, b: 0 })).toEqual(native);
-    expect(typeCardEntry({ in: { name: 't3' } as never, carryFrom: undefined, b: 0 })).toEqual(
-      native,
-    );
-    expect(typeCardEntry({ in: { name: 't5' } as never, carryFrom: undefined, b: 5 })).toEqual({
-      kind: 't5',
-      blank: 5,
-    });
-    const box = { x: 0, y: 0, width: 1, height: 1 };
-    expect(typeCardEntry({ in: t1 as never, carryFrom: box, b: 0 })).toEqual({
-      kind: 't1',
-      seam: seamX,
-      carried: true,
-    });
-    expect(
-      typeCardEntry({ in: { ...t1, carry: undefined } as never, carryFrom: undefined, b: 0 }),
-    ).toEqual({
-      kind: 't1',
-      seam: seamX,
-      carried: false,
-    });
+    expect(typeCardEntry({ in: undefined, b: 0 })).toEqual(native);
+    expect(typeCardEntry({ in: { name: 't3' } as never, b: 0 })).toEqual(native);
+    expect(typeCardEntry({ in: { name: 't5' } as never, b: 5 })).toEqual({ kind: 't5', blank: 5 });
+    expect(typeCardEntry({ in: t1 as never, b: 0 })).toEqual({ kind: 't1', seam: seamX });
   });
 });
 

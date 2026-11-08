@@ -7,8 +7,13 @@
  *
  * Everything that decides a frame is a pure function here: the layout from the copy and the
  * measured font, the frames each word arrives on, and each word's state at a spec frame. The
- * component only draws that state, and the anchor's `box` reads the same layout, so a carry across
- * a T1 seam lands where the words are.
+ * component only draws that state, and the anchor's `box` reads the same layout.
+ *
+ * On a T1 entry every word moves on the seam, as the scene file says, never on the shared-anchor
+ * carry: a carry between two different headlines is a morph, not a seam. It draws the type at the
+ * outgoing block's height, so a two-line block arriving from a one-line block starts at half its
+ * size, below its cap height, and it starts from where the outgoing block would be without its
+ * exit ramp, so the cut jumps back against the seam instead of continuing it.
  */
 import type { TextRole } from '@boiler-room/schema';
 import { z } from 'zod';
@@ -379,25 +384,16 @@ export function typeCardBeats(
 /** How the card is entered, from the transition the resolver chose. */
 export type TypeCardEntry =
   | { kind: 'native' }
-  | { kind: 't1'; seam: Seam | undefined; carried: boolean }
+  | { kind: 't1'; seam: Seam | undefined }
   | { kind: 't5'; blank: number };
 
 /**
  * T1 enters on the seam, T5 on the blink and rack, and everything else, T3 included, on the
- * native entry. On a T1 that carries the headline anchor from the outgoing scene, the carry is the
- * whole move.
+ * native entry. A T1 enters on the seam even where the resolver names a carry.
  */
-export function typeCardEntry(
-  runtime: Pick<SceneRuntime, 'in' | 'carryFrom' | 'b'>,
-): TypeCardEntry {
+export function typeCardEntry(runtime: Pick<SceneRuntime, 'in' | 'b'>): TypeCardEntry {
   const incoming = runtime.in;
-  if (incoming?.name === 't1') {
-    return {
-      kind: 't1',
-      seam: incoming.seam,
-      carried: incoming.carry === 'headline' && runtime.carryFrom !== undefined,
-    };
-  }
+  if (incoming?.name === 't1') return { kind: 't1', seam: incoming.seam };
   if (incoming?.name === 't5') return { kind: 't5', blank: runtime.b };
   return { kind: 'native' };
 }
@@ -425,7 +421,7 @@ const still = (visible: boolean): WordState => ({ visible, x: 0, y: 0 });
  * Every word of the card at a spec frame, for an entry. Native: words pop in at full opacity and
  * rise on `wordRise`, the name rises as one unit, and line 2 pushes line 1 up. T1: every word at
  * rest and visible from frame 0, each word of a line moving `seamIn * gain(i)` with the word-gap
- * gain, unless the anchor is carried. T5: every word at full ink from the blank frames on, racked
+ * gain. T5: every word at full ink from the blank frames on, racked
  * into focus as one block. The drift runs on every frame.
  */
 export function typeCardState(
@@ -446,9 +442,8 @@ export function typeCardState(
   }
 
   if (entry.kind === 't1') {
-    const { seam, carried } = entry;
-    const lateral = seam !== undefined && seam.axis === 'x' && !carried;
-    const offset = lateral ? seamIn(f, seam) : 0;
+    const { seam } = entry;
+    const offset = seam !== undefined && seam.axis === 'x' ? seamIn(f, seam) : 0;
     return {
       drift,
       blur: 0,
@@ -491,8 +486,11 @@ const TypeCard = ({ scene, props }: SceneProps<TypeCardProps>) => {
   const layout = typeCardLayout(scene.text, variantOf(props), stage, fonts, scene.id);
   const state = typeCardState(f, layout, typeCardEntry(runtime));
   const { centre } = layout;
+  // The block is a seam layer with no anchor id, so a T1 moves it on `seamIn` and never carries
+  // it: see the note at the top of this file. The anchor is still declared below, for the
+  // resolver's velocities and for a scene that carries from this one.
   return (
-    <SeamLayer anchor="headline">
+    <SeamLayer>
       <div
         style={{
           inset: 0,
