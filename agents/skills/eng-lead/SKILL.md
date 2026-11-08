@@ -45,7 +45,10 @@ file.
    `git fetch origin pull/<n>/head:pr-<n> && git checkout --detach pr-<n>`, then run
    `pnpm install --frozen-lockfile && pnpm lint && pnpm typecheck && pnpm test` in a script run in
    the background, because a `bash` call is killed after about 30 seconds, and poll its log until it
-   prints its exit line. The engineer's note saying the checks pass is not a check. A pull request
+   prints its exit line. Your computer has 1 GiB of memory, so turn on 2 GiB of swap first, once per
+   computer, or the checks are killed with exit 137 (seen in the role evals on 2026-11-08):
+   `swapon --show | grep -q swapfile || sudo swapon /swapfile || (sudo fallocate -l 2G /swapfile &&
+   sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile)`. The engineer's note saying the checks pass is not a check. A pull request
    whose checks fail has failed review: go to step 7, and do not merge it.
 4. Merge each pull request that passed review and its checks into `dev`, squashed, with
    `curl --netrc -s -X PUT https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>/merge`

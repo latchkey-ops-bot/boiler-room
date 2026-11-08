@@ -60,6 +60,12 @@ export interface SnapCard {
   id: string;
   /** The seed key, for a card the harness wrote. */
   seed: string | null;
+  /**
+   * Who wrote it: `harness`, `schedule` (a sweep's standing card), the label of the session under
+   * test that created it, `stray` when only a session the test cancelled created a card with this
+   * title, or `unknown`. Only `stray` cards are left out of the checks.
+   */
+  author: string;
   title: string;
   body: string;
   status: Status;

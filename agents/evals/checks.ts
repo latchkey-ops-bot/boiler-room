@@ -3,8 +3,9 @@ import { type Check, type Context, check, type SnapCard, type Snapshot } from '.
 
 /** Cards the agents wrote, not the harness. The sweep's standing cards are the schedule's. */
 export function createdCards(snapshot: Snapshot): SnapCard[] {
+  // A card only a cancelled stray session wrote is not the agent under test's.
   return snapshot.cards.filter(
-    (card) => card.seed === null && !card.title.startsWith('Recurring:'),
+    (card) => card.seed === null && !card.title.startsWith('Recurring:') && card.author !== 'stray',
   );
 }
 

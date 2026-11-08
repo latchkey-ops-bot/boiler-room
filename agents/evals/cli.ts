@@ -5,6 +5,7 @@ import { GithubApi } from './github.ts';
 import { fullCleanup, readState, runScenario, type ScenarioResult } from './harness.ts';
 import { judgeConfig } from './judge.ts';
 import { teardown } from './practice.ts';
+import { markdown, readSuites } from './report.ts';
 import { ceoScenarios } from './scenarios/ceo.ts';
 import { leadScenarios } from './scenarios/eng-lead.ts';
 import { engineerScenarios } from './scenarios/engineer.ts';
@@ -17,6 +18,7 @@ import type { Scenario } from './types.ts';
  *   prepare --only id                                                    seeds a scenario whose cards must age
  *   cleanup                                                              deletes every br-eval- agent, skill, computer, PR and branch
  *   list                                                                 lists the scenarios
+ *   report                                                               scores the latest run of each scenario, as Markdown
  */
 
 export const SCENARIOS: Scenario[] = [...ceoScenarios, ...leadScenarios, ...engineerScenarios];
@@ -42,6 +44,11 @@ const pick = () => {
       (!values.role || scenario.role === values.role) && (!only || only.includes(scenario.id)),
   );
 };
+
+if (command === 'report') {
+  console.log(markdown(readSuites(new URL('./results/', import.meta.url))));
+  process.exit(0);
+}
 
 if (command === 'list') {
   for (const scenario of SCENARIOS) {
@@ -78,7 +85,7 @@ if (command === 'prepare') {
 
 if (command !== 'run') throw new Error(`Unknown command ${command}.`);
 
-const suite = `s${new Date().toISOString().slice(5, 16).replace(/[-T:]/g, '')}`;
+const suite = `s${new Date().toISOString().slice(5, 19).replace(/[-T:]/g, '')}`;
 const budget = Number(values.budget) * 1e6;
 const scenarios = pick();
 // Leftovers of a crashed run go first: teams over two hours old, except one prepared for an aged

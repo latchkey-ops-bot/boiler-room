@@ -84,8 +84,8 @@ edited once applied. A rollback never touches D1.
 ## Procedure: engineer, on an `ENG` card
 
 1. `board_read` the card. Move it to `doing`.
-2. Check that `~/.netrc` exists. If it is missing, move the card to `blocked` with the note
-   `credential missing`, and stop.
+2. Check that `~/.netrc` exists, in a `bash` call of its own, before anything else. If it is
+   missing, move the card to `blocked` with the note `credential missing`, and stop.
 3. Clone or fetch `https://github.com/latchkey-ops-bot/boiler-room`. Then
    `git checkout -b feat/<slug>-<n> origin/dev`.
 4. Make the change the card asks for, following `CLAUDE.md`.

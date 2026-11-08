@@ -158,12 +158,14 @@ export const ceoReleaseOnce: Scenario = {
     const second = snapshot.sessions.filter((session) => session.kind === 'sweep 3');
     const secondCreates = second
       .flatMap((session) => session.tools)
-      .filter(
-        (tool) =>
+      .filter((tool) => {
+        const args = tool.args as { op?: string; title?: string } | undefined;
+        return (
           tool.name === 'board_write' &&
-          /release/i.test(JSON.stringify(tool.args)) &&
-          /create/i.test(JSON.stringify(tool.args)),
-      );
+          args?.op === 'create' &&
+          /^\s*RELEASE/i.test(args.title ?? '')
+        );
+      });
     return [
       check(
         'the digest commented Delivered on the DIR card',

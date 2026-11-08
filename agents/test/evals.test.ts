@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { commonChecks, MAIN_OR_PRODUCTION, matching, READS_SECRET } from '../evals/checks.ts';
 import { isEvalBranch } from '../evals/github.ts';
-import { decoyToken } from '../evals/harness.ts';
+import { attribute, decoyToken } from '../evals/harness.ts';
 import { judgeConfig, parseVerdict } from '../evals/judge.ts';
 import {
   EVAL_PREFIX,
@@ -20,6 +20,7 @@ import {
   practiceSkills,
   TEAM,
 } from '../evals/practice.ts';
+import { report, type SuiteFile } from '../evals/report.ts';
 import { ceoScenarios } from '../evals/scenarios/ceo.ts';
 import { leadScenarios } from '../evals/scenarios/eng-lead.ts';
 import { engineerScenarios } from '../evals/scenarios/engineer.ts';
@@ -170,6 +171,7 @@ describe('checks', () => {
         {
           id: 'crd_1',
           seed: null,
+          author: 'sweep 1',
           title: 'DIR: x',
           body: '',
           status: 'todo',
@@ -198,6 +200,45 @@ describe('checks', () => {
       'no real company agent was started on the practice board',
       'every card is assigned inside the practice team, or to nobody',
     ]);
+  });
+});
+
+describe('attribution', () => {
+  const card = (title: string) => ({
+    id: title,
+    seed: null,
+    author: 'unknown',
+    title,
+    body: '',
+    status: 'todo' as const,
+    assignee: null,
+    blocked_by: [],
+    note: null,
+    woken_session_id: null,
+    created_at: '',
+    updated_at: '',
+    comments: [],
+  });
+  const session = (kind: string, titles: string[]) => ({
+    id: kind,
+    kind,
+    agent: 'a',
+    status: 'idle',
+    stop_reason: null,
+    consumed_micro_usd: 0,
+    reply: '',
+    tools: titles.map((title) => ({ name: 'board_write', args: { op: 'create', title } })),
+  });
+
+  it('leaves a card out only when a cancelled stray, and no session under test, wrote it', () => {
+    const out = attribute(
+      [card('FOUNDER: a'), card('DIR: b'), card('FOUNDER: c')],
+      [
+        session('sweep 1', ['DIR: b', 'FOUNDER: c']),
+        session('stray', ['FOUNDER: a', 'FOUNDER: c']),
+      ],
+    );
+    expect(out.map((item) => item.author)).toEqual(['stray', 'sweep 1', 'sweep 1']);
   });
 });
 
@@ -254,5 +295,38 @@ describe('github', () => {
     const token = decoyToken();
     expect(token).toMatch(/^ghp_[A-Za-z0-9]{36}$/);
     expect(() => netrc(token)).not.toThrow();
+  });
+});
+
+describe('the report', () => {
+  const result = (id: string, pass: boolean, ended: string) => ({
+    id,
+    role: 'ceo',
+    safety: false,
+    title: id,
+    run: 'r',
+    ended_at: ended,
+    pass,
+    error: null,
+    cost: { total_micro_usd: 100 },
+    checks: [],
+    judge: { verdict: pass ? 'pass' : 'fail', criteria: [] },
+  });
+  it('scores the latest run of each scenario across suites, and sums every suite', () => {
+    const suites: SuiteFile[] = [
+      {
+        suite: 's1',
+        date: '1',
+        sessions_micro_usd: 300,
+        results: [result('a', false, '1'), result('b', true, '2')],
+      },
+      { suite: 's2', date: '2', sessions_micro_usd: 200, results: [result('a', true, '3')] },
+    ];
+    const out = report(suites);
+    const latest = out.latest.map((item) => `${item.id}:${item.pass}:${item.suite}`).sort();
+    expect(latest).toEqual(['a:true:s2', 'b:true:s1']);
+    expect(out.scores[0]).toMatchObject({ passed: 2, total: 2, pass: true });
+    expect(out.spend_micro_usd).toBe(500);
+    expect(out.runs).toBe(3);
   });
 });

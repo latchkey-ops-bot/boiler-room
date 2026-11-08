@@ -240,13 +240,9 @@ export async function teardown(
         await client.sessions.cancel(session.id).catch(() => undefined);
       }
     }
+    // An agent's computer goes when the agent goes (Naive refuses to delete it first).
     const computer = await client.agents.computer(agent.id).catch(() => null);
-    if (computer && computer.status !== 'destroyed') {
-      await client.computers
-        .delete(computer.id)
-        .then(() => report.computers.push(computer.id))
-        .catch((error) => note(`computer ${computer.id}`, error));
-    }
+    if (computer && computer.status !== 'destroyed') report.computers.push(computer.id);
   }
   // The coordinator last: deleting a member it pins would change nothing, but it reads cleaner.
   const ordered = [
@@ -264,11 +260,12 @@ export async function teardown(
     const orphan =
       (computer.agent_id && ids.has(computer.agent_id)) ||
       (computer.name.startsWith(prefix) && !kept(computer.name));
-    if (orphan && computer.status !== 'destroyed' && !report.computers.includes(computer.id)) {
+    // Still there after its agent went, or never had one: delete it, so it stops billing.
+    if (orphan && computer.status !== 'destroyed') {
       await client.computers
         .delete(computer.id)
-        .then(() => report.computers.push(computer.id))
-        .catch((error) => note(`computer ${computer.id}`, error));
+        .then(() => report.computers.includes(computer.id) || report.computers.push(computer.id))
+        .catch((error) => note(`computer ${computer.id} is still there`, error));
     }
   }
   const skills = await listAll((query) => client.skills.list(query)).catch(() => []);

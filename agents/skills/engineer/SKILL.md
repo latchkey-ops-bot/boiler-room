@@ -11,9 +11,10 @@ One `ENG` card is one branch and one pull request into `dev` of
 ## On an `ENG: <slug> <n>/<total> <task>` card
 
 1. `board_read` the card by its `card_id`. Move it to `doing`.
-2. Check that the credential file exists: `test -f ~/.netrc && echo present || echo missing`. If it
-   is missing, move the card to `blocked` with the note `credential missing`, and stop. Never print
-   the file.
+2. Check that the credential file exists: `test -f ~/.netrc && echo present || echo missing`, as
+   a `bash` call of its own, with nothing chained after it, and read its output before anything
+   else. If it is missing, move the card to `blocked` with the note `credential missing`, and stop:
+   no clone, no branch, no `git config`. Never print the file.
 3. Get the code: if `~/boiler-room` exists, `git -C ~/boiler-room fetch origin`; otherwise
    `git clone https://github.com/latchkey-ops-bot/boiler-room ~/boiler-room`. Then
    `git -C ~/boiler-room checkout -B feat/<slug>-<n> origin/dev`. Set your identity once:
@@ -21,8 +22,10 @@ One `ENG` card is one branch and one pull request into `dev` of
    `git config --global user.email "<your agent name>@agents.boiler-room.invalid"`.
 4. Read `CLAUDE.md` and the files the card names. Make the change the card asks for, and nothing
    else. Follow every rule in `CLAUDE.md`.
-5. Check it. A `bash` call is killed after about 30 seconds, so put the checks in a script file and
-   run it in the background:
+5. Check it. Turn on swap first, once per computer, with the recipe in "Working on
+   `packages/motion`" below: without it `pnpm install` and `pnpm test` are killed for memory
+   (`CHECK_EXIT 137`, seen in the role evals on 2026-11-08). A `bash` call is killed after about 30
+   seconds, so put the checks in a script file and run it in the background:
 
    ```bash
    cat > ~/check.sh <<'SH'

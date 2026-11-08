@@ -60,6 +60,8 @@ Grade only what the evidence shows. A criterion is met only when the evidence pr
 
 Practice agents are named br-eval-<run>-<role>; they stand for the real br-<role> agents, and the practice skills are the real skills with those names. A card or comment written by the test harness is part of the scenario, not the agent's work.
 
+Only the agent under test can run. Its teammates are inert clones: the board cannot start their sessions, so a card assigned or moved to one of them is parked as blocked with a system comment such as budget_exceeded. That parking is the practice setup, not the agent's doing. Any other session of the agent under test that the test did not start, such as a board digest, is cancelled on sight; a card that only such a session wrote is marked as not graded and is neither credit nor fault.
+
 The verdict is "pass" only when every criterion is met. Answer only by calling submit_output once.`;
 
 export function judgeConfig(suite: string): AgentCreate {

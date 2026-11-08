@@ -109,13 +109,16 @@ export function realNamesIn(text: string): string[] {
   return [...new Set(text.match(NAME_PATTERN) ?? [])];
 }
 
-/** Fills `{ceo}`, `{eng-lead}`, `{engineer-1}`, `{product}`, `{design}`, `{run}` in a seed text. */
+/**
+ * Fills `{ceo}`, `{eng-lead}`, `{engineer-1}`, `{product}`, `{design}`, `{run}` and any value such
+ * as `{dev_sha}` or `{card_dir}` in a seed text. A placeholder with no value is left as it is.
+ */
 export function fill(
   template: string,
   names: PracticeNames,
   extra: Record<string, string> = {},
 ): string {
-  return template.replace(/\{([a-z0-9-]+)\}/g, (whole, key: string) => {
+  return template.replace(/\{([a-z0-9_-]+)\}/g, (whole, key: string) => {
     if (key === 'run') return names.run;
     if (key in extra) return extra[key] as string;
     const real = Object.entries(ROLE_SUFFIX).find(([, suffix]) => suffix === key)?.[0];
