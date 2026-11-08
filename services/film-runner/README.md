@@ -263,18 +263,19 @@ that is not that commit's stops every film with `agent_drift` before anything is
 
 ### The current snapshot
 
-|                      |                                                                                                    |
-| -------------------- | -------------------------------------------------------------------------------------------------- |
-| `RUNNER_SNAPSHOT_ID` | `snp_30c4becf716146e58d5dfe37ad82d93f`                                                             |
-| `RUNNER_COMMIT`      | `f68923c6021d849798701c228dba986ae327dd7e` (this package, on `feat/web-runner`)                    |
-| `RUNNER_FILM_COMMIT` | `7df0046c1b099ecec9459c50cbe1f4ce438b2374` (`feat/crew-agents`, whose `film` has no `--phase` yet) |
-| Adapter              | `standin`, chosen with `--adapter standin`                                                         |
-| Naive key            | None, by design: the website sends one with each launch                                            |
-| sudo                 | `swapon /swapfile` only; a fork's ready check proved `sudo -n true` is refused                     |
-| Built                | 2026-11-08: setup 32 s, snapshot 8.6 s, a fork ready in 3.4 s, $0.06 for the builder and the fork  |
+|                      |                                                                                                                                                             |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `RUNNER_SNAPSHOT_ID` | `snp_d9352fbbd60a4fb8806963b63c2ae11f`                                                                                                                      |
+| `RUNNER_COMMIT`      | `10bc917d1a2e3832aaac8aa98c8569a170e82422` (`feat/staging-real-films`)                                                                                      |
+| `RUNNER_FILM_COMMIT` | The same commit: the film command with the runner's contract, and the crew `pnpm agents:sync` left on Naive (all four agents unchanged, `site-research@10`) |
+| Adapter              | `film`, chosen with `--adapter film`                                                                                                                        |
+| Naive key            | None, by design: the website sends one with each launch                                                                                                     |
+| sudo                 | `swapon /swapfile` only; a fork's ready check proved `sudo -n true` is refused                                                                              |
+| Ready check          | On the builder and on one fork: swap on, the renderer's browser launches, the self-test passes, and `pnpm run --silent film --help` answers with `--phase`  |
+| Built                | 2026-11-08: setup 48 s, snapshot 8.5 s, a fork ready in 6.7 s, $0.09 for the builder and the fork                                                           |
 
-Rebuild it with `--adapter film` once the film command has the contract, then set
-`RUNNER_ALLOW_STANDIN` to `false` on staging.
+Staging runs it with `RUNNER_ALLOW_STANDIN` set to `false`. Rebuild it, and run `pnpm agents:sync`
+at the same commit first, whenever the crew's definitions, skills or the film command change.
 
 ## Measured on Naive
 
