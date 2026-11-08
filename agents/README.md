@@ -48,6 +48,7 @@ pnpm company:sync     # idempotent: run it again and everything reads "unchanged
 pnpm company:status   # also lists how GitHub differs from the spec
 pnpm company:verify   # one session per token holder, after its computer has paused, then the br-ceo check; exits 1 on a failure
 pnpm company:verify --ceo   # only the br-ceo check: one session that reports the tools it is offered
+pnpm company:verify --lockdown  # read-only, no session: board exposure and br-ceo's stored lockdown
 pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
 ```
 
@@ -91,6 +92,11 @@ empty commit to the token's own repo is accepted, and the same dry run to the ot
 refused. A dry run sends no objects, but it does fetch the `git-receive-pack` advertisement, which
 needs write access.
 
+`company:verify` first runs the lockdown check, read-only and with no session: it fails on any agent
+in the organization that the company board offers a board tool its definition does not give it,
+and on any control-plane tool the live catalogue serves that `br-ceo`, as Naive stores it, does not
+name off. `--lockdown` runs only that check.
+
 `company:verify` then starts one `br-ceo` session that reports the tools it is offered, and code
 compares them, and every tool it called, with `board_read`, `board_write`, `read_skill`,
 `session_spend`, `submit_output` and `br-app.company_metrics`. Anything else fails it.
@@ -121,7 +127,26 @@ named off it was offered `board_read` only. So:
   defined on their own branches and synced by their own jobs: until those branches take this
   `define.ts`, their live agents name neither tool, so each is offered both. Changing them from
   here was refused. The fix is theirs: rebase on this branch and run `agents:sync`, or name both
-  tools off by hand.
+  tools off by hand. The same holds for a `br-researcher` synced from a branch without it, and for
+  a per-run Researcher, which reads untrusted websites.
+
+Naive has no organization-wide policy (docs: concepts/policies) and no way to seat only a roster on
+the company board, so nothing here can close this for an agent another branch syncs. What this
+branch does is find it: `company:sync` warns about each agent the board offers a tool its
+definition does not give it (a crew or probe agent: any board tool; a GTM agent: `board_write`),
+`company:status` lists them, and `company:verify` fails on them. A card any of them creates and
+assigns starts its assignee at once, sweep or not.
+
+### The control-plane lockdown is a list
+
+`br-ceo` is protected by naming every control-plane tool off, and that list is a copy of a catalogue
+Naive can grow at any time. MCP tools default to `ask`, and there is no server-wide switch (docs:
+capabilities/tools, MCP connector), so a tool added upstream is offered to `br-ceo` at `ask` until
+the next sync names it. `company:sync` refuses to run while the catalogue serves a tool the list
+lacks, and `company:verify --lockdown` compares the live catalogue with `br-ceo`'s stored toolset,
+with no session and no spend. Run it before trusting a `br-ceo` run, and before resuming the sweep.
+An `ask` call parks the session as `awaiting_approval`, which `company:status` lists; approving it
+would run the call.
 
 Not provisioned yet, because nothing uses them until GTM is activated: the GTM persona and the
 inbox reader's AgentMail vault credential. The activation checklist is in `docs/company/roles/gtm.md`.

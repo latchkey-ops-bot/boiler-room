@@ -1,7 +1,14 @@
 import { company } from '../definitions/company/index.ts';
 import { listAll, type Naive, usd } from '../naive/client.ts';
-import { CONTROL_PLANE, compareCatalogue, liveCatalogue, organization } from './control-plane.ts';
+import {
+  CONTROL_PLANE,
+  compareCatalogue,
+  liveCatalogue,
+  organization,
+  unnamedOn,
+} from './control-plane.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
+import { liveBoardExposure } from './seats.ts';
 
 export interface StatusAgent {
   name: string;
@@ -146,7 +153,10 @@ export async function companyStatus(
   const credentials = vault
     ? await listAll((query) => client.vaults.credentials.list(vault.id, query))
     : [];
-  const served = compareCatalogue(await catalogue());
+  const names = await catalogue();
+  const served = compareCatalogue(names);
+  const stored = ceo ? ((await client.agents.get(ceo.id)).tools?.configs ?? {}) : {};
+  const exposure = await liveBoardExposure(client);
   const held = await heldSessions(
     client,
     agents.flatMap((agent) => (agent.id ? [{ name: agent.name, id: agent.id }] : [])),
@@ -161,7 +171,10 @@ export async function companyStatus(
       vault: vault?.id ?? null,
       credentials: credentials.map((item) => `${item.id} ${item.key} -> ${item.agent_id}`),
       control_plane: served,
+      /** Served now and not named off on br-ceo as Naive stores it, not as this repo lists it. */
+      unnamed_on_ceo: ceo ? unnamedOn(names, stored) : [...names].sort(),
     },
+    board_exposure: exposure,
     roster: { board: multiagent?.board ?? false, members: roster },
     board: board
       ? {

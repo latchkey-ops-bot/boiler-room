@@ -14,6 +14,7 @@ import {
 import { netrc, TOKENS, type TokenName } from './github.ts';
 import { interruptHeld, isHalted } from './halt.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
+import { type BoardExposure, exposureLine, liveBoardExposure } from './seats.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const sha256 = (text: string) => createHash('sha256').update(text).digest('hex');
@@ -41,6 +42,8 @@ export interface CompanyReport {
   agents: SyncResult[];
   ceo: CeoBinding;
   board: { id: string; action: 'created' | 'existing'; cards: Record<string, number> };
+  /** Agents the company board offers a board tool their definition does not give them. */
+  exposure: BoardExposure[];
   deployment: DeploymentResult;
   netrc: NetrcResult[];
   github: GithubReport;
@@ -267,6 +270,9 @@ export async function syncCompany(
     cards: board.cards,
   };
   log(`board     ${boardResult.action} ${board.id} ${JSON.stringify(board.cards)}`);
+  // Read-only: an agent another branch defines is that branch's to fix, so this only warns.
+  const exposure = await liveBoardExposure(client);
+  for (const item of exposure) log(`board     WARNING ${exposureLine(item)}`);
 
   const deployment = await syncSweep(client, ceo.id);
   log(
@@ -289,11 +295,17 @@ export async function syncCompany(
       `github    ${github.gaps.length} gap(s) above. Keep the sweep paused until they are fixed: until then only prompts keep agents off the other repo and off main and dev.`,
     );
   }
+  if (exposure.length) {
+    log(
+      `board     ${exposure.length} agent(s) above can read or write company cards they should not. A card any of them creates and assigns starts its assignee at once, sweep or not.`,
+    );
+  }
   return {
     catalogue: served,
     agents,
     ceo: binding,
     board: boardResult,
+    exposure,
     deployment,
     netrc: netrcResults,
     github,

@@ -1,3 +1,4 @@
+import { exposureLine } from '../company/seats.ts';
 import { companyStatus } from '../company/status.ts';
 import { naiveClient } from '../naive/client.ts';
 
@@ -14,6 +15,15 @@ console.log(
 console.log(
   `Control plane: ${ceo.control_plane.count} tools served; ${ceo.control_plane.unnamed.length ? `NOT named on br-ceo: ${ceo.control_plane.unnamed.join(', ')}` : 'every one named off on br-ceo'}`,
 );
+console.log(
+  `Control plane on br-ceo as stored: ${ceo.unnamed_on_ceo.length ? `NOT named off: ${ceo.unnamed_on_ceo.join(', ')}` : 'every served tool named off'}`,
+);
+if (status.board_exposure.length) {
+  console.log('Company board: agents offered a board tool their definition does not give them');
+  for (const item of status.board_exposure) console.log(`- ${exposureLine(item)}`);
+} else {
+  console.log('Company board: every agent is offered only the board tools its definition gives it');
+}
 console.log(`Roster of br-ceo (board ${status.roster.board ? 'on' : 'off'})`);
 console.table(status.roster.members);
 if (status.board) {

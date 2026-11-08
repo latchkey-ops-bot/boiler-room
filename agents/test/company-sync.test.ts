@@ -60,6 +60,8 @@ function fakeClient(
     ceo?: string | null;
     /** Drops every control-plane tool from br-ceo's stored toolset. */
     storedWithoutLockdown?: boolean;
+    /** Agents that other branches define, already in the organization. */
+    others?: { name: string; configs: Record<string, unknown> }[];
   } = {},
 ) {
   const org = { id: 'org_1', ceo_agent_id: options.ceo ?? null };
@@ -71,6 +73,11 @@ function fakeClient(
   const execs: string[] = [];
   const writes: { computer: string; path: string; content: string }[] = [];
   const sessions: Record<string, unknown>[] = [];
+  const listed: { id: string; name: string; current_version: number }[] = [];
+  for (const other of options.others ?? []) {
+    stored.set(`agt_${other.name}`, { tools: { configs: other.configs } });
+    listed.push({ id: `agt_${other.name}`, name: other.name, current_version: 6 });
+  }
   const computerFor = (agentId: string) => `cmp_${agentId}`;
   const exec = vi.fn(async (computerId: string, command: string) => {
     execs.push(command);
@@ -87,7 +94,7 @@ function fakeClient(
   const client = {
     skills: { push: vi.fn(async ({ slug }: { slug: string }) => ({ slug, version: 1 })) },
     agents: {
-      list: vi.fn(async () => ({ data: [], has_more: false, next_cursor: null })),
+      list: vi.fn(async () => ({ data: [...listed], has_more: false, next_cursor: null })),
       create: vi.fn(async (body: { name: string; tools: { configs: Record<string, unknown> } }) => {
         const configs = { ...body.tools.configs };
         if (options.storedWithoutLockdown) {
@@ -96,9 +103,15 @@ function fakeClient(
           }
         }
         stored.set(`agt_${body.name}`, { tools: { configs } });
+        listed.push({ id: `agt_${body.name}`, name: body.name, current_version: 1 });
         return { id: `agt_${body.name}`, name: body.name, current_version: 1 };
       }),
-      get: vi.fn(async (id: string) => ({ id, ...stored.get(id) })),
+      get: vi.fn(async (id: string) => ({
+        id,
+        current_version: listed.find((agent) => agent.id === id)?.current_version ?? 1,
+        name: listed.find((agent) => agent.id === id)?.name ?? id,
+        ...stored.get(id),
+      })),
       update: vi.fn(),
       computer: vi.fn(async (agentId: string) => {
         if (options.computers !== 'none') return { id: computerFor(agentId), status: 'paused' };
@@ -327,6 +340,37 @@ describe('syncCompany', () => {
     for (const text of [...fake.execs, ...lines]) {
       for (const token of allTokens()) expect(text).not.toContain(token);
     }
+  });
+
+  it('warns about every agent the company board offers a board tool it should not have, and patches none', async () => {
+    const fake = fakeClient({
+      others: [
+        { name: 'br-director', configs: { bash: { enabled: true, permission: 'allow' } } },
+        {
+          name: 'br-researcher',
+          configs: {
+            board_read: { enabled: false, permission: 'deny' },
+            board_write: { enabled: false, permission: 'deny' },
+          },
+        },
+      ],
+    });
+    const lines: string[] = [];
+    const report = await syncCompany(fake.naive, (line) => lines.push(line), {
+      preflight: async () => clean,
+      catalogue: served,
+    });
+    expect(report.exposure.map((item) => [item.name, item.offered])).toEqual([
+      ['br-director', ['board_read', 'board_write']],
+    ]);
+    expect(lines).toContain(
+      'board     WARNING br-director agt_br-director v6 is seated on the company board and offered board_read and board_write. Its definition must name both off (toolset() in src/define.ts names both), then sync it.',
+    );
+    expect(lines.at(-1)).toMatch(/1 agent\(s\) above can read or write company cards/);
+    expect(fake.client.agents.update).not.toHaveBeenCalled();
+    expect(fake.client.agents.create.mock.calls.map(([body]) => body.name)).not.toContain(
+      'br-director',
+    );
   });
 
   it('warns about every GitHub gap the preflight finds, and changes nothing on GitHub', async () => {

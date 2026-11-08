@@ -1,16 +1,28 @@
-import { verifyCeoTools, verifyNetrc } from '../company/verify.ts';
+import { verifyCeoTools, verifyLockdown, verifyNetrc } from '../company/verify.ts';
 import { naiveClient, scrub, usd } from '../naive/client.ts';
 
 /**
- * `pnpm company:verify`: proves each token-holding agent can still use ~/.netrc in a new session,
- * can push to its own repo, and is refused by the other one, and that the bound br-ceo is offered
- * nothing from the control plane. `--ceo` runs only the br-ceo check. Exits 1 if any check fails.
+ * `pnpm company:verify`: first the lockdown check, read-only and free: no agent is offered a board
+ * tool its definition does not give it, and br-ceo as stored names every served control-plane tool
+ * off. Then it proves each token-holding agent can still use ~/.netrc in a new session, can push to
+ * its own repo, and is refused by the other one, and that the bound br-ceo is offered nothing from
+ * the control plane. `--lockdown` runs only the first check, `--ceo` only it and the br-ceo check.
+ * Exits 1 if any check fails.
  */
 const client = naiveClient();
 const log = (line: string) => console.log(scrub(line));
 let failed = false;
 
-if (!process.argv.includes('--ceo')) {
+const lockdown = await verifyLockdown(client);
+console.log(
+  scrub(
+    `lockdown  ${lockdown.verdict.ok ? 'PASS' : 'FAIL'}: ${lockdown.exposure.length} agent(s) offered a board tool they should not have, ${lockdown.unnamed_on_ceo.length} control-plane tool(s) not named off on br-ceo${lockdown.verdict.failures.map((failure) => `\n  - ${failure}`).join('')}`,
+  ),
+);
+failed ||= !lockdown.verdict.ok;
+const only = (flag: string) => process.argv.includes(flag);
+
+if (!only('--ceo') && !only('--lockdown')) {
   const results = await verifyNetrc(client, log, {
     waitForPause: !process.argv.includes('--no-wait'),
   });
@@ -25,12 +37,14 @@ if (!process.argv.includes('--ceo')) {
   failed ||= results.some((result) => !result.verdict.ok);
 }
 
-const ceo = await verifyCeoTools(client, log);
-const verdict = ceo.verdict.ok ? 'PASS' : `FAIL: ${ceo.verdict.failures.join('; ')}`;
-console.log(
-  scrub(
-    `br-ceo tools ${ceo.session_id} ${ceo.status} ${usd(ceo.consumed_micro_usd)}\n  ${verdict}\n  offered: ${JSON.stringify(ceo.offered)}\n  called:  ${JSON.stringify(ceo.called)}`,
-  ),
-);
-failed ||= !ceo.verdict.ok;
+if (!only('--lockdown')) {
+  const ceo = await verifyCeoTools(client, log);
+  const verdict = ceo.verdict.ok ? 'PASS' : `FAIL: ${ceo.verdict.failures.join('; ')}`;
+  console.log(
+    scrub(
+      `br-ceo tools ${ceo.session_id} ${ceo.status} ${usd(ceo.consumed_micro_usd)}\n  ${verdict}\n  offered: ${JSON.stringify(ceo.offered)}\n  called:  ${JSON.stringify(ceo.called)}`,
+    ),
+  );
+  failed ||= !ceo.verdict.ok;
+}
 if (failed) process.exitCode = 1;

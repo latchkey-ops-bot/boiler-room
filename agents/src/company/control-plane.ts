@@ -40,6 +40,26 @@ export function compareCatalogue(live: readonly string[]): CatalogueReport {
   };
 }
 
+/**
+ * Served control-plane tools that an agent's stored toolset does not name off, each offered to the
+ * bound CEO at "ask". It reads the stored toolset, not this repo's list, so it also catches a
+ * br-ceo that was not synced after the list changed. The list is a denylist of a catalogue Naive can
+ * grow at any time: the platform has no server-wide switch for MCP tools (docs: capabilities/tools),
+ * so this check, run before the CEO is trusted, is what closes the gap between a new tool and the
+ * next sync.
+ */
+export function unnamedOn(
+  served: readonly string[],
+  configs: Readonly<Record<string, { enabled?: boolean; permission?: string } | undefined>>,
+): string[] {
+  return served
+    .filter((tool) => {
+      const config = configs[controlPlaneTool(tool)];
+      return config?.enabled !== false || config?.permission !== 'deny';
+    })
+    .sort();
+}
+
 type FetchFn = (url: string, init?: RequestInit) => Promise<Response>;
 
 /**

@@ -1,6 +1,8 @@
 import { company, NETRC } from '../definitions/company/index.ts';
 import { listAll, type Naive } from '../naive/client.ts';
+import { liveCatalogue, unnamedOn } from './control-plane.ts';
 import { GITHUB_OWNER, otherRepo, REPO_OF } from './github.ts';
+import { type BoardExposure, exposureLine, liveBoardExposure } from './seats.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -281,5 +283,42 @@ export async function verifyCeoTools(
     called,
     verdict: judgeCeoTools(offered, called),
     consumed_micro_usd: current.consumed_micro_usd ?? 0,
+  };
+}
+
+export interface LockdownResult {
+  /** Agents the company board offers a board tool their definition does not give them. */
+  exposure: BoardExposure[];
+  /** Served control-plane tools that br-ceo, as stored, does not name off. */
+  unnamed_on_ceo: string[];
+  verdict: VerifyVerdict;
+}
+
+/**
+ * `pnpm company:verify --lockdown`: what the binding exposes, read from Naive as it is now, with no
+ * session and no spend. It fails on any agent offered a board tool its definition does not give it,
+ * and on any served control-plane tool that br-ceo's stored toolset does not name off. Naive can add
+ * a control-plane tool at any time, so run it before trusting a br-ceo run.
+ */
+export async function verifyLockdown(
+  client: Naive,
+  catalogue: () => Promise<string[]> = () => liveCatalogue(),
+): Promise<LockdownResult> {
+  const exposure = await liveBoardExposure(client);
+  const existing = await listAll((query) => client.agents.list(query));
+  const ceo = existing.filter((item) => item.name === 'br-ceo');
+  if (ceo.length !== 1) throw new Error(`${ceo.length} agents are named br-ceo; expected one.`);
+  const stored = (await client.agents.get((ceo[0] as { id: string }).id)).tools?.configs ?? {};
+  const unnamed = unnamedOn(await catalogue(), stored);
+  const failures = exposure.map(exposureLine);
+  if (unnamed.length) {
+    failures.push(
+      `br-ceo is offered ${unnamed.length} control-plane tool(s) at "ask", because its stored toolset does not name them off: ${unnamed.join(', ')}. Add them to src/company/control-plane-tools.ts and run company:sync.`,
+    );
+  }
+  return {
+    exposure,
+    unnamed_on_ceo: unnamed,
+    verdict: { ok: failures.length === 0, failures },
   };
 }
