@@ -1,8 +1,9 @@
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { DEFAULT_CAP, DEFAULT_IMAGE_MODEL } from '../art/generate.ts';
-import { artDirect } from '../art/run.ts';
+import { artDirect, defaultOutPath } from '../art/run.ts';
+import { freshReport, ledgerPath, recordSpend, refuseUnlessAllowed } from '../pipeline/ledger.ts';
 
 const usage = `Usage: pnpm art <campaign.json> [--research <research.json>] [--out <file>] [--budget-usd 1] [--image-cap-usd 0.10] [--max-images 2] [--image-model <id>] [--concurrency 2] [--max-reviews N] [--no-agent]
 
@@ -61,10 +62,17 @@ const maxImages = number('max-images', values['max-images'], 0, 2);
 
 // pnpm runs this from agents/, so paths are read against the directory pnpm was started in.
 const cwd = process.env.INIT_CWD ?? process.cwd();
+const campaignPath = resolve(cwd, file);
+const outPath = values.out ? resolve(cwd, values.out) : defaultOutPath(campaignPath);
+// The film's ledger lives beside its campaign.json: no review starts on a film over its limits.
+const film = basename(dirname(campaignPath));
+const ledger = ledgerPath(dirname(campaignPath));
+refuseUnlessAllowed(ledger, film, 'art-director');
+const started = Date.now();
 const code = await artDirect({
-  campaignPath: resolve(cwd, file),
+  campaignPath,
   researchPath: values.research ? resolve(cwd, values.research) : undefined,
-  outPath: values.out ? resolve(cwd, values.out) : undefined,
+  outPath,
   outRoot: fileURLToPath(new URL('../../../out/', import.meta.url)),
   budgetUsd: budget,
   concurrency,
@@ -77,4 +85,23 @@ const code = await artDirect({
   imageModel: values['image-model'] ?? DEFAULT_IMAGE_MODEL,
   agent: !values['no-agent'],
 });
+const cost = freshReport(`${outPath.replace(/\.json$/, '')}.report.json`, started)?.cost as
+  | { session_micro_usd?: number; images_micro_usd?: number }
+  | undefined;
+if (cost) {
+  recordSpend(ledger, film, {
+    step: 'art-director',
+    microUsd: cost.session_micro_usd ?? 0,
+    session: null,
+    note: 'review sessions',
+  });
+  if (cost.images_micro_usd) {
+    recordSpend(ledger, film, {
+      step: 'art-images',
+      microUsd: cost.images_micro_usd,
+      session: null,
+      note: 'generated images',
+    });
+  }
+}
 process.exit(code);

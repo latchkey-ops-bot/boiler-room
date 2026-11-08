@@ -98,7 +98,7 @@ function assetExists(client: Naive, outDir: string) {
   };
 }
 
-function defaultOutPath(campaignPath: string): string {
+export function defaultOutPath(campaignPath: string): string {
   const name = basename(campaignPath, extname(campaignPath)).replace(/\.campaign$/, '');
   return join(dirname(campaignPath), `${name}.art.json`);
 }

@@ -1,6 +1,18 @@
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import {
+  EXPECTED_PLACEHOLDER_FAILURES,
+  FILM_LIMITS,
+  ledgerPath,
+  readLedger,
+  recordSpend,
+  refuseUnlessAllowed,
+  rounds,
+  routable,
+  spentMicroUsd,
+} from '../pipeline/ledger.ts';
+import { readRenderDir } from '../quality/render-dir.ts';
 import { formatReport, qualityCheckRender } from '../quality/run.ts';
 
 const usage = `Usage: pnpm qc <render-dir> --research <research.json> [--campaign <campaign.json>] [--no-model] [--budget-usd 1] [--json]
@@ -59,6 +71,20 @@ if (budget !== undefined && !(budget >= 1 && budget <= 1.5)) {
   process.exit(2);
 }
 
+// The film's ledger lives beside its campaign.json. A review the agent runs is a Quality Check
+// round; none starts on a film over its limits. Code-only runs cost nothing and always run.
+let ledger: { file: string; film: string } | undefined;
+try {
+  const render = readRenderDir(from(dir));
+  const campaign = values.campaign
+    ? from(values.campaign)
+    : render.campaignPath(render.manifest.campaign.file);
+  ledger = { file: ledgerPath(dirname(campaign)), film: basename(dirname(campaign)) };
+} catch {
+  ledger = undefined;
+}
+if (ledger && !values['no-model']) refuseUnlessAllowed(ledger.file, ledger.film, 'quality-check');
+
 try {
   const report = await qualityCheckRender({
     renderDir: from(dir),
@@ -69,6 +95,30 @@ try {
     say: values.json ? (line) => console.error(line) : undefined,
   });
   console.log(values.json ? JSON.stringify(report, null, 2) : `\n${formatReport(report)}`);
+  if (ledger && report.review) {
+    const after = recordSpend(ledger.file, ledger.film, {
+      step: 'quality-check',
+      microUsd: report.review.costMicroUsd,
+      session: report.review.sessionId,
+      note: `verdict ${report.verdict}`,
+    });
+    const owners = [...routable(report).entries()]
+      .map(([owner, list]) => `${list.length} for ${owner}`)
+      .join(', ');
+    const expected = report.issues.filter((issue) =>
+      EXPECTED_PLACEHOLDER_FAILURES.has(issue.check),
+    ).length;
+    const say = values.json ? console.error : console.log;
+    say(
+      `\nroute-back: ${owners || 'nothing to send back'}; ${expected} expected placeholder failure(s) send nothing back. Round ${rounds(after)} of ${FILM_LIMITS.maxRounds}; film spend $${(spentMicroUsd(after) / 1e6).toFixed(4)} of $${(FILM_LIMITS.maxMicroUsd / 1e6).toFixed(2)} (${ledger.file}).`,
+    );
+  } else if (ledger) {
+    const known = readLedger(ledger.file, ledger.film);
+    if (known.entries.length && !values.json)
+      console.log(
+        `\nfilm spend so far $${(spentMicroUsd(known) / 1e6).toFixed(4)} (${ledger.file}).`,
+      );
+  }
   process.exit(report.verdict === 'pass' ? 0 : 1);
 } catch (cause) {
   console.error(cause instanceof Error ? cause.message : String(cause));

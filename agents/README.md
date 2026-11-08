@@ -155,17 +155,25 @@ sample in 16:9 with no music or narration, where extracted claims may be cited.
    - the template §1 picks for this brief and these counts, its rows in order, each row's frames
      exactly, and only the substitutions `director-beat-templates` allows;
    - the default seam plan after those substitutions, hooks (1 to 3 `word-slam`s on the opening
-     seam), CTAs (1 to 3, 4 words and 24 characters, on the customer's site, the end card's CTA
-     the first label) and formats;
+     seam), CTAs (1 to 3, 4 words and 24 characters, on the customer's site or a subdomain of it,
+     compared on a label boundary so `getlinear.app` is not `linear.app`, the end card's CTA the
+     first label) and formats;
    - roles, slot counts and word limits per scene type, `card.min` on every `type-card`, the name
      and pivot cards, accents and digit-free text ids;
-   - claim status against the brief, a cited superlative its quote must state, no capture props
-     (the research holds no DOM boxes), no audio without a track, no narration unpaid;
+   - claim status against the brief; a cited superlative its quote must state as a word of its
+     own (`superlativeForms`: "fastest-growing" in a quote does not back "Fastest"); a name on
+     screen that a cited quote must name (`CLAIM_NAME`: copy is sentence case, so a capitalised
+     word mid-sentence is a name); a number a quote states only as a goal ("Our mission is to
+     connect a billion people by 2031") said as a fact (`CLAIM_GOAL`); no capture props (the
+     research holds no DOM boxes), no audio without a track, no narration unpaid;
    - brand, claims and assets copied from the research unchanged.
 4. Every issue the Director owns goes back into the same session with its fix text, up to
    `--max-repairs` rounds (3). Then the run fails loudly: it prints every remaining issue, writes
    `director-failures.json`, writes no `campaign.json`, and exits 1. `CONTRAST_LOW` is the Art
    Director's and `ASSET_UNAVAILABLE` the Researcher's: they never block, and land in the handoff.
+   `validateCampaign` itself compares a count's noun with its quote's ("50,000+ paying
+   customers" is not backed by "50,000 product teams") and a percent's direction ("35% more" is
+   not backed by "35% less").
 5. `campaign.json` and `handoff.json` are saved beside the research, with `director-report.json`
    (rounds, issues, tokens, session cost), each `director-submission-N.json` and the events. The
    run prints the rounds and the cost. The agent is kept: it is a crew agent and has no computer.
@@ -250,7 +258,10 @@ with the same thresholds, which is why they live in `@boiler-room/schema`.
 
 Cost is held in code. A review session that starts a second `view_image` call or runs past 3
 minutes is interrupted, and once a film's reviews have spent `--budget-usd` (default $1) no further
-review starts. Measured: $0.05 per review of 4 pictures; a Long film of 27 scenes took 14 reviews
+review starts. A dropped event stream is resumed from the last event, after a wait that doubles,
+up to three times; if it still fails, the session is interrupted and its cost is still counted
+and reported (`stream failed`), so a broken stream can never leave a session running unbilled.
+The Director and Quality Check sessions get the same handling. Measured: $0.05 per review of 4 pictures; a Long film of 27 scenes took 14 reviews
 and $0.72 in all, a Short film 2 reviews and $0.05.
 
 Exit codes: 0 written, 1 refused (an invalid input, or a result that fails `validateCampaign`), 3
@@ -264,10 +275,13 @@ detail only the pixels hold. The structured result, with its `seen` field, is wh
 ## Quality Check
 
 ```sh
-pnpm qc <render-dir>                                   # code checks, then br-quality-check
-pnpm qc <render-dir> --research out/research/<host>/research.json
-pnpm qc <render-dir> --no-model                        # code checks only; always blocked
+pnpm qc <render-dir> --research out/research/<host>/research.json             # code, then br-quality-check
+pnpm qc <render-dir> --research out/research/<host>/research.json --no-model  # code only; always blocked
 ```
+
+`--research` is required, and it must be a Researcher folder: `research.json` (it must parse as
+`researchOutputSchema`, so a campaign cannot stand in), with the `pages.json` and `report.json`
+of the same run beside it, and the bundle's SHA-256 in `report.json`'s `capture_digests`.
 
 `<render-dir>` is what the render service writes: `film.mp4`, `film.manifest.json` and
 `film.quality/` (contact sheet, transition stills and sheet, phone sheet, `index.json`). The
@@ -280,35 +294,44 @@ it. Exit 0 is pass, 1 is fail, 2 is an input error.
 `src/quality/` measures the film itself before any model looks. Every check is a pure function of
 measurements, and is tested in `test/quality.test.ts`.
 
-| Check              | Pass                                                                                                                 |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `film-hash`        | The film's SHA-256 is the one the manifest records                                                                   |
-| `campaign-hash`    | The campaign file's SHA-256 is the one the film was rendered from                                                    |
-| `stills-from-film` | Contact and transition stills match the same frames decoded from the film, within 3 levels                           |
-| `gate`             | `validateCampaign` ok                                                                                                |
-| `claims-cited`     | No `CLAIM_UNBACKED`, `CLAIM_UNKNOWN` or `CLAIM_SUPERLATIVE`: no text states a number or superlative it does not cite |
-| `scene-registry`   | Scene types from the 15-type `sceneRegistry`, within its limits. Unknown types are a minor note for motion           |
-| `size`             | 1920 x 1080 or 4K for 16:9, and the same for 9:16 and 1:1: the aspect ratio of the format                            |
-| `fps`              | The campaign's fps                                                                                                   |
-| `frame-count`      | Exactly `sceneFrames(cut).durationInFrames` decoded frames                                                           |
-| `duration`         | `durationSeconds`, within one frame                                                                                  |
-| `audio-stream`     | An audio stream, unless the manifest says the render is muted                                                        |
-| `black-frames`     | No frame with every channel at 12 or below, outside a `t16` dip                                                      |
-| `frame-0`          | Pixel variance above 0, not black                                                                                    |
-| `static-runs`      | No run of more than 30 identical frames (MAD under 0.02 at 320 x 180) outside the end card                           |
-| `ground`           | A 20 x 20 ground patch within 3 levels of `brand.colors.background` on every scene's rest frame                      |
-| `claims-research`  | Every campaign claim is a research claim: the same quote, word for word, from the same page                          |
-| `brand-research`   | Background, primary and foreground are colours the Researcher measured (foreground may be black or white)            |
+| Check              | Pass                                                                                                                                                                  |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `film-hash`        | The film's SHA-256 is the one the manifest records                                                                                                                    |
+| `campaign-hash`    | The campaign file's SHA-256 is the one the film was rendered from                                                                                                     |
+| `stills-from-film` | Contact and transition stills match the same frames decoded from the film, within 3 levels, and there is one to compare                                               |
+| `artifacts`        | Every file the quality index names is in the quality folder (resolved only inside it)                                                                                 |
+| `gate`             | `validateCampaign` ok                                                                                                                                                 |
+| `claims-cited`     | No `CLAIM_UNBACKED`, `CLAIM_UNKNOWN` or `CLAIM_SUPERLATIVE`; every cited superlative is a word of its own in a cited quote, and every name on screen is in one        |
+| `scene-registry`   | Scene types from the 15-type `sceneRegistry`, within its limits. Unknown types are a minor note for motion                                                            |
+| `size`             | 1920 x 1080 or 4K for 16:9, and the same for 9:16 and 1:1: the aspect ratio of the format                                                                             |
+| `fps`              | The campaign's fps                                                                                                                                                    |
+| `frame-count`      | Exactly `sceneFrames(cut).durationInFrames` decoded frames                                                                                                            |
+| `duration`         | `durationSeconds`, within one frame                                                                                                                                   |
+| `audio-stream`     | An audio stream, unless the manifest says the render is muted                                                                                                         |
+| `black-frames`     | No frame with every channel at 12 or below, outside a `t16` dip                                                                                                       |
+| `frame-0`          | Pixel variance above 0, not black, and more than 30 edge pixels: not only ground                                                                                      |
+| `blank-frames`     | On every frame after 0: no run with only ground (30 edge pixels or fewer at 320 x 180), outside a `t5` blink or `t16` dip                                             |
+| `flash-frames`     | On every frame: no run of up to 12 frames that jumps away from the picture and back                                                                                   |
+| `static-runs`      | No run of more than 30 identical frames (MAD under 0.02 at 320 x 180) outside the end card                                                                            |
+| `ground`           | A 20 x 20 ground patch within 3 levels of `brand.colors.background` on every scene's rest frame                                                                       |
+| `claims-research`  | Every campaign claim is a research claim: the same quote, word for word, from the same page, and in the stored text of that page by the Researcher's own `checkQuote` |
+| `brand-research`   | Background, primary and foreground are colours the Researcher measured (foreground may be black or white)                                                             |
 
 The hook and CTA the manifest names are applied first, as the render step cut the film. A film
-whose hashes or stills do not match is blocked before any money is spent on a review.
+whose hashes, stills or named artifacts do not match is blocked before any money is spent on a
+review. Blank and flash frames are measured on every frame, because the agent only sees samples:
+on the drill renders, a 10-frame "Used by 900,000 teams" flash between contact frames and 6
+frames of empty ground on a light film were both missed by code and agent before.
 
 ### Then the agent
 
 `br-quality-check` runs Sonnet 5.5 with `view_image`, `read_skill` and `session_spend` and nothing
 else: no shell, no files, no web, no computer. Its skill is `skills/quality-check`, pushed from the
-repo root. Code uploads the contact sheet, transitions sheet, phone sheet and every scene's rest
-frame (full size, decoded here from the film) as Naive files, starts one session with
+repo root. Code builds every image it uploads from frames it decodes from the film itself, never
+from the render folder: the contact sheet, the transitions sheet (during is the boundary from
+`sceneFrames`), the phone sheet, a seams sheet (the frames before and at every chunk seam, every
+`framesPerChunk` frames, and at every run code flagged as blank or a flash), and every scene's rest
+frame at full size. It uploads them as Naive files, starts one session with
 `output_schema`, and deletes the files afterwards. The agent reads the skill, opens every image,
 and submits a typed review: `pass` or `fail`, what each image showed, one entry per visual check,
 and issues with severity, scene, frame, owner (`director`, `art-director` or `motion`) and a fix.
@@ -317,9 +340,11 @@ Timecodes are worked out in code from the frame.
 ### The verdict is code's
 
 A review passes only when every code check passed, the agent passed it with no blocker or major
-issue, and the event stream shows a successful `view_image` on every image it was given. A review
-without the agent (`--no-model`), without a typed result, or with an image left unopened is
-blocked, whatever the agent said. Nothing passes without real rendered frames.
+issue, and the event stream shows a successful `view_image` on every image planned for it. A
+review without the agent (`--no-model`), without a typed result, with an image left unopened,
+with claims not traced to the research, or with a model check that passes while saying it could
+not check, or without naming a frame from an image it was given, is blocked, whatever the agent
+said. Nothing passes without real rendered frames.
 
 ### Drill: does it catch broken films?
 
@@ -360,6 +385,22 @@ What the drill also showed:
 - The first three Linear reviews read the Researcher's `out/research/linear.app/research.json`;
   a new Researcher run replaced it mid-drill, so the rest read a saved copy with the same brand and
   the same six claims.
+
+## The film ledger and route-back limits
+
+Nothing routes Quality Check failures back to their owners yet. Whatever does must be bounded,
+because every film fails Quality Check today on motion's placeholder scenes, so "retry until it
+passes" would only stop at the agents' day caps (about $1.26 a round, and image generation is
+under no agent cap). `src/pipeline/ledger.ts` holds the bounds, and the CLIs already use them:
+
+- `pnpm direct`, `pnpm art` and `pnpm qc` append what they spent to `film-ledger.json` beside the
+  film's `campaign.json`: the Director session, the Art Director's review sessions and its
+  generated images (media debits) as separate entries, and each Quality Check review.
+- Each refuses to start (exit 1) once the film has spent $5 in all, or has had 2 Quality Check
+  reviews (the first and one re-review): the film then goes to a person.
+- `pnpm qc` prints which issues would go back, by owner. The known placeholder failures
+  (`frame-0`, `words-recovered`, `lines`, `scene-registry`) never send a film back, whoever the
+  agent names as owner, until motion builds the registry scene types.
 
 ## Testing the capture tool locally
 

@@ -1,8 +1,9 @@
 import { readFileSync } from 'node:fs';
-import { isAbsolute, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import { type DirectorBrief, directorBriefSchema, OUTREACH_BRIEF } from '../director/output.ts';
 import { direct } from '../director/run.ts';
+import { freshReport, ledgerPath, recordSpend, refuseUnlessAllowed } from '../pipeline/ledger.ts';
 
 const usage = `Usage: pnpm direct <research.json> [--brief <brief.json>] [--order] [--approved-only] [--model opus|sonnet|<id>] [--budget-usd 2.5] [--max-repairs 3] [--out <dir>]
 
@@ -57,6 +58,13 @@ if (budget !== undefined && !(budget >= 1 && budget <= 3)) {
   process.exit(1);
 }
 
+// The film's ledger lives beside its campaign.json: no Director run starts on a film over its limits.
+const outDir = values.out ? path(values.out) : dirname(path(research));
+const film = basename(outDir);
+const ledger = ledgerPath(outDir);
+refuseUnlessAllowed(ledger, film, 'director');
+const started = Date.now();
+
 const code = await direct({
   researchPath: path(research),
   brief,
@@ -66,4 +74,13 @@ const code = await direct({
   outDir: values.out ? path(values.out) : undefined,
   drillRepair: values['drill-repair'] ?? false,
 });
+const report = freshReport(join(outDir, 'director-report.json'), started);
+if (report) {
+  recordSpend(ledger, film, {
+    step: 'director',
+    microUsd: Number(report.session_micro_usd ?? 0),
+    session: typeof report.session_id === 'string' ? report.session_id : null,
+    note: code === 0 ? 'campaign written' : 'no campaign written',
+  });
+}
 process.exit(code);
