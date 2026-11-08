@@ -1,18 +1,16 @@
-import { clerkMiddleware, createRouteMatcher } from '@clerk/nextjs/server';
+import { clerkMiddleware } from '@clerk/nextjs/server';
 
 /**
- * Clerk on every request. App pages send a signed-out visitor to /sign-in; API routes answer 401
- * themselves (src/server/api/route.ts), so they are not redirected here.
+ * Clerk on every request, so pages and routes can ask who is signed in. Protection lives on each
+ * resource, as Clerk 7 recommends instead of path matching here: the app layout and every app page
+ * send a signed-out visitor to sign in (src/server/next.ts), and every API route answers 401
+ * (src/server/api/route.ts).
  *
  * This is `middleware.ts`, not Next 16's `proxy.ts`, on purpose: proxy always runs on the Node.js
  * runtime, and the OpenNext Cloudflare adapter supports only Edge middleware. Keep it until the
  * adapter supports Node middleware.
  */
-const isAppPage = createRouteMatcher(['/films(.*)', '/settings(.*)']);
-
-export default clerkMiddleware(async (auth, request) => {
-  if (isAppPage(request)) await auth.protect();
-});
+export default clerkMiddleware();
 
 export const config = {
   matcher: [

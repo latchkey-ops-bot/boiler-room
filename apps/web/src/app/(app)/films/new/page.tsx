@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { NewFilmForm } from '../../../../components/new-film-form.tsx';
+import { requireSignedIn } from '../../../../server/next.ts';
 
 export const metadata: Metadata = { title: 'New video' };
 
@@ -9,6 +10,7 @@ export default async function NewFilmPage({
 }: {
   searchParams: Promise<{ url?: string | string[] }>;
 }) {
+  await requireSignedIn();
   const { url } = await searchParams;
   const initialUrl = typeof url === 'string' ? url.slice(0, 2048) : '';
   return (

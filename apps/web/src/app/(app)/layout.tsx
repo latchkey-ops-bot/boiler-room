@@ -3,13 +3,14 @@ import type { ReactNode } from 'react';
 import { AppNav } from '../../components/app-nav.tsx';
 import { Brand } from '../../components/brand.tsx';
 import { Icon } from '../../components/icon.tsx';
-import { workerBindings } from '../../server/next.ts';
+import { requireSignedIn, workerBindings } from '../../server/next.ts';
 import { pipelineKindFrom } from '../../server/pipeline/index.ts';
 
 export const dynamic = 'force-dynamic';
 
-/** The app: the 2px pixel, a 248px sidebar and one content column. */
-export default function AppLayout({ children }: { children: ReactNode }) {
+/** The app: the 2px pixel, a 248px sidebar and one content column. Signed-in founders only. */
+export default async function AppLayout({ children }: { children: ReactNode }) {
+  await requireSignedIn();
   const simulated = pipelineKindFrom(workerBindings().PIPELINE) === 'simulated';
   return (
     <div className="surface-app app-shell">

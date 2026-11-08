@@ -1,6 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
-import { redirect } from 'next/navigation';
 import { type ApiContext, type Bindings, createContext, type Principal } from './api/context.ts';
 import { makeRoute } from './api/route.ts';
 
@@ -18,9 +17,14 @@ export function workerBindings(): Bindings {
 /** Route handlers: `export const GET = route(async (ctx, request, params) => …)`. */
 export const route = makeRoute({ principal: currentPrincipal, bindings: workerBindings });
 
-/** For server components on app pages. The middleware already sent signed-out visitors away. */
+/** Sends a signed-out visitor to sign in, and back here afterwards. */
+export async function requireSignedIn(): Promise<Principal> {
+  const { userId, orgId, redirectToSignIn } = await auth();
+  if (!userId) return redirectToSignIn();
+  return { userId, orgId: orgId ?? null };
+}
+
+/** For server components on app pages: the caller's context, or a redirect to sign in. */
 export async function pageContext(): Promise<ApiContext> {
-  const principal = await currentPrincipal();
-  if (!principal) redirect('/sign-in');
-  return createContext(principal, workerBindings());
+  return createContext(await requireSignedIn(), workerBindings());
 }
