@@ -9,10 +9,14 @@ export const off: ToolConfig = { enabled: false, permission: 'deny' };
 /**
  * Tools named and switched off on every agent here, on top of the deny default. A deny-by-default
  * toolset still offers the undocumented `vetta.tools_search` and `vetta.tools_execute` until they
- * are named, and no agent may pause to ask a person anything.
+ * are named, and no agent may pause to ask a person anything. The company board seats every agent
+ * of the organization, so `board_read` and `board_write` are named off too: a crew agent works
+ * from its task alone and never posts to, or takes instructions from, the board.
  */
 export const ALWAYS_OFF = [
   'ask_operator',
+  'board_read',
+  'board_write',
   'request_tools',
   'propose_plan',
   'vetta.tools_search',

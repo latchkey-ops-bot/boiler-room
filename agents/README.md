@@ -19,8 +19,9 @@ SHA-256 of the definition in the agent's metadata, so an unchanged agent is left
 changed one gets a new version. Two agents with one name is an error, never a guess.
 
 Every toolset denies by default and names `vetta.tools_search`, `vetta.tools_execute`,
-`ask_operator`, `request_tools` and `propose_plan` as off, because a deny default still offers the
-first two until they are named.
+`ask_operator`, `request_tools`, `propose_plan`, `board_read` and `board_write` as off, because a
+deny default still offers the first two until they are named, and the company board seats every
+agent of the organization: a crew agent works from its task alone.
 
 ## The Researcher
 

@@ -15,6 +15,17 @@ import { artCampaign, DIGESTS } from './art-fixtures.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
+describe('every agent definition', () => {
+  it.each(agents.map((agent) => [agent.name, agent] as const))(
+    '%s names the company board tools off',
+    (_name, agent) => {
+      for (const name of ['board_read', 'board_write']) {
+        expect(agent.tools.configs[name], name).toEqual({ enabled: false, permission: 'deny' });
+      }
+    },
+  );
+});
+
 describe('the researcher definition', () => {
   const { configs, default_config } = researcher.tools;
 
