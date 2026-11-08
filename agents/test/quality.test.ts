@@ -2,8 +2,9 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type Campaign, sceneRegistry, validateCampaign } from '@boiler-room/schema';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { qualityCheck } from '../src/definitions/quality-check.ts';
+import type { Naive } from '../src/naive/client.ts';
 import {
   checkFrames,
   checkGate,
@@ -25,7 +26,7 @@ import {
 import { qcReviewJsonSchema, qcReviewSchema } from '../src/quality/output.ts';
 import { reviewTask, VISUAL_CHECKS } from '../src/quality/prompt.ts';
 import { cutOf, readRenderDir } from '../src/quality/render-dir.ts';
-import { ViewTracker } from '../src/quality/review.ts';
+import { runReview, ViewTracker } from '../src/quality/review.ts';
 import { finalVerdict } from '../src/quality/run.ts';
 import { skillContent } from '../src/sync.ts';
 
@@ -467,6 +468,60 @@ describe('view tracking', () => {
       data: { tool_call_id: 't2', name: 'view_image', output: 'fil_c', is_error: true },
     });
     expect([...tracker.viewed]).toEqual(['fil_a']);
+  });
+});
+
+describe('the review session', () => {
+  it('stops a session whose event stream fails, keeps its cost, and deletes the images', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'qc-review-'));
+    const file = join(dir, 'frame.png');
+    writeFileSync(file, 'not really a png');
+    const client = {
+      skills: { push: vi.fn(async () => ({ version: 1 })) },
+      agents: {
+        list: vi.fn(async () => ({ data: [], has_more: false, next_cursor: null })),
+        create: vi.fn(async () => ({ id: 'agt_qc', current_version: 1 })),
+      },
+      files: {
+        upload: vi.fn(async () => ({ id: 'fil_frame' })),
+        delete: vi.fn(async () => ({ deleted: true })),
+      },
+      sessions: {
+        create: vi.fn(async () => ({ id: 'ses_qc' })),
+        get: vi.fn(async () => ({
+          status: 'running',
+          stop_reason: null,
+          consumed_micro_usd: 250_000,
+        })),
+        send: vi.fn(),
+        interrupt: vi.fn(async () => ({})),
+      },
+      stream: vi.fn(() =>
+        (async function* () {
+          yield* [];
+          throw new TypeError('fetch failed');
+        })(),
+      ),
+    };
+    const run = await runReview({
+      client: client as unknown as Naive,
+      definition: qualityCheck,
+      images: [{ file, name: 'frame.png', what: 'a frame' }],
+      folder: 'test',
+      task: () => 'Review.',
+      budgetMicroUsd: 1_000_000,
+      eventsFile: join(dir, 'events.jsonl'),
+      say: () => {},
+      streamRetry: { retries: 1, delayMs: 0 },
+    });
+    expect(run).toMatchObject({
+      sessionId: 'ses_qc',
+      review: null,
+      problem: 'the event stream failed: fetch failed',
+      costMicroUsd: 250_000,
+    });
+    expect(client.sessions.interrupt).toHaveBeenCalledWith('ses_qc');
+    expect(client.files.delete).toHaveBeenCalledWith('fil_frame');
   });
 });
 

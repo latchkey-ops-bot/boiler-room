@@ -1,7 +1,7 @@
 import { appendFileSync } from 'node:fs';
 import type { Campaign } from '@boiler-room/schema';
 import type { AgentDefinition } from '../define.ts';
-import { type Naive, scrub, usd } from '../naive/client.ts';
+import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
 import { describe } from '../researcher/run.ts';
 import { syncAgents } from '../sync.ts';
 import { type Batch, type BatchResult, batchFiles } from './apply.ts';
@@ -26,6 +26,8 @@ export interface ReviewOptions {
   maxMinutesPerBatch: number;
   eventsPath: string;
   campaignId: string;
+  /** How a dropped event stream is resumed before the session is stopped. */
+  streamRetry?: StreamRetry;
 }
 
 export interface SessionRecord {
@@ -98,7 +100,12 @@ async function runBatch(
         Math.max(1000, deadline - Date.now()),
       );
       try {
-        for await (const event of client.stream(session.id, { afterSeq })) {
+        for await (const event of sessionEvents(
+          client,
+          session.id,
+          afterSeq,
+          options.streamRetry,
+        )) {
           afterSeq = event.seq;
           const record_ = event as unknown as { type: string; data: Record<string, unknown> };
           const data = record_.data ?? {};
@@ -126,15 +133,29 @@ async function runBatch(
     }
   };
 
-  let state = await settle();
-  if (!submitted && !stopped && state.status === 'idle' && Date.now() < deadline) {
-    afterSeq = (await client.sessions.send(session.id, { message: NUDGE, queue: true }))
-      .accepted_seq;
-    state = await settle();
-  }
-  const final = await client.sessions.get(session.id).catch(() => state);
-  if (final.status === 'running' || final.status === 'queued')
+  let final: Awaited<ReturnType<typeof client.sessions.get>>;
+  try {
+    let state = await settle();
+    if (!submitted && !stopped && state.status === 'idle' && Date.now() < deadline) {
+      afterSeq = (await client.sessions.send(session.id, { message: NUDGE, queue: true }))
+        .accepted_seq;
+      state = await settle();
+    }
+    final = await client.sessions.get(session.id).catch(() => state);
+    if (final.status === 'running' || final.status === 'queued')
+      await client.sessions.interrupt(session.id).catch(() => {});
+  } catch (cause) {
+    // The stream or the API failed for good. The session may still be running and spending: stop
+    // it, and count what it spent, so the run's budget sees it and the report lists it. A cost
+    // that cannot be read is counted as the session's whole budget.
     await client.sessions.interrupt(session.id).catch(() => {});
+    const after = await client.sessions.get(session.id).catch(() => undefined);
+    record.consumed_micro_usd = after?.consumed_micro_usd ?? definition.session.budget_micro_usd;
+    const message = cause instanceof Error ? cause.message.slice(0, 200) : String(cause);
+    return fail(
+      `stream failed: ${message}${after ? '' : '; cost unread, counted at the session budget'}`,
+    );
+  }
   record.consumed_micro_usd = final.consumed_micro_usd ?? 0;
 
   if (stopped) return fail(`interrupted: ${stopped}`);
@@ -200,8 +221,17 @@ export async function reviewBatches(
         sessions.push(record);
         say(`[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}`);
       } catch (cause) {
+        // Only starting the session throws now, so nothing ran and nothing was spent.
         const failure = `session failed: ${cause instanceof Error ? cause.message.slice(0, 200) : cause}`;
         results.push({ batch, review: undefined, failure });
+        sessions.push({
+          batch: batch.id,
+          kind: batch.kind,
+          session_id: null,
+          consumed_micro_usd: 0,
+          views: 0,
+          outcome: failure,
+        });
         say(`[${batch.id}] ${failure}`);
       }
     }

@@ -120,6 +120,32 @@ describe('runDirectorSession', () => {
     expect(client.sessions.create).toHaveBeenCalledTimes(1);
   });
 
+  it('stops the session and counts its cost when the event stream fails for good', async () => {
+    const client = fakeClient([{ good: true }]);
+    client.stream.mockImplementation(() =>
+      (async function* () {
+        yield* [];
+        throw new TypeError('fetch failed');
+      })(),
+    );
+    client.sessions.get.mockImplementation(async () => ({
+      status: 'running',
+      stop_reason: 'end_turn',
+      structured_output: null,
+      consumed_micro_usd: 300_000,
+    }));
+    const result = await run(client);
+    expect(result).toMatchObject({
+      ok: false,
+      sessionId: 'ses_director',
+      reason: 'the event stream failed: fetch failed',
+      consumedMicroUsd: 300_000,
+    });
+    expect(client.sessions.interrupt).toHaveBeenCalledWith('ses_director');
+    // The first connection and three reconnects.
+    expect(client.stream).toHaveBeenCalledTimes(4);
+  });
+
   it('gives up after 3 repair rounds and returns the remaining issues', async () => {
     const client = fakeClient([{}, {}, {}, {}, { good: true }]);
     const result = await run(client);

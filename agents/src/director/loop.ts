@@ -1,4 +1,4 @@
-import type { Naive } from '../naive/client.ts';
+import { type Naive, sessionEvents } from '../naive/client.ts';
 import type { DirectorIssue } from './checks.ts';
 import { CONTINUE_MESSAGE, repairMessage } from './prompt.ts';
 
@@ -122,7 +122,7 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
         Math.max(1000, deadline - Date.now()),
       );
       try {
-        for await (const event of client.stream(session.id, { afterSeq })) {
+        for await (const event of sessionEvents(client, session.id, afterSeq, { sleep })) {
           afterSeq = event.seq;
           const record = event as unknown as StreamEvent;
           counter.handle(record);
@@ -138,55 +138,74 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
     }
   };
 
-  for (;;) {
-    const state = await settle();
-    const consumedMicroUsd = state.consumed_micro_usd;
-    const output = counter.latest ?? state.structured_output;
-    const fresh = counter.count > checked && output != null;
-    if (!fresh) {
-      const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
-      if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
-        continues += 1;
-        const sent = await client.sessions.send(session.id, {
-          message: CONTINUE_MESSAGE,
-          queue: true,
-        });
-        afterSeq = sent.accepted_seq;
-        continue;
+  try {
+    return await repairLoop();
+  } catch (cause) {
+    // The stream or the API failed for good, and the session may still be running and spending.
+    await client.sessions.interrupt(session.id).catch(() => {});
+    const after = await client.sessions.get(session.id).catch(() => undefined);
+    return {
+      ok: false,
+      sessionId: session.id,
+      rounds,
+      reason: `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
+      remaining: rounds.at(-1)?.blocking ?? [],
+      consumedMicroUsd: after?.consumed_micro_usd ?? options.budgetMicroUsd,
+    };
+  }
+
+  // Each round: wait for a submission, check it, and send back what blocks it.
+  async function repairLoop(): Promise<LoopResult> {
+    for (;;) {
+      const state = await settle();
+      const consumedMicroUsd = state.consumed_micro_usd;
+      const output = counter.latest ?? state.structured_output;
+      const fresh = counter.count > checked && output != null;
+      if (!fresh) {
+        const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
+        if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
+          continues += 1;
+          const sent = await client.sessions.send(session.id, {
+            message: CONTINUE_MESSAGE,
+            queue: true,
+          });
+          afterSeq = sent.accepted_seq;
+          continue;
+        }
+        return {
+          ok: false,
+          sessionId: session.id,
+          rounds,
+          reason: `the session stopped (${state.status}/${state.stop_reason}) without a new submission`,
+          remaining: rounds.at(-1)?.blocking ?? [],
+          consumedMicroUsd,
+        };
       }
-      return {
-        ok: false,
-        sessionId: session.id,
-        rounds,
-        reason: `the session stopped (${state.status}/${state.stop_reason}) without a new submission`,
-        remaining: rounds.at(-1)?.blocking ?? [],
-        consumedMicroUsd,
-      };
+      checked = counter.count;
+      const { blocking, other } = await options.check(output);
+      rounds.push({ round: rounds.length + 1, output, blocking, other });
+      if (blocking.length === 0) {
+        return { ok: true, sessionId: session.id, rounds, output, consumedMicroUsd };
+      }
+      const repair = rounds.length;
+      if (repair > options.maxRepairs || Date.now() > deadline) {
+        return {
+          ok: false,
+          sessionId: session.id,
+          rounds,
+          reason:
+            repair > options.maxRepairs
+              ? `${options.maxRepairs} repair rounds did not clear every issue`
+              : 'the time limit was reached',
+          remaining: blocking,
+          consumedMicroUsd,
+        };
+      }
+      const sent = await client.sessions.send(session.id, {
+        message: repairMessage(blocking, repair, options.maxRepairs),
+        queue: true,
+      });
+      afterSeq = sent.accepted_seq;
     }
-    checked = counter.count;
-    const { blocking, other } = await options.check(output);
-    rounds.push({ round: rounds.length + 1, output, blocking, other });
-    if (blocking.length === 0) {
-      return { ok: true, sessionId: session.id, rounds, output, consumedMicroUsd };
-    }
-    const repair = rounds.length;
-    if (repair > options.maxRepairs || Date.now() > deadline) {
-      return {
-        ok: false,
-        sessionId: session.id,
-        rounds,
-        reason:
-          repair > options.maxRepairs
-            ? `${options.maxRepairs} repair rounds did not clear every issue`
-            : 'the time limit was reached',
-        remaining: blocking,
-        consumedMicroUsd,
-      };
-    }
-    const sent = await client.sessions.send(session.id, {
-      message: repairMessage(blocking, repair, options.maxRepairs),
-      queue: true,
-    });
-    afterSeq = sent.accepted_seq;
   }
 }

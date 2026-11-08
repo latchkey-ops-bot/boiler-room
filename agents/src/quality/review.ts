@@ -6,7 +6,7 @@
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { AgentDefinition } from '../define.ts';
-import { type Naive, scrub, usd } from '../naive/client.ts';
+import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
 import { syncAgents } from '../sync.ts';
 import { type QcReview, qcReviewSchema } from './output.ts';
 import { CONTINUE_MESSAGE, type ReviewImage } from './prompt.ts';
@@ -117,6 +117,8 @@ export async function runReview(options: {
   budgetMicroUsd: number;
   eventsFile: string;
   say: (line: string) => void;
+  /** How a dropped event stream is resumed before the session is stopped. */
+  streamRetry?: StreamRetry;
 }): Promise<ReviewRun> {
   const { client, definition, say } = options;
   const [synced] = await syncAgents(client, [definition]);
@@ -149,7 +151,12 @@ export async function runReview(options: {
           Math.max(1000, deadline - Date.now()),
         );
         try {
-          for await (const event of client.stream(session.id, { afterSeq })) {
+          for await (const event of sessionEvents(
+            client,
+            session.id,
+            afterSeq,
+            options.streamRetry,
+          )) {
             afterSeq = event.seq;
             const record = event as unknown as { type: string; data: Record<string, unknown> };
             tracker.handle(record);
@@ -168,26 +175,47 @@ export async function runReview(options: {
       }
     };
 
-    let state = await settle();
-    while (
-      !(tracker.submissions > 0 && state.structured_output) &&
-      state.status === 'idle' &&
-      RESUMABLE.has(state.stop_reason ?? '') &&
-      continues < MAX_CONTINUES &&
-      Date.now() < deadline
-    ) {
-      continues += 1;
-      say(`no review submitted yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`);
-      const sent = await client.sessions.send(session.id, {
-        message: CONTINUE_MESSAGE,
-        queue: true,
-      });
-      afterSeq = sent.accepted_seq;
+    let state: Awaited<ReturnType<typeof settle>>;
+    try {
       state = await settle();
-    }
-    if (state.status === 'running' || state.status === 'queued') {
+      while (
+        !(tracker.submissions > 0 && state.structured_output) &&
+        state.status === 'idle' &&
+        RESUMABLE.has(state.stop_reason ?? '') &&
+        continues < MAX_CONTINUES &&
+        Date.now() < deadline
+      ) {
+        continues += 1;
+        say(
+          `no review submitted yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`,
+        );
+        const sent = await client.sessions.send(session.id, {
+          message: CONTINUE_MESSAGE,
+          queue: true,
+        });
+        afterSeq = sent.accepted_seq;
+        state = await settle();
+      }
+      if (state.status === 'running' || state.status === 'queued') {
+        await client.sessions.interrupt(session.id).catch(() => {});
+        state = await client.sessions.get(session.id);
+      }
+    } catch (cause) {
+      // The stream or the API failed for good, and the session may still be running and
+      // spending: stop it, and keep its cost for the report. A cost that cannot be read is
+      // counted as the session's whole budget.
       await client.sessions.interrupt(session.id).catch(() => {});
-      state = await client.sessions.get(session.id);
+      const after = await client.sessions.get(session.id).catch(() => undefined);
+      say(`the event stream failed; session ${session.id} stopped`);
+      return {
+        agentId: synced.id,
+        agentVersion: synced.version,
+        sessionId,
+        images: images.map((image) => ({ ...image, viewed: tracker.viewed.has(image.fileId) })),
+        review: null,
+        problem: `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
+        costMicroUsd: after?.consumed_micro_usd ?? options.budgetMicroUsd,
+      };
     }
 
     let review: QcReview | null = null;
