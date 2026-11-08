@@ -24,7 +24,7 @@ import {
 } from './gate.ts';
 import { fileIdOf, type ResearchOutput, siteUrlProblem } from './output.ts';
 import { CONTINUE_MESSAGE, type MaterialRef, repairMessage, researchTask } from './prompt.ts';
-import { siteHost, slugify } from './text.ts';
+import { siteHost } from './text.ts';
 import { type PagesBundle, pagesBundleSchema } from './verify.ts';
 
 export interface ResearchOptions {
@@ -34,29 +34,34 @@ export interface ResearchOptions {
   description?: string;
   budgetUsd?: number;
   maxRepairs: number;
-  /** Keep this run's agent and its computer afterwards, to inspect them. The next run makes its own. */
-  keepAgent: boolean;
+  /** Leave the agent's computer running afterwards, to inspect it. By default it is paused. */
+  keepComputer: boolean;
   /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
   drillRepair: boolean;
   outRoot: string;
   definition?: AgentDefinition;
   /** Extra Naive file ids fetched alongside the capture tool (the injection test's server). */
   extraFileIds?: readonly string[];
-  /** Extra numbered steps run after fetch_file and before setup (the injection test). */
-  preSteps?: readonly string[];
+  /**
+   * Extra numbered steps run after fetch_file and before setup (the injection test), given this
+   * run's folder on the agent's computer, relative to its home, such as `br/lx1a2b3c4d5e6f`.
+   */
+  preSteps?: (runDir: string) => readonly string[];
   /**
    * Hosts the capture tool may load although they resolve privately. Only the injection test sets
    * one, for its fixture on the agent's loopback; it builds and uploads a separate tool file.
    */
   allowPrivateHosts?: readonly string[];
   /**
-   * Runs once after the session has stopped and before the agent (and its computer) is torn down,
-   * so a caller can read artefacts off the agent's computer. Best-effort; errors are swallowed.
+   * Runs once after the session has stopped and before the agent's computer is paused, so a caller
+   * can read artefacts off it. Best-effort; errors are swallowed.
    */
   onBeforeTeardown?: (ctx: {
     client: Naive;
     agentId: string;
     sessionId: string | undefined;
+    /** This run's folder on the agent's computer, relative to its home. */
+    runDir: string;
   }) => Promise<void>;
 }
 
@@ -129,16 +134,40 @@ const CAPTURE_LINE =
   /BR_CAPTURE_DONE sha256=([0-9a-f]{64})(?: pages=\d+)?(?: site=(\S+))?(?: requested=(\S+))?/g;
 
 /**
- * The name of one run's agent. Each run gets its own agent, and with it its own computer, job slot
- * and output folder: runs in parallel never share state, and deleting one never stops another.
+ * A short id that sorts by start time and is unique across parallel starts. It names the run's own
+ * folder on the agent's computer, so a run never reads what an earlier run left there.
  */
-export function runAgentName(baseName: string, host: string, suffix: string): string {
-  return `${baseName}-${slugify(host, 'site').slice(0, 40)}-${suffix}`.slice(0, 100);
-}
-
-/** A short id that sorts by start time and is unique across parallel starts. */
 export function runSuffix(now = Date.now(), random = randomBytes(3).toString('hex')): string {
   return `${now.toString(36)}${random}`;
+}
+
+/** This run's folder on the agent's computer, relative to its home. */
+export function runDirFor(runId: string): string {
+  return `br/${runId}`;
+}
+
+export interface LiveSession {
+  id: string;
+  status: string;
+  created_at: string;
+}
+
+/** The agent's sessions that are running or queued, other than `except`. */
+export async function liveSessions(
+  client: Naive,
+  agentId: string,
+  except?: string,
+): Promise<LiveSession[]> {
+  const found: LiveSession[] = [];
+  for (const status of ['running', 'queued']) {
+    const page = await listAll((query) =>
+      client.sessions.list({ ...query, agent_id: agentId, status }),
+    );
+    for (const session of page)
+      if (session.id !== except && (session.status === 'running' || session.status === 'queued'))
+        found.push({ id: session.id, status: session.status, created_at: session.created_at });
+  }
+  return found;
 }
 
 /** Whether a Naive call failed because the thing it names does not exist (any more). */
@@ -362,80 +391,105 @@ async function gate(
   return { output, failures, bundle, bundleText };
 }
 
-export interface TeardownResult {
-  spend: unknown;
-  /** True once the agent is deleted, or was already gone. */
-  agentDeleted: boolean;
+export interface ReleaseResult {
   computerId: string | null;
-  /** True once this run's computer reads destroyed or failed, or no longer exists. */
-  computerGone: boolean;
-  /** Computers other runs or people still have live in the organisation. Never touched. */
+  /** The computer's status once the release is done, or null when the agent has none. */
+  computerStatus: string | null;
+  /** True once nothing runs: the computer reads paused, or there is none. */
+  idle: boolean;
+  /** What stopping this run's processes on the computer printed, or why it was not done. */
+  stopped: string | null;
+  /** Other sessions of this agent that were live, so the computer was left running for them. */
+  busy: string[];
+  /** Computers of other agents that are live in the organisation. Never touched. */
   others: string[];
 }
 
-export interface TeardownOptions {
+export interface ReleaseOptions {
+  /** This run's session, which is not counted as another user of the computer. */
+  sessionId?: string;
   sleep?: (ms: number) => Promise<unknown>;
-  /** How long to wait for the computer to go after the agent is deleted. */
+  /** How long to wait for the computer to read paused. */
   maxWaitMs?: number;
   pollMs?: number;
 }
 
-const LIVE = (status: string) => status !== 'destroyed' && status !== 'failed';
+const STOPPED = (status: string) =>
+  status === 'paused' || status === 'destroyed' || status === 'failed';
 
 /**
- * Deletes this run's agent, the only way to remove its computer, then waits for that computer to
- * go. An agent that is already gone counts as deleted: retrying a delete that answers "not found"
- * only wastes the wait. The computer is polled by id until it reads destroyed or is gone; the
- * platform removes it a few minutes after the agent, and asking again does not make it faster.
+ * Leaves nothing running once a run is done, and keeps the agent for the next run. Every run uses
+ * the one `br-researcher` agent, and an agent has one computer, which all its sessions share. So
+ * when no other session of the agent is live, the run's processes on it are stopped (a capture
+ * job, Chromium, the injection test's fixture server), so none of them comes back when the
+ * computer resumes, and the computer is paused: a paused computer bills nothing, and the next
+ * session resumes it. A computer another session is using is left alone. Other agents' computers
+ * are listed and never touched.
  */
-export async function teardown(
+export async function releaseComputer(
   client: Naive,
   agentId: string,
-  options: TeardownOptions = {},
-): Promise<TeardownResult> {
+  options: ReleaseOptions = {},
+): Promise<ReleaseResult> {
   const wait = options.sleep ?? sleep;
-  const pollMs = options.pollMs ?? 10_000;
-  const maxWaitMs = options.maxWaitMs ?? 6 * 60_000;
-  const spend = await client.agents
-    .spend(agentId, { by: 'component' })
-    .catch((cause) => ({ error: String(cause) }));
+  const pollMs = options.pollMs ?? 5000;
+  const maxWaitMs = options.maxWaitMs ?? 3 * 60_000;
   const computer = await client.agents.computer(agentId).catch(() => null);
-  let agentDeleted = false;
-  for (let attempt = 0; attempt < 4 && !agentDeleted; attempt++) {
-    try {
-      await client.agents.delete(agentId);
-      agentDeleted = true;
-      say(`deleted agent ${agentId} to release its computer${computer ? ` ${computer.id}` : ''}`);
-    } catch (cause) {
-      if (isNotFound(cause)) {
-        agentDeleted = true;
-        say(`agent ${agentId} is already gone`);
-        break;
-      }
-      say(`agent delete retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
-      await wait(5000);
-    }
-  }
-  let computerGone = computer === null || !LIVE(computer.status);
-  if (computer && agentDeleted) {
-    for (let waited = 0; !computerGone && waited <= maxWaitMs; waited += pollMs) {
-      const status = await client.computers.get(computer.id).then(
-        (item) => item.status as string,
-        (cause) => (isNotFound(cause) ? 'destroyed' : 'unknown'),
-      );
-      if (!LIVE(status)) {
-        computerGone = true;
-        break;
-      }
-      if ((waited / pollMs) % 3 === 0) say(`waiting for computer ${computer.id} to go (${status})`);
-      await wait(pollMs);
-    }
-  }
   const computers = await listAll((query) => client.computers.list(query)).catch(() => []);
   const others = computers
-    .filter((item) => LIVE(item.status) && item.id !== computer?.id)
+    .filter((item) => !STOPPED(item.status) && item.id !== computer?.id)
     .map((item) => `${item.id} ${item.name} ${item.status}`);
-  return { spend, agentDeleted, computerId: computer?.id ?? null, computerGone, others };
+  const result: ReleaseResult = {
+    computerId: computer?.id ?? null,
+    computerStatus: computer?.status ?? null,
+    idle: computer === null || STOPPED(computer.status),
+    stopped: null,
+    busy: [],
+    others,
+  };
+  if (!computer) return result;
+  result.busy = (await liveSessions(client, agentId, options.sessionId)).map(
+    (session) => `${session.id} ${session.status} since ${session.created_at}`,
+  );
+  if (result.busy.length > 0) {
+    say(`computer ${computer.id} is left running: ${result.busy.join('; ')} still uses it`);
+    return result;
+  }
+  if (computer.status === 'running') {
+    // The patterns are written so they do not match this command's own shell.
+    const command =
+      "pkill -f '[c]hrome-headless-shell'; pkill -f '[/]br/'; sleep 1; pgrep -fl '[c]hrome-headless-shell|[/]br/' || echo 'nothing left running'";
+    result.stopped = await client.computers
+      .exec(computer.id, command, 20_000)
+      .then((exec) => `${exec.stdout}${exec.stderr}`.trim() || `exit ${exec.exit_code}`)
+      .catch((cause) => `not stopped: ${cause instanceof Error ? cause.message : cause}`);
+    say(`processes on computer ${computer.id}: ${result.stopped}`);
+  }
+  // Asked once; a failed ask is retried. The computer can take a moment to read paused.
+  let status: string = computer.status;
+  for (let attempt = 0; !STOPPED(status) && attempt < 3; attempt++) {
+    try {
+      status = (await client.computers.pause(computer.id)).status;
+      break;
+    } catch (cause) {
+      if (isNotFound(cause)) status = 'destroyed';
+      else {
+        say(`pause retry ${attempt + 1}: ${cause instanceof Error ? cause.message : cause}`);
+        await wait(pollMs);
+      }
+    }
+  }
+  for (let waited = 0; !STOPPED(status) && waited < maxWaitMs; waited += pollMs) {
+    await wait(pollMs);
+    status = await client.computers.get(computer.id).then(
+      (item) => item.status as string,
+      (cause) => (isNotFound(cause) ? 'destroyed' : status),
+    );
+  }
+  result.computerStatus = status;
+  result.idle = STOPPED(status);
+  say(`computer ${computer.id} is ${status}`);
+  return result;
 }
 
 async function downloadAssets(
@@ -460,11 +514,13 @@ async function downloadAssets(
 }
 
 /**
- * One research run: uploads the capture tool and any customer material, creates this run's own
- * agent from the definition, starts a session, streams it, gates the result and sends failures
- * back for repair, then saves the result under `out/research/<host>/` and prints the cost. The
- * agent is deleted at the end, which is the only way to remove its computer. Because every run has
- * its own agent, runs in parallel never share a computer and never delete each other's agent.
+ * One research run: uploads the capture tool and any customer material, syncs the one
+ * `br-researcher` agent from its definition, starts a session, streams it, gates the result and
+ * sends failures back for repair, then saves the result under `out/research/<host>/` and prints
+ * the cost. Every run reuses that agent; none is created per run. Its one computer is shared by its
+ * sessions, so runs go one at a time: a run refuses to start while another session of the agent is
+ * live, and works in its own folder on the computer. At the end its processes are stopped and the
+ * computer is paused, so nothing is left running.
  */
 export async function research(options: ResearchOptions): Promise<number> {
   // A site the result could never cite is refused before any spend.
@@ -473,12 +529,10 @@ export async function research(options: ResearchOptions): Promise<number> {
     say(`error: ${problem}`);
     return 1;
   }
-  const base = options.definition ?? researcher;
+  const definition: AgentDefinition = options.definition ?? researcher;
   const host = siteHost(options.url);
-  const definition: AgentDefinition = {
-    ...base,
-    name: runAgentName(base.name, host, runSuffix()),
-  };
+  const runId = runSuffix();
+  const runDir = runDirFor(runId);
   const client = naiveClient();
   const outDir = join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
@@ -500,14 +554,20 @@ export async function research(options: ResearchOptions): Promise<number> {
     host,
     started_at: startedAt,
     agent_name: definition.name,
+    run_dir: runDir,
     model: definition.model,
     budget_micro_usd: budgetMicro,
   };
   const tracker = new EventTracker(options.url);
   let agentId: string | undefined;
   let sessionId: string | undefined;
+  /** Set once this run may use the agent's computer: no other session of the agent was live. */
+  let ownsComputer = false;
+  let spendBefore: number | undefined;
   let exitCode = 1;
   let cleaned = false;
+  const agentSpend = (id: string) =>
+    client.agents.spend(id, { by: 'component' }).catch((cause) => ({ error: String(cause) }));
 
   const cleanup = async () => {
     if (cleaned) return;
@@ -518,41 +578,46 @@ export async function research(options: ResearchOptions): Promise<number> {
         await client.sessions.interrupt(sessionId).catch(() => {});
       if (session) report.session_micro_usd = session.consumed_micro_usd;
     }
-    if (agentId && options.onBeforeTeardown) {
+    if (agentId && ownsComputer && options.onBeforeTeardown) {
       await options
-        .onBeforeTeardown({ client, agentId, sessionId })
+        .onBeforeTeardown({ client, agentId, sessionId, runDir })
         .catch((cause) =>
           say(`before-teardown hook failed: ${cause instanceof Error ? cause.message : cause}`),
         );
     }
-    if (agentId && !options.keepAgent) {
-      const result = await teardown(client, agentId);
-      report.agent_spend = result.spend;
-      report.agent_deleted = result.agentDeleted;
-      report.computer_id = result.computerId;
-      report.computer_gone = result.computerGone;
-      report.other_live_computers = result.others;
-      say(
-        result.computerGone
-          ? `this run's computer${result.computerId ? ` ${result.computerId}` : ''} is gone`
-          : `this run's computer ${result.computerId} is still live; it goes when the platform removes it`,
-      );
+    if (agentId && ownsComputer && !options.keepComputer) {
+      const result = await releaseComputer(client, agentId, { sessionId });
+      Object.assign(report, {
+        computer_id: result.computerId,
+        computer_status: result.computerStatus,
+        nothing_running: result.idle,
+        processes_stopped: result.stopped,
+        busy_sessions: result.busy,
+        other_live_computers: result.others,
+      });
       if (result.others.length)
-        say(`other computers live in the org (not this run's): ${result.others.join('; ')}`);
-    } else if (agentId) {
-      report.agent_spend = await client.agents
-        .spend(agentId, { by: 'component' })
-        .catch(() => null);
-      say(`kept agent ${agentId}; its computer stays until the agent is deleted`);
+        say(`other agents' computers live in the org (not touched): ${result.others.join('; ')}`);
+    } else if (agentId && ownsComputer) {
+      const computer = await client.agents.computer(agentId).catch(() => null);
+      report.computer_id = computer?.id ?? null;
+      report.computer_status = computer?.status ?? null;
+      say(`kept computer ${computer?.id ?? '(none)'} running; pause it when done`);
+    }
+    if (agentId) {
+      const spend = await agentSpend(agentId);
+      report.agent_spend = spend;
+      const after = (spend as { spent_micro_usd?: number }).spent_micro_usd;
+      if (after !== undefined && spendBefore !== undefined)
+        report.agent_spend_this_run_micro_usd = after - spendBefore;
     }
     const balanceAfter = (await client.credits.show().catch(() => null))?.balance_micro_usd;
     if (balanceAfter !== undefined) report.balance_delta_micro_usd = balanceBefore - balanceAfter;
     report.finished_at = new Date().toISOString();
     writeFileSync(join(outDir, 'report.json'), scrub(`${JSON.stringify(report, null, 1)}\n`));
     const session = Number(report.session_micro_usd ?? 0);
-    const agentSpend = (report.agent_spend as { spent_micro_usd?: number } | null)?.spent_micro_usd;
+    const runSpend = report.agent_spend_this_run_micro_usd as number | undefined;
     say(
-      `cost: session ${usd(session)}${agentSpend !== undefined ? `, agent total incl. computer ${usd(agentSpend)}` : ''}${report.balance_delta_micro_usd !== undefined ? `, balance change ${usd(Number(report.balance_delta_micro_usd))}` : ''}. Computer time can book a few minutes late.`,
+      `cost: session ${usd(session)}${runSpend !== undefined ? `, agent incl. computer this run ${usd(runSpend)}` : ''}${report.balance_delta_micro_usd !== undefined ? `, balance change ${usd(Number(report.balance_delta_micro_usd))}` : ''}. Computer time can book a few minutes late.`,
     );
   };
   const onSignal = () => {
@@ -579,6 +644,28 @@ export async function research(options: ResearchOptions): Promise<number> {
       tool_file_id: toolFileId,
       material: refs,
     });
+    // One agent, one computer: a run starts only when no other session of the agent is live.
+    const busy = await liveSessions(client, synced.id);
+    if (busy.length > 0) {
+      report.busy_sessions = busy;
+      throw new Error(
+        `${synced.name} is busy with ${busy.map((item) => `${item.id} (${item.status} since ${item.created_at})`).join(', ')}. Its sessions share one computer, so runs go one at a time; start this one when that one has finished.`,
+      );
+    }
+    ownsComputer = true;
+    spendBefore = ((await agentSpend(synced.id)) as { spent_micro_usd?: number }).spent_micro_usd;
+    const computer = await client.agents.computer(synced.id).catch(() => null);
+    report.computer_at_start = computer ? `${computer.id} ${computer.status}` : null;
+    if (computer?.status === 'paused') {
+      await client.computers
+        .resume(computer.id)
+        .then((item) => say(`resumed computer ${item.id} (${item.status})`))
+        .catch((cause) =>
+          say(
+            `resume of ${computer.id} failed, the session resumes it: ${cause instanceof Error ? cause.message : cause}`,
+          ),
+        );
+    }
 
     const session = await client.sessions.create({
       agent_id: synced.id,
@@ -591,7 +678,8 @@ export async function research(options: ResearchOptions): Promise<number> {
         budgetUsd: budgetMicro / 1e6,
         description: options.description,
         extraFileIds: options.extraFileIds,
-        preSteps: options.preSteps,
+        preSteps: options.preSteps?.(runDir),
+        runDir,
       }),
       budget_micro_usd: budgetMicro,
       ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
@@ -600,7 +688,17 @@ export async function research(options: ResearchOptions): Promise<number> {
     });
     sessionId = session.id;
     report.session_id = session.id;
-    say(`session ${session.id} started, budget ${usd(budgetMicro)}`);
+    say(`session ${session.id} started, budget ${usd(budgetMicro)}, folder ~/${runDir}`);
+    // Two runs that checked at the same moment would share the computer: both back off.
+    const rivals = await liveSessions(client, synced.id, session.id);
+    if (rivals.length > 0) {
+      report.busy_sessions = rivals;
+      ownsComputer = false;
+      await client.sessions.interrupt(session.id).catch(() => {});
+      throw new Error(
+        `Another session of ${synced.name} started at the same time (${rivals.map((item) => item.id).join(', ')}), so this run stopped its own and leaves the computer to it.`,
+      );
+    }
 
     const deadline = Date.now() + definition.session.max_minutes * 60_000;
     let afterSeq = 0;
@@ -695,7 +793,7 @@ export async function research(options: ResearchOptions): Promise<number> {
       );
       if (round > options.maxRepairs || Date.now() > deadline) break;
       const sent = await client.sessions.send(session.id, {
-        message: repairMessage(verdict.failures, host, round, options.maxRepairs),
+        message: repairMessage(verdict.failures, runDir, host, round, options.maxRepairs),
         queue: true,
       });
       afterSeq = sent.accepted_seq;

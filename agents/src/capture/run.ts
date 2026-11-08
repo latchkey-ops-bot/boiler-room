@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type { APIRequestContext, Browser } from 'playwright';
 import { normaliseUrl, normaliseWhitespace, siteHost, slugify } from '../researcher/text.ts';
 import type { PagesBundle, StoredPage } from '../researcher/verify.ts';
@@ -107,8 +107,32 @@ export function ensureSwap(): string {
   return `${result.stdout}${result.stderr}`.trim();
 }
 
+/** A run's folder name: the run id, which sorts by start time. */
+const RUN_FOLDER = /^[a-z0-9]{10,24}$/;
+
+/**
+ * Removes the folders earlier runs left on this computer. Every run reuses the one agent and its
+ * computer, and works in its own folder under `~/br`, named by its run id; runs go one at a time,
+ * so any other run folder there is finished. Returns the names removed.
+ */
+export function pruneOtherRuns(base: string): string[] {
+  const parent = dirname(base);
+  if (basename(parent) !== 'br' || !RUN_FOLDER.test(basename(base))) return [];
+  const removed: string[] = [];
+  for (const name of readdirSync(parent)) {
+    if (name === basename(base) || !RUN_FOLDER.test(name)) continue;
+    rmSync(join(parent, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  return removed;
+}
+
 export function setup(base: string): void {
   log(`swap: ${ensureSwap().replace(/\n/g, ' | ') || 'none'}`);
+  if (!LOCAL) {
+    const removed = pruneOtherRuns(base);
+    log(`earlier run folders removed: ${removed.length ? removed.join(', ') : 'none'}`);
+  }
   const run = (command: string, timeoutMs: number) => {
     log(`$ ${command}`);
     const result = spawnSync('sh', ['-c', command], {

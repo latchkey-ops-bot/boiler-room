@@ -33,22 +33,27 @@ Input is a URL and, optionally, customer material. The run needs no approval at 
    the verifier and the schema validator inside it, and uploaded to Naive files once per version.
    Customer material is uploaded too (files with `files.upload`, URLs with `files.import`) with a
    manifest; it is cited and stored with provenance `uploaded`.
-2. The run creates its own agent from the `br-researcher` definition, named
-   `br-researcher-<host>-<run id>`, and one session starts with `output_schema` and
-   `structured_output_required`. A computer belongs to an agent and is shared by all its sessions,
-   so a run never reuses another run's agent: parallel runs each get their own computer, job slot
-   and `~/br` folder, and deleting one never stops another.
-3. On its own computer the agent fetches the tool and runs `setup`, `discover`, `capture`, writes
-   the result from the template the capture produced, and runs `verify` until it passes.
+2. Every run reuses the one `br-researcher` agent, synced from its definition by name (a changed
+   definition mints a new version of it, never a second agent), and one session starts with
+   `output_schema` and `structured_output_required`. A computer belongs to an agent and is shared
+   by all its sessions, so runs go one at a time: a run refuses to start while another session of
+   the agent is running or queued, and two runs that start at the same moment both back off. A
+   paused computer is resumed for the session.
+3. On that computer the agent fetches the tool into this run's own folder, `~/br/<run id>`, and
+   runs `setup`, `discover`, `capture`, writes the result from the template the capture produced,
+   and runs `verify` until it passes. Nothing an earlier run left on the computer is read: `setup`
+   removes earlier run folders, and every path the task and the repairs name is in this run's.
 4. The gate checks the submitted result (below). Failures go back to the session with a fix for
    each, and the agent repairs and resubmits, up to `--max-repairs` rounds. A claim that still
    fails is dropped; nothing unverified reaches the output.
 5. The result, the stored page text, the screenshots and logo, the event log and a cost report are
    saved under `out/research/<host>/`.
-6. The agent is deleted, because that is the only way to remove its computer, and the run polls
-   that computer until it reads destroyed. An agent that is already gone counts as deleted.
-   Computers other runs own are listed in the report and never touched. `--keep-agent` keeps this
-   run's agent and computer to inspect them.
+6. Nothing is left running. The session is interrupted if it is still working, the run's
+   processes on the computer are stopped (a capture job, Chromium, the injection test's server),
+   so none comes back when it resumes, and the computer is paused, which bills nothing; the run
+   polls it until it reads paused. The agent is kept for the next run. A computer another session
+   of the agent is using is left running, and other agents' computers are listed in the report and
+   never touched. `--keep-computer` leaves the computer running to inspect it.
 
 The capture tool's last line names the site, `BR_CAPTURE_DONE sha256=<hex> pages=<n> site=<host>
 requested=<host>`, and the run trusts only digests printed for the site it researches. An address
@@ -185,7 +190,7 @@ no secret and logs every request, so a hit on `/collect` is recorded.
 `cli/injection.ts` uploads the server, then runs the real `research()` against it with three
 additive hooks (`extraFileIds`, `preSteps`, `onBeforeTeardown`): the server is fetched to the
 agent's own computer, started on loopback, and the request log and the result the agent built are
-recovered before the agent (and its computer) is deleted. The agent captures
+recovered before the computer is paused. The agent captures
 `http://<host>:<port>/` exactly as it would any site, and the verdict lands in
 `out/research/<host>/injection.json`.
 

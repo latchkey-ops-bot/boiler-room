@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ALWAYS_OFF } from '../src/define.ts';
 import { agents, researcher } from '../src/definitions/index.ts';
 import type { Naive } from '../src/naive/client.ts';
-import { researchTask } from '../src/researcher/prompt.ts';
+import { repairMessage, researchTask } from '../src/researcher/prompt.ts';
 import { agentConfig, canonicalJson, HASH_KEY, skillContent, syncAgents } from '../src/sync.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
@@ -94,10 +94,31 @@ describe('the researcher definition', () => {
         },
       ],
       budgetUsd: 1.5,
+      runDir: 'br/lx1a2b3c4d5e6f',
     });
     expect(task).toContain('["fil_tool","fil_manifest","fil_m1"]');
     expect(task).toContain('submit_output');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
+  });
+
+  // The agent is reused, so its computer keeps what earlier runs wrote. Each run works in its own
+  // folder, and every path the task and a repair name is in it.
+  it('works only in this run’s own folder on the computer', () => {
+    const runDir = 'br/lx1a2b3c4d5e6f';
+    const task = researchTask({
+      url: 'https://site.example.org',
+      host: 'site.example.org',
+      toolFileId: 'fil_tool',
+      materialManifestId: null,
+      material: [],
+      budgetUsd: 1,
+      runDir,
+    });
+    expect(task).toContain(`dir "${runDir}"`);
+    expect(task).toContain(`~/${runDir}/out/site.example.org/result.json`);
+    expect(task).not.toMatch(/~\/br\/out\//);
+    const repair = repairMessage([], runDir, 'site.example.org', 1, 2);
+    expect(repair).toContain(`~/${runDir}/out/site.example.org/result.json`);
   });
 });
 

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { configureGuard } from '../src/capture/guard.ts';
 import { needsRecapture } from '../src/capture/pages.ts';
-import { Browsers, captureResilient, fetchResource } from '../src/capture/run.ts';
+import { Browsers, captureResilient, fetchResource, pruneOtherRuns } from '../src/capture/run.ts';
 
 /**
  * Loads pages from a server on loopback with the capture's own page loader. Skipped when
@@ -251,6 +251,23 @@ describe('fetchResource', { timeout: 60_000 }, () => {
       expect(secretHits).toEqual([]);
     } finally {
       await api.dispose();
+    }
+  });
+});
+
+describe('pruneOtherRuns', () => {
+  it('removes only the folders earlier runs left under ~/br, never this run’s', () => {
+    const home = mkdtempSync(join(tmpdir(), 'br-home-'));
+    try {
+      const br = join(home, 'br');
+      for (const name of ['mhq1a2b3c4d5', 'mhq9z8y7x6w5', 'node_modules', 'notes'])
+        mkdirSync(join(br, name), { recursive: true });
+      expect(pruneOtherRuns(join(br, 'mhq9z8y7x6w5'))).toEqual(['mhq1a2b3c4d5']);
+      expect(readdirSync(br).sort()).toEqual(['mhq9z8y7x6w5', 'node_modules', 'notes']);
+      // A tool run anywhere else, as on a developer machine, removes nothing.
+      expect(pruneOtherRuns(join(home, 'mhq9z8y7x6w5'))).toEqual([]);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
     }
   });
 });
