@@ -237,6 +237,29 @@ Both commits must be on origin, since the computer clones the public repo.
 Rebuild it once the film command has the contract and a runner key is minted: `--adapter film`
 and `NAIVE_RUNNER_KEY` in the env file.
 
+## Measured on Naive
+
+`pnpm runner:e2e --snapshot snp_f623af1411dc4d0181fb8e17c39ab04e`, 2026-11-08: one stand-in film on
+a fork of the snapshot, through every launcher call, with the receiver on the computer at
+127.0.0.1 (a computer takes no inbound connections). Every request passed the receiver's checks,
+both MP4s arrived with the hashes they had on the computer, `bootstrap.json` was gone after each
+launch, the key was not in the runner's log, and nothing was left on Naive.
+
+| Step                                                                       | Time           |
+| -------------------------------------------------------------------------- | -------------- |
+| Create from the snapshot to running                                        | 2.9 s          |
+| Launch exec (setsid, returns at once)                                      | 0.3 to 0.4 s   |
+| Script phase (stand-in, 2 s between steps)                                 | 13.7 s         |
+| Checkpoint (snapshot of the 20 GB disk)                                    | 8.4 to 10.5 s  |
+| Pause                                                                      | 8.9 to 9.2 s   |
+| Resume                                                                     | 5.5 to 5.6 s   |
+| Render phase (stand-in)                                                    | 13.8 to 13.9 s |
+| A fork of the checkpoint (a late approval's path) to running, run dir kept | 3.1 s          |
+
+Two things the design assumed otherwise: the checkpoint of a forked computer forks again, and a
+process running before the pause was still running after the resume. The runner still exits at
+the approval gate, so nothing depends on the second.
+
 ## Tests
 
 `pnpm --filter @boiler-room/film-runner test` runs the runner and the stand-in end to end against
