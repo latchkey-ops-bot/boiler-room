@@ -1072,7 +1072,7 @@ above.
 | `--events <file>`   | One flushed JSON line per event, each checked with `parseFilmEvent` before it is written (`src/film/events.ts`). Messages are plain sentences: keys, links (only the site is kept), paths (only the file name) and Naive ids are taken out               |
 | `--render local`    | `renderCampaign({ runner: 'local' })`: drawn on the film computer, so the render needs no crew budget                                                                                                                                                    |
 | `--no-sync`         | Agents are checked, never created or changed, and no skill is pushed. A deployed agent that is not this checkout's stops the phase with `agent_drift`, exit 1, before anything is spent                                                                  |
-| `--max-usd <n>`     | This phase's cap. The script phase needs $1.30 (Researcher and Director), the render phase $1.00 per format with a local render; under that, `cost_cap`, exit 4                                                                                          |
+| `--max-usd <n>`     | This phase's cap. The script phase needs $1.30 (Researcher and Director), the render phase $1.00 per format with a local render, and a sample both, under one cap: its script leaves its render and review their $1.00; under that, `cost_cap`, exit 4   |
 
 The Naive key is read only from `BOILER_ROOM_ENV` when it is set (the runner's launch key file),
 and a missing key stops with `no_naive_key`. SIGTERM or SIGINT writes `error stopped`, interrupts
