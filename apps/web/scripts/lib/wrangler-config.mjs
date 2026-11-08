@@ -59,6 +59,7 @@ export function environmentConfig(env) {
     databaseId: db.database_id,
     bucketName: bucket.bucket_name,
     provisioned: Boolean(db.database_id) && db.database_id !== PLACEHOLDER_ID,
+    vars: section.vars ?? {},
   };
 }
 

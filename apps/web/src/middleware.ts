@@ -4,7 +4,9 @@ import { clerkMiddleware } from '@clerk/nextjs/server';
  * Clerk on every request, so pages and routes can ask who is signed in. Protection lives on each
  * resource, as Clerk 7 recommends instead of path matching here: the app layout and every app page
  * send a signed-out visitor to sign in (src/server/next.ts), and every API route answers 401
- * (src/server/api/route.ts).
+ * (src/server/api/route.ts). The runner's routes under `/api/runner/` are left out: a film's
+ * computer has no Clerk session, and each call is checked against its HMAC signature instead.
+ * `worker.ts` serves them before Next ever sees the request (src/server/runner/worker-routes.ts).
  *
  * This is `middleware.ts`, not Next 16's `proxy.ts`, on purpose: proxy always runs on the Node.js
  * runtime, and the OpenNext Cloudflare adapter supports only Edge middleware. Keep it until the
@@ -14,8 +16,10 @@ export default clerkMiddleware();
 
 export const config = {
   matcher: [
-    // Everything except Next internals and static files
-    '/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
-    '/(api|trpc)(.*)',
+    // Everything except Next internals, static files, and the runner's signed routes
+    '/((?!_next|api/runner/|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)',
+    // Every API route except the runner's: a film's computer signs its own calls, with no session
+    '/api/((?!runner/).*)',
+    '/trpc(.*)',
   ],
 };

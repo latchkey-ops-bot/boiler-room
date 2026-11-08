@@ -1,7 +1,6 @@
 import { AbsoluteFill, Img } from 'remotion';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
-import { cornerMark } from '../components/scene-base.tsx';
 import {
   type RuntimeImage,
   type SceneProps,
@@ -291,7 +290,6 @@ export const tileWall = defineScene<TileWallProps>({
     const { tile } = wallLayout(stage);
     return { width: Math.max(tile.width, tile.height * image.aspect), zoom: 1 };
   },
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'product',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   anchors: [

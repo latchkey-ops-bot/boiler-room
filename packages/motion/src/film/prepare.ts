@@ -13,20 +13,27 @@ import { type FilmPlan, planFilm } from './plan.ts';
 import { type FilmIssue, validateFilm } from './validate-film.ts';
 import { validateForRender } from './validate-render.ts';
 
-/** Thrown when a campaign may not be rendered. It lists every issue, with what to change. */
+/**
+ * Thrown when a campaign may not be rendered. It lists every issue, with what to change.
+ *
+ * The message is one line. Remotion keeps only the first line of an error thrown in the page, which
+ * is where `calculateMetadata` runs, so `remotion still` and `remotion render` print that line and
+ * nothing else. `report` is the same list one issue a line, for a terminal of our own.
+ */
 export class FilmRejected extends Error {
   readonly issues: (Issue | FilmIssue)[];
+  readonly report: string;
 
   constructor(stage: string, issues: (Issue | FilmIssue)[]) {
     const errors = issues.filter(({ severity }) => severity === 'error');
-    const lines = errors.map(
-      ({ code, path, message, fix }) => `- ${code} at ${path}: ${message} ${fix}`,
+    const header = `This campaign cannot be rendered: ${stage} found ${errors.length} error(s).`;
+    const items = errors.map(({ code, path, message, fix }) =>
+      `${code} at ${path}: ${message} ${fix}`.replace(/\s*\n\s*/g, ' '),
     );
-    super(
-      `This campaign cannot be rendered: ${stage} found ${errors.length} error(s).\n${lines.join('\n')}`,
-    );
+    super([header, ...items.map((item, index) => `(${index + 1}) ${item}`)].join(' '));
     this.name = 'FilmRejected';
     this.issues = issues;
+    this.report = [header, ...items.map((item) => `- ${item}`)].join('\n');
   }
 }
 

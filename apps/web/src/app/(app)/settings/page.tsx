@@ -15,7 +15,7 @@ export default async function SettingsPage() {
     currentUser().catch(() => null),
     ownerOf(ctx.account.kind, ctx.account.clerkOrgId),
     ctx.db
-      .select({ pipeline: films.pipeline })
+      .select({ pipeline: films.pipeline, standIn: films.standIn })
       .from(films)
       .where(and(eq(films.accountId, ctx.account.id), eq(films.showcaseOptIn, true))),
   ]);
@@ -31,8 +31,8 @@ export default async function SettingsPage() {
       }
       owner={owner}
       showcase={{
-        real: shown.filter((film) => film.pipeline !== 'simulated').length,
-        simulated: shown.filter((film) => film.pipeline === 'simulated').length,
+        real: shown.filter((film) => film.pipeline !== 'simulated' && !film.standIn).length,
+        simulated: shown.filter((film) => film.pipeline === 'simulated' || film.standIn).length,
       }}
       accountId={ctx.account.id}
       memberSince={ctx.account.createdAt}

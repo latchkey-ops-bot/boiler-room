@@ -3,6 +3,11 @@
 // Each value goes to `wrangler secret put` on stdin, never on the command line. For staging, a
 // value named STAGING_<NAME> wins over <NAME>. Production takes only PRODUCTION_<NAME>, and refuses
 // a Clerk development key.
+//
+// Staging also gets the real-film secrets (scripts/lib/runner-secrets.mjs), each from its STAGING_
+// name only. The website's Naive key is checked with Naive first: it must hold exactly
+// computers:write and billing:read, and it must not be the admin key. The runner's key, when there
+// is one, may hold nothing beyond sessions and agents:read. Production gets none.
 import {
   bin,
   ENV_FILE,
@@ -15,6 +20,7 @@ import {
   valueFor,
   WORKER_SECRETS,
 } from './lib/env.mjs';
+import { checkRunnerKey, checkWebKey, runnerSecretsFor } from './lib/runner-secrets.mjs';
 
 const env = environmentArg();
 const vars = readEnvFile();
@@ -27,7 +33,26 @@ if (missing.length > 0) {
 }
 refuseDevelopmentKeys(env, values);
 
-await guardProduction(env, `replace ${WORKER_SECRETS.length} secrets`);
+const runner = runnerSecretsFor(vars, env);
+if (runner.problems.length > 0) fail(`Real-film secrets: ${runner.problems.join(' ')}`);
+const webKey = runner.values.find(([name]) => name === 'NAIVE_WEB_KEY')?.[1];
+if (webKey) {
+  const problem = await checkWebKey(webKey);
+  if (problem) fail(problem);
+}
+const runnerKey = runner.values.find(([name]) => name === 'NAIVE_RUNNER_KEY')?.[1];
+if (runnerKey) {
+  const problem = await checkRunnerKey(runnerKey);
+  if (problem) fail(problem);
+}
+if (env === 'staging' && runner.values.length === 0) {
+  console.log('No STAGING_NAIVE_WEB_KEY or STAGING_RUNNER_SIGNING_SECRET: real films stay off.');
+} else if (runner.skipped.length > 0) {
+  console.log(`Not set, so left as they are: ${runner.skipped.join(', ')}.`);
+}
+values.push(...runner.values);
+
+await guardProduction(env, `replace ${values.length} secrets`);
 for (const [name, value] of values) {
   console.log(`Setting ${name} on ${env}`);
   bin('wrangler', ['secret', 'put', name, '--env', env], { env: credentials, input: value });

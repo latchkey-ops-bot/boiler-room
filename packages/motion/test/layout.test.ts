@@ -102,7 +102,7 @@ describe.each(stages)('layout in %s', (_format, stage) => {
     const layout = cardLayout(stage);
     expect(contains(frame, layout.panel)).toBe(true);
     expect(layout.headlineTop).toBeLessThan(layout.panel.y);
-    expect(layout.headlineTop).toBeGreaterThan(markBox(stage).y + markBox(stage).height);
+    expect(layout.headlineTop).toBeGreaterThan(stage.safe.y);
     for (const node of [layout.cause, layout.effect]) {
       expect(contains(layout.panel, node.visual)).toBe(true);
       expect(contains(layout.panel, node.label)).toBe(true);

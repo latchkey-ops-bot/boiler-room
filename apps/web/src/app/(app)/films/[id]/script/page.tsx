@@ -6,7 +6,7 @@ import { Refresher } from '../../../../../components/refresher.tsx';
 import { ScriptReview } from '../../../../../components/script-review.tsx';
 import { SimulatedBadge } from '../../../../../components/status-badge.tsx';
 import { MAX_REVISIONS_PER_FILM } from '../../../../../server/api/films.ts';
-import { simulatedEnvironment } from '../../../../../server/next.ts';
+import { simulatedForCaller } from '../../../../../server/next.ts';
 import { loadFilm } from '../../../../../server/pages.ts';
 import { buildReviewModel } from '../../../../../server/script-review.ts';
 import '../../../../../styles/script-review.css';
@@ -20,7 +20,7 @@ export default async function ScriptPage({ params }: { params: Promise<{ id: str
   if (!detail) notFound();
   const { film, campaign } = detail;
   const working = film.status === 'queued' || film.status === 'working';
-  const banner = simulatedEnvironment();
+  const banner = await simulatedForCaller();
 
   if (!campaign) {
     return (

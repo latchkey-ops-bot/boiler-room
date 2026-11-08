@@ -8,7 +8,6 @@ import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
 import { withAlpha } from '../brand/color.ts';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark } from '../components/scene-base.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import { specPx } from '../components/type.tsx';
 import { type Point, WHOLE_IMAGE } from '../core/camera.ts';
@@ -418,7 +417,6 @@ export const siteScroll = defineScene<SiteScrollProps>({
     }
     return { width: layout.frame.width, zoom: pushAt(specFrame(durationInFrames, fps) - 1) };
   },
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'product',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   anchors: [

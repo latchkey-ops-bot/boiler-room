@@ -163,7 +163,7 @@ try {
   process.exitCode ??= 0;
 } catch (error) {
   if (error instanceof FilmRejected) {
-    guard.log(error.message);
+    guard.log(error.report);
     process.exitCode = 1;
   } else if (error instanceof CostLimitExceeded) {
     guard.log(error.message);

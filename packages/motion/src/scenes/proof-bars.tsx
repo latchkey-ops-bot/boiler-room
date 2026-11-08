@@ -3,7 +3,6 @@ import { useBrand } from '../brand/brand-context.tsx';
 import { withAlpha } from '../brand/color.ts';
 import type { BrandTheme } from '../brand/theme.ts';
 import { RisingWords } from '../components/rising-words.tsx';
-import { cornerMark } from '../components/scene-base.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import { baselineOffset, type SpecFit, specFit, specPx } from '../components/type.tsx';
 import { blink } from '../core/curves.ts';
@@ -338,7 +337,6 @@ export const proofBars = defineScene<ProofBarsProps>({
   },
   image: 'none',
   maxImages: 0,
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'proof',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   anchors: [
