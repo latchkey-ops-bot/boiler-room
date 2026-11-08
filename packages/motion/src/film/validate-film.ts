@@ -2,13 +2,14 @@ import {
   type Campaign,
   type Issue,
   type Scene,
+  sceneFrames,
   TEXT_ROLES,
   type TextRole,
 } from '@boiler-room/schema';
 import type { Format } from '../layout/stage.ts';
 import { definitionOf } from '../scenes/registry.ts';
 import { isCatalogId, isTransition, TRANSITIONS } from '../transitions/catalog.ts';
-import type { CutSelection } from './cut.ts';
+import { type CutSelection, resolveCut } from './cut.ts';
 import { screenImageId } from './media.ts';
 import { filmSeams, propsRefused } from './seams.ts';
 
@@ -27,6 +28,7 @@ export const FILM_ISSUE_CODES = [
   'TRANSITION_UNBUILT',
   'TRANSITION_RESOLVED',
   'TRANSITION_UNUSED',
+  'SCENE_TOO_SHORT',
   'FORMAT_UNLISTED',
   'VARIANT_UNKNOWN',
   'VARIANT_UNUSED',
@@ -219,6 +221,37 @@ function checkSeams(campaign: Campaign): FilmIssue[] {
   });
 }
 
+/**
+ * A scene that holds still to its end, the end card, must be built before its hold starts. It is
+ * checked as the cut being rendered, since the CTA chosen changes its copy and a hook can change
+ * the transition into it. Any `transitionOut` outside the catalog is `TRANSITION_UNKNOWN`, and
+ * until there is none, which transition plays into a scene is not known.
+ */
+function checkHolds(campaign: Campaign, selection: CutSelection): FilmIssue[] {
+  const cut = resolveCut(campaign, selection);
+  if (cut.scenes.some(({ transitionOut }) => transitionOut && !isCatalogId(transitionOut))) {
+    return [];
+  }
+  const { fps, scenes: frames } = sceneFrames(cut);
+  const seams = filmSeams(cut);
+  return cut.scenes.flatMap((scene, index) => {
+    const definition = definitionOf(scene.type);
+    const parsed = definition?.props.safeParse(scene.props);
+    if (!definition?.unfinishedAtHold || !parsed?.success) return [];
+    const path = `scenes[${index}]`;
+    return definition
+      .unfinishedAtHold({
+        props: parsed.data,
+        text: scene.text,
+        durationInFrames: frames[index]?.durationInFrames ?? 0,
+        fps,
+        inT: seams[index - 1]?.used,
+        path,
+      })
+      .map(({ message, fix }) => error('SCENE_TOO_SHORT', path, message, fix));
+  });
+}
+
 function checkSelection(campaign: Campaign, format: Format, selection: CutSelection): FilmIssue[] {
   const { variants } = campaign;
   const issues: FilmIssue[] = [];
@@ -269,8 +302,9 @@ function checkSelection(campaign: Campaign, format: Format, selection: CutSelect
 
 /**
  * The rules that only the templates know: props each template accepts, copy each one sets, the
- * images it needs, transitions that are catalog ids, and what the seam resolver plays on each
- * boundary. Run it on a campaign `validateCampaign` passed.
+ * images it needs, transitions that are catalog ids, what the seam resolver plays on each
+ * boundary, and a hold that comes only once the scene is built. Run it on a campaign
+ * `validateCampaign` passed.
  */
 export function validateFilm(
   campaign: Campaign,
@@ -289,6 +323,7 @@ export function validateFilm(
       ),
     ]),
     ...checkSeams(campaign),
+    ...checkHolds(campaign, selection),
     ...checkSelection(campaign, format, selection),
   ];
 }
