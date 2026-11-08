@@ -31,7 +31,7 @@
           "binding": "DB",
           "database_name": "boiler-room-staging",
           // Written by `pnpm web:provision:staging`, then committed by pull request.
-          "database_id": "PROVISION_ME",
+          "database_id": "c8adc012-fdec-4c94-898b-f94c20829393",
           "migrations_dir": "drizzle"
         }
       ],
