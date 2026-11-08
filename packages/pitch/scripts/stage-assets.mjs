@@ -74,7 +74,8 @@ export function stageAssets({
       console.warn(`stage: film not found, its scene will be empty: ${from}`);
       continue;
     }
-    copyFileSync(from, path.join(filmsOut, file));
+    // Staged under its last part, as filmFile() in src/manifest.ts expects.
+    copyFileSync(from, path.join(filmsOut, path.basename(file)));
     films.push(file);
   }
 

@@ -19,3 +19,9 @@ export interface Manifest {
 export const EMPTY_MANIFEST: Manifest = { frames: [], events: [], films: [], narration: false };
 
 export const frameFile = (ms: number): string => `run/frames/${String(ms).padStart(8, '0')}.jpg`;
+
+/**
+ * Where a film from timeline.json is staged in public/. A name in the films dir keeps its name; an
+ * absolute path is staged under its last part. scripts/stage-assets.mjs uses the same rule.
+ */
+export const filmFile = (file: string): string => `films/${file.split('/').pop() ?? file}`;

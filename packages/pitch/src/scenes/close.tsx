@@ -1,5 +1,6 @@
 import { Img, OffthreadVideo, Sequence, staticFile } from 'remotion';
 import { C } from '../brand.ts';
+import { filmFile } from '../manifest.ts';
 import { toFrame } from '../time.ts';
 import { timeline } from '../timeline.ts';
 import { body, display, Pill, Rise, SceneShell } from '../ui.tsx';
@@ -17,7 +18,7 @@ export function CloseMontage({ duration, manifest }: SceneProps) {
           durationInFrames={i === clips.length - 1 ? duration - i * each : each}
         >
           <OffthreadVideo
-            src={staticFile(`films/${clip.file}`)}
+            src={staticFile(filmFile(clip.file))}
             trimBefore={toFrame(clip.from)}
             muted
             style={{ width: '100%', height: '100%' }}

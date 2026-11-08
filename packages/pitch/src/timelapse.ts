@@ -1,6 +1,6 @@
 import type { RunEvent } from './manifest.ts';
 
-/** Moments when someone acts on screen. They play near real speed; waits between them race. */
+/** Moments when someone acts on screen. They play fastest-readable; the waits between them race. */
 const INTERACTIVE = new Set([
   'typing',
   'submitted',
@@ -13,10 +13,12 @@ const INTERACTIVE = new Set([
 ]);
 const LEAD_MS = 1500;
 const TAIL_MS = 3500;
-/** Interactive moments play at this many times real speed, unless they would not fit. */
-const INTERACTIVE_SPEED = 2;
-/** The share of the scene that interactive moments may take at most. */
-const INTERACTIVE_SHARE = 0.5;
+/** A wait (research, script, a render) never takes more than this many seconds of the scene. */
+const WAIT_CAP_S = 2.5;
+/** Short waits still race at least this fast, so a 4-second page load is not a 2-second beat. */
+const WAIT_MIN_SPEED = 6;
+/** Interactive moments never play faster than this; past it the waits shrink instead. */
+const INTERACTIVE_MAX_SPEED = 6;
 
 export interface LapsePoint {
   /** ms since the recording started */
@@ -25,10 +27,20 @@ export interface LapsePoint {
   out: number;
 }
 
+interface Segment {
+  a: number;
+  b: number;
+  interactive: boolean;
+}
+
+/** A status the recorder could not read (the browser closed, say) is not a stage of the film. */
+const isStage = (e: RunEvent) => e.kind === 'status' && e.status !== 'unknown';
+
 /**
- * Maps the whole recording onto `outFrames` frames: interactive windows at about 2x, every wait in
- * between at whatever speed fills the rest. Never slower than real time, so a short recording ends
- * early and holds its last frame.
+ * Maps the recording onto `outFrames` frames. It starts just before the first thing someone does
+ * on screen (the sign-in is cut), splits the waits at every stage change, gives each wait at most
+ * WAIT_CAP_S seconds, and lets the interactive moments fill the rest at one shared speed. Nothing
+ * plays slower than real time, so a short recording ends early and holds its last frame.
  */
 export function planTimelapse(
   frames: number[],
@@ -49,34 +61,68 @@ export function planTimelapse(
     if (last && a <= last[1]) last[1] = Math.max(last[1], b);
     else windows.push([a, b]);
   }
+  const start = windows[0]?.[0] ?? 0;
 
-  const segments: { a: number; b: number; interactive: boolean }[] = [];
-  let cursor = 0;
+  const segments: Segment[] = [];
+  const cuts = events.filter(isStage).map((e) => e.ms);
+  const pushWait = (a: number, b: number) => {
+    let from = a;
+    for (const cut of cuts) {
+      if (cut > from && cut < b) {
+        segments.push({ a: from, b: cut, interactive: false });
+        from = cut;
+      }
+    }
+    if (b > from) segments.push({ a: from, b, interactive: false });
+  };
+  let cursor = start;
   for (const [a, b] of windows) {
-    if (a > cursor) segments.push({ a: cursor, b: a, interactive: false });
+    if (a > cursor) pushWait(cursor, a);
     segments.push({ a, b, interactive: true });
     cursor = b;
   }
-  if (cursor < end) segments.push({ a: cursor, b: end, interactive: false });
+  if (cursor < end) pushWait(cursor, end);
 
   const outSeconds = outFrames / fps;
-  const realInteractive = segments.filter((s) => s.interactive).reduce((n, s) => n + s.b - s.a, 0);
-  const realWait = end - realInteractive;
+  const realS = (s: Segment) => (s.b - s.a) / 1000;
+  const waits = segments.filter((s) => !s.interactive);
+  const interactiveReal = segments.filter((s) => s.interactive).reduce((n, s) => n + realS(s), 0);
 
-  let slow = INTERACTIVE_SPEED;
-  if (realInteractive / 1000 / slow > INTERACTIVE_SHARE * outSeconds) {
-    slow = realInteractive / 1000 / (INTERACTIVE_SHARE * outSeconds);
+  // Each wait's share of the scene, in output seconds.
+  const waitOut = new Map<Segment, number>(
+    waits.map((s) => [s, Math.min(realS(s) / WAIT_MIN_SPEED, WAIT_CAP_S)]),
+  );
+  const waitTotal = () => [...waitOut.values()].reduce((n, v) => n + v, 0);
+
+  let speed = 1;
+  if (interactiveReal > 0) {
+    const room = outSeconds - waitTotal();
+    speed = room > 0 ? interactiveReal / room : Number.POSITIVE_INFINITY;
+    if (speed > INTERACTIVE_MAX_SPEED) {
+      // Too little room: hold interactive moments at the cap and shrink the waits to fit.
+      speed = Math.max(INTERACTIVE_MAX_SPEED, interactiveReal / outSeconds);
+      const left = Math.max(0, outSeconds - interactiveReal / speed);
+      const k = waitTotal() > 0 ? left / waitTotal() : 0;
+      for (const [s, v] of waitOut) waitOut.set(s, v * k);
+    }
   }
-  const waitSeconds = outSeconds - realInteractive / 1000 / slow;
-  let fast = realWait > 0 ? realWait / 1000 / Math.max(waitSeconds, 1e-6) : slow;
-  if (realWait <= 0) slow = realInteractive / 1000 / outSeconds;
-  slow = Math.max(1, slow);
-  fast = Math.max(1, fast);
+  if (speed < 1) {
+    // More room than the moments need at real time: let the waits run longer, up to real time.
+    speed = 1;
+    let spare = outSeconds - interactiveReal - waitTotal();
+    for (const [s, v] of waitOut) {
+      const grow = Math.min(spare, realS(s) - v);
+      if (grow > 0) {
+        waitOut.set(s, v + grow);
+        spare -= grow;
+      }
+    }
+  }
 
-  const points: LapsePoint[] = [{ real: 0, out: 0 }];
+  const points: LapsePoint[] = [{ real: start, out: 0 }];
   let out = 0;
   for (const s of segments) {
-    out += ((s.b - s.a) / 1000 / (s.interactive ? slow : fast)) * fps;
+    out += (s.interactive ? realS(s) / speed : (waitOut.get(s) ?? 0)) * fps;
     points.push({ real: s.b, out });
   }
   return points;
@@ -111,39 +157,60 @@ export function frameAt(frames: number[], ms: number): number | undefined {
   return found;
 }
 
-export function formatClock(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+/** When the clock starts: the moment the URL was submitted, so it reads as the film's own time. */
+export function clockZero(events: RunEvent[]): number {
+  return events.find((e) => e.kind === 'submitted')?.ms ?? 0;
 }
 
-function captionFor(e: RunEvent): string | undefined {
+/** Elapsed time as "11m 36s", so it cannot be read as a time of day. */
+export function formatClock(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`;
+}
+
+/** The captions, in the order a film goes through them. A caption never steps back. */
+const CAPTIONS = [
+  'Paste a URL.',
+  'A researcher reads the site.',
+  'A director writes the script.',
+  'The script waits for you.',
+  'Every number, quoted from the site.',
+  'You approve it.',
+  'An art director picks the shots.',
+  'The film renders.',
+  'A quality check reviews it.',
+  'Delivered.',
+] as const;
+
+/** The stage names the film API reports, each to its caption. */
+const STAGE_CAPTION: Record<string, number> = {
+  research: 1,
+  script: 2,
+  approval: 3,
+  art_direction: 6,
+  render: 7,
+  review: 8,
+  delivery: 9,
+};
+
+function captionIndex(e: RunEvent): number | undefined {
   switch (e.kind) {
     case 'typing':
     case 'submitted':
     case 'film':
-      return 'Paste a URL.';
+      return 0;
     case 'script_open':
     case 'confirmed_number':
-      return 'Every number is quoted from the site.';
+      return 4;
     case 'approved':
-      return 'You approve it.';
+      return 5;
     case 'delivered_page':
     case 'done':
-      return 'Delivered.';
-    case 'status': {
-      const stage = `${e.stage ?? ''}`.toLowerCase();
-      if (e.status === 'done') return 'Delivered.';
-      if (stage.includes('research')) return 'A researcher reads the site.';
-      if (stage.includes('approval')) return 'The script waits for you.';
-      if (stage.includes('script') || stage.includes('direct'))
-        return 'A director writes the script.';
-      if (stage.includes('art') || stage.includes('anim'))
-        return 'An art director picks the shots.';
-      if (stage.includes('render')) return 'The film renders.';
-      if (stage.includes('qc') || stage.includes('quality') || stage.includes('check'))
-        return 'A quality check watches every frame.';
-      return undefined;
-    }
+      return 9;
+    case 'status':
+      if (!isStage(e)) return undefined;
+      if (e.status === 'done') return 9;
+      return STAGE_CAPTION[`${e.stage ?? ''}`];
     default:
       return undefined;
   }
@@ -151,10 +218,10 @@ function captionFor(e: RunEvent): string | undefined {
 
 /** What the time-lapse is showing at recording time `ms`, in plain words. */
 export function captionAt(events: RunEvent[], ms: number): string {
-  let caption = 'Paste a URL.';
+  let index = 0;
   for (const e of events) {
     if (e.ms > ms) break;
-    caption = captionFor(e) ?? caption;
+    index = Math.max(index, captionIndex(e) ?? index);
   }
-  return caption;
+  return CAPTIONS[index] ?? CAPTIONS[0];
 }

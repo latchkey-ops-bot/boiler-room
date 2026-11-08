@@ -39,7 +39,7 @@ export function ProblemAnswer({ duration }: SceneProps) {
         <div style={{ display: 'flex', gap: 64, marginTop: 88 }}>
           <Rise delay={30}>
             <PixelBox fill={C.cream} style={chip}>
-              <span style={display(60)}>About fifteen minutes</span>
+              <span style={display(60)}>Under half an hour</span>
             </PixelBox>
           </Rise>
           <Rise delay={42}>

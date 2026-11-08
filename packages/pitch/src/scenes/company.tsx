@@ -199,7 +199,7 @@ export function CompanyOrg({ duration }: SceneProps) {
 }
 
 /** The first autonomous cycle, card by card, with the real UTC times from the CEO's board. */
-const CYCLE = [
+const CYCLE: Card[] = [
   { at: '11:10:42', who: 'CEO', what: 'Sweep: reads the board' },
   { at: '11:10:57', who: 'CEO', what: 'DIR: scene-library-first-scene' },
   { at: '11:12:39', who: 'Product', what: 'Spec merged: design PR #13' },
@@ -207,6 +207,56 @@ const CYCLE = [
   { at: '11:13:37', who: 'Eng lead', what: 'ENG 1/3: status-relay layout' },
   { at: '11:21:34', who: 'Engineer', what: 'Pull request #32 opened' },
 ];
+
+type Card = { at: string; who: string; what: string };
+
+/** One board card on a timeline: its UTC time, who wrote it, and what it says. */
+function CardRow({
+  card,
+  at,
+  fill = C.white,
+  drop = C.sky,
+}: {
+  card: Card;
+  at: number;
+  fill?: string;
+  drop?: string;
+}) {
+  const p = enter(useCurrentFrame(), at, 10);
+  return (
+    <div style={{ opacity: p, transform: `translateX(${(1 - p) * 40}px)` }}>
+      <PixelBox
+        fill={fill}
+        drop={drop}
+        lift={8}
+        style={{
+          height: 104,
+          padding: '0 28px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 28,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: F.mono,
+            fontWeight: 600,
+            fontSize: 26,
+            color: C.muted,
+            width: 136,
+            flexShrink: 0,
+          }}
+        >
+          {card.at}
+        </span>
+        <span style={{ width: 190, flexShrink: 0 }}>
+          <Pill size={20}>{card.who}</Pill>
+        </span>
+        <span style={body(30, C.ink, 700)}>{card.what}</span>
+      </PixelBox>
+    </div>
+  );
+}
 
 const toSeconds = (hms: string) => {
   const [h = 0, m = 0, s = 0] = hms.split(':').map(Number);
@@ -247,49 +297,21 @@ export function CompanyCycle({ duration }: SceneProps) {
         </Rise>
         <div style={{ marginTop: 40, opacity: enter(frame, appear.at(-1) ?? 0) }}>
           <p style={display(56, done ? C.deep : C.muted)}>Under 11 minutes.</p>
-          <p style={{ ...body(40, C.ink), marginTop: 10 }}>Nobody touching it.</p>
+          <p style={{ ...body(40, C.ink), marginTop: 10 }}>No human after the sweep.</p>
         </div>
       </div>
       <div
         style={{ position: 'absolute', left: 780, width: 980, top: 168, display: 'grid', gap: 22 }}
       >
-        {CYCLE.map((card, i) => {
-          const p = enter(frame, appear[i] ?? 0, 10);
-          const last = i === CYCLE.length - 1;
-          return (
-            <div key={card.at} style={{ opacity: p, transform: `translateX(${(1 - p) * 40}px)` }}>
-              <PixelBox
-                fill={last ? C.successSoft : C.white}
-                drop={last ? C.mint : C.sky}
-                lift={8}
-                style={{
-                  height: 104,
-                  padding: '0 28px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 28,
-                }}
-              >
-                <span
-                  style={{
-                    fontFamily: F.mono,
-                    fontWeight: 600,
-                    fontSize: 26,
-                    color: C.muted,
-                    width: 136,
-                    flexShrink: 0,
-                  }}
-                >
-                  {card.at}
-                </span>
-                <span style={{ width: 190, flexShrink: 0 }}>
-                  <Pill size={20}>{card.who}</Pill>
-                </span>
-                <span style={body(30, C.ink, 700)}>{card.what}</span>
-              </PixelBox>
-            </div>
-          );
-        })}
+        {CYCLE.map((card, i) => (
+          <CardRow
+            key={card.at}
+            card={card}
+            at={appear[i] ?? 0}
+            fill={i === CYCLE.length - 1 ? C.successSoft : C.white}
+            drop={i === CYCLE.length - 1 ? C.mint : C.sky}
+          />
+        ))}
       </div>
     </SceneShell>
   );
@@ -363,11 +385,57 @@ export function CompanyPr({ duration }: SceneProps) {
   );
 }
 
+/**
+ * Why PR #32 is still open, from the board: the engineer's own block note, the CEO's decision
+ * comments, and the FOUNDER card a later sweep wrote. The block is not cleared, so nothing here
+ * says it was.
+ */
+const DEADLOCK: Card[] = [
+  { at: '11:22:09', who: 'Engineer', what: 'Blocks its own card: won’t stack on an unmerged PR' },
+  { at: '11:24:05', who: 'CEO', what: 'Finds the deadlock: 4 decision comments' },
+  { at: '15:11:03', who: 'CEO', what: 'FOUNDER: clear SHIP dependency deadlock' },
+];
+
+export function CompanyDeadlock({ duration }: SceneProps) {
+  const frame = useCurrentFrame();
+  const first = 30;
+  const step = Math.max(20, (duration - first - 90) / (DEADLOCK.length - 1));
+  const appear = DEADLOCK.map((_, i) => Math.round(first + i * step));
+  const last = appear.at(-1) ?? 0;
+  return (
+    <SceneShell duration={duration}>
+      <Kicker>Same day · UTC</Kicker>
+      <div style={{ position: 'absolute', left: SIDE, top: 200, width: 560 }}>
+        <Rise>
+          <p style={display(64)}>PR #32 is still open. The agents know why.</p>
+        </Rise>
+        <div style={{ marginTop: 56, opacity: enter(frame, last + 6) }}>
+          <p style={display(56, C.deep)}>Sent to the founder.</p>
+          <p style={{ ...body(40, C.ink), marginTop: 10 }}>The card is still to do.</p>
+        </div>
+      </div>
+      <div
+        style={{ position: 'absolute', left: 780, width: 980, top: 300, display: 'grid', gap: 22 }}
+      >
+        {DEADLOCK.map((card, i) => (
+          <CardRow
+            key={card.at}
+            card={card}
+            at={appear[i] ?? 0}
+            fill={i === DEADLOCK.length - 1 ? C.attentionSoft : C.white}
+            drop={i === DEADLOCK.length - 1 ? C.pink : C.sky}
+          />
+        ))}
+      </div>
+    </SceneShell>
+  );
+}
+
 export function CompanyGtm({ duration }: SceneProps) {
   const steps = [
     'Find startups that just launched',
     'Make each a free launch video',
-    'Prepare the post',
+    'Draft the post',
   ];
   return (
     <SceneShell duration={duration}>
@@ -375,12 +443,17 @@ export function CompanyGtm({ duration }: SceneProps) {
       <Rise style={{ position: 'absolute', left: SIDE, top: 190 }}>
         <p style={display(104)}>Go-to-market is agents too.</p>
       </Rise>
+      <Rise delay={10} style={{ position: 'absolute', left: SIDE, top: 330 }}>
+        <Pill fill={C.attentionSoft} color={C.attentionInk} size={26}>
+          Set up · daily caps at $0, so switched off for now
+        </Pill>
+      </Rise>
       <div
         style={{
           position: 'absolute',
           left: SIDE,
           right: SIDE,
-          top: 440,
+          top: 470,
           display: 'flex',
           alignItems: 'center',
           gap: 28,
@@ -416,7 +489,7 @@ export function CompanyGtm({ duration }: SceneProps) {
           </div>
         ))}
       </div>
-      <Rise delay={70} style={{ position: 'absolute', left: SIDE, top: 760 }}>
+      <Rise delay={70} style={{ position: 'absolute', left: SIDE, top: 790 }}>
         <PixelBox
           fill={C.cream}
           drop={C.pink}

@@ -11,7 +11,12 @@ const TimelineSchema = z.object({
   fps: z.number().int().positive(),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
-  finishedFilm: z.object({ file: z.string().min(1), site: z.string().min(1) }),
+  finishedFilm: z.object({
+    file: z.string().min(1),
+    site: z.string().min(1),
+    /** Seconds into the film where the beat starts, past its cold open. */
+    from: z.number().min(0).default(0),
+  }),
   montage: z.array(
     z.object({ file: z.string().min(1), site: z.string().min(1), from: z.number().min(0) }),
   ),

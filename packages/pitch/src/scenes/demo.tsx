@@ -1,7 +1,15 @@
 import { Img, OffthreadVideo, staticFile, useCurrentFrame, useVideoConfig } from 'remotion';
 import { C, F } from '../brand.ts';
-import { frameFile } from '../manifest.ts';
-import { captionAt, formatClock, frameAt, planTimelapse, realMsAt } from '../timelapse.ts';
+import { filmFile, frameFile } from '../manifest.ts';
+import { toFrame } from '../time.ts';
+import {
+  captionAt,
+  clockZero,
+  formatClock,
+  frameAt,
+  planTimelapse,
+  realMsAt,
+} from '../timelapse.ts';
 import { timeline } from '../timeline.ts';
 import { display, Pill, PixelBox, SceneShell } from '../ui.tsx';
 import type { SceneProps } from './types.ts';
@@ -23,8 +31,18 @@ function TopRow({ caption, right }: { caption: string; right: React.ReactNode })
         justifyContent: 'space-between',
       }}
     >
-      <p style={display(64)}>{caption}</p>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>{right}</div>
+      <p style={{ ...display(56), whiteSpace: 'nowrap' }}>{caption}</p>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: 10,
+          flexShrink: 0,
+        }}
+      >
+        {right}
+      </div>
     </div>
   );
 }
@@ -42,18 +60,34 @@ export function DemoTimelapse({ duration, manifest }: SceneProps) {
         caption={captionAt(events, real)}
         right={
           <>
-            <Pill>Real run · sped up</Pill>
+            <Pill size={22}>Real run · sped up</Pill>
             <span
-              style={{
-                fontFamily: F.mono,
-                fontWeight: 700,
-                fontSize: 56,
-                color: C.deep,
-                minWidth: 150,
-                textAlign: 'right',
-              }}
+              style={{ display: 'flex', alignItems: 'baseline', gap: 14, whiteSpace: 'nowrap' }}
             >
-              {formatClock(real)}
+              <span
+                style={{
+                  fontFamily: F.mono,
+                  fontWeight: 600,
+                  fontSize: 22,
+                  letterSpacing: '0.14em',
+                  color: C.muted,
+                }}
+              >
+                ELAPSED
+              </span>
+              <span
+                style={{
+                  fontFamily: F.mono,
+                  fontWeight: 700,
+                  fontSize: 48,
+                  lineHeight: 1,
+                  color: C.deep,
+                  minWidth: 210,
+                  textAlign: 'right',
+                }}
+              >
+                {formatClock(real - clockZero(events))}
+              </span>
             </span>
           </>
         }
@@ -84,11 +118,12 @@ export function DemoFilm({ duration, manifest }: SceneProps) {
   const staged = manifest.films.includes(film.file);
   return (
     <SceneShell duration={duration}>
-      <TopRow caption="The finished film." right={<Pill>{film.site}</Pill>} />
+      <TopRow caption="A finished film." right={<Pill>{film.site}</Pill>} />
       <PixelBox style={{ position: 'absolute', ...SCREEN, overflow: 'hidden' }} fill={C.ink}>
         {staged ? (
           <OffthreadVideo
-            src={staticFile(`films/${film.file}`)}
+            src={staticFile(filmFile(film.file))}
+            trimBefore={toFrame(film.from)}
             muted
             style={{ width: '100%', height: '100%' }}
           />

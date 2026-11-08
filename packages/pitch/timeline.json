@@ -4,138 +4,139 @@
   "height": 1080,
   "finishedFilm": {
     "file": "1-resend-staging-website.mp4",
-    "site": "resend.com"
+    "site": "resend.com",
+    "from": 12
   },
   "montage": [
     {
       "file": "2-posthog-approved-script.mp4",
       "site": "posthog.com",
-      "from": 6
+      "from": 17.5
     },
     {
       "file": "3-linear.mp4",
       "site": "linear.app",
-      "from": 6
+      "from": 8
     },
     {
-      "file": "1-resend-staging-website.mp4",
-      "site": "resend.com",
-      "from": 14
-    },
-    {
-      "file": "4-posthog-first-real-film.mp4",
-      "site": "posthog.com",
-      "from": 20
+      "file": "/tmp/claude-1000/-home-moss-YC-hack/a4ff2f83-e504-404d-bfb3-6285b0456490/scratchpad/qcimg/agentmail/16x9.main.none.mp4",
+      "site": "agentmail.to",
+      "from": 15
     }
   ],
   "sections": [
     {
       "id": "problem",
-      "start": 0,
-      "end": 12,
+      "start": 0.0,
+      "end": 12.5,
       "scenes": [
         {
           "id": "problem-need",
-          "start": 0,
-          "end": 4
+          "start": 0.0,
+          "end": 3.0
         },
         {
           "id": "problem-studio",
-          "start": 4,
-          "end": 7.5
+          "start": 3.0,
+          "end": 6.0
         },
         {
           "id": "problem-answer",
-          "start": 7.5,
-          "end": 12
+          "start": 6.0,
+          "end": 12.5
         }
       ]
     },
     {
       "id": "demo",
-      "start": 12,
-      "end": 45,
+      "start": 12.5,
+      "end": 35.0,
       "scenes": [
         {
           "id": "demo-timelapse",
-          "start": 12,
-          "end": 39
+          "start": 12.5,
+          "end": 29.0
         },
         {
           "id": "demo-film",
-          "start": 39,
-          "end": 45
+          "start": 29.0,
+          "end": 35.0
         }
       ]
     },
     {
       "id": "company",
-      "start": 45,
-      "end": 90,
+      "start": 35.0,
+      "end": 92.0,
       "scenes": [
         {
           "id": "company-intro",
-          "start": 45,
-          "end": 52
+          "start": 35.0,
+          "end": 47.5
         },
         {
           "id": "company-org",
-          "start": 52,
-          "end": 63
+          "start": 47.5,
+          "end": 60.5
         },
         {
           "id": "company-cycle",
-          "start": 63,
-          "end": 77
+          "start": 60.5,
+          "end": 69.5
         },
         {
           "id": "company-pr",
-          "start": 77,
-          "end": 83
+          "start": 69.5,
+          "end": 73.5
+        },
+        {
+          "id": "company-deadlock",
+          "start": 73.5,
+          "end": 83.0
         },
         {
           "id": "company-gtm",
-          "start": 83,
-          "end": 90
+          "start": 83.0,
+          "end": 92.0
         }
       ]
     },
     {
       "id": "trust",
-      "start": 90,
-      "end": 110,
+      "start": 92.0,
+      "end": 108.0,
       "scenes": [
         {
           "id": "trust-caps",
-          "start": 90,
-          "end": 97
+          "start": 92.0,
+          "end": 97.0
         },
         {
           "id": "trust-tripwire",
-          "start": 97,
-          "end": 103
+          "start": 97.0,
+          "end": 102.0
         },
         {
           "id": "trust-quotes",
-          "start": 103,
-          "end": 110
+          "start": 102.0,
+          "end": 108.0
         }
       ]
     },
     {
       "id": "close",
-      "start": 110,
-      "end": 120,
+      "start": 108.0,
+      "end": 120.0,
       "scenes": [
         {
           "id": "close-montage",
-          "start": 110,
-          "end": 115
+          "start": 108.0,
+          "end": 113.5
         },
         {
           "id": "close-logo",
-          "start": 115,
-          "end": 120
+          "start": 113.5,
+          "end": 120.0
         }
       ]
     }

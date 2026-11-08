@@ -3,7 +3,11 @@ import { C, F } from '../brand.ts';
 import { body, display, enter, Kicker, Pill, PixelBox, Rise, SceneShell, SIDE } from '../ui.tsx';
 import type { SceneProps } from './types.ts';
 
-/** Live daily caps, from agents.get .budget.cap_micro_usd (company.json). */
+/**
+ * Live daily caps, from agents.get .budget.cap_micro_usd (company.json). The 4 GTM agents sit at
+ * $0 (they cannot spend), which the footnote says rather than a $0 card that reads as a running
+ * team.
+ */
 const CAPS = [
   { who: 'CEO', cap: '$5' },
   { who: 'Product', cap: '$4' },
@@ -14,7 +18,6 @@ const CAPS = [
   { who: 'Director', cap: '$40' },
   { who: 'Art Director', cap: '$20' },
   { who: 'Quality Check', cap: '$15' },
-  { who: '4 GTM agents', cap: '$0' },
 ];
 
 function Rule({ n, title }: { n: number; title: string }) {
@@ -53,27 +56,43 @@ export function TrustCaps({ duration }: SceneProps) {
         ))}
       </div>
       <Rise delay={64} style={{ position: 'absolute', left: SIDE, top: 900 }}>
-        <p style={body(34, C.muted)}>Live caps on Naive, per agent, per day.</p>
+        <p style={body(34, C.muted)}>
+          Live caps on Naive, per agent, per day. The 4 GTM agents are at $0: switched off.
+        </p>
       </Rise>
     </SceneShell>
   );
 }
 
+/**
+ * The tripwire as apps/web/src/server/runner/watchdog.ts runs it: the org balance falling more than
+ * TRIPWIRE_DAILY_FALL_USD within a day, measured from the day's starting balance, halts real films.
+ * It is not a floor. The threshold is left off screen until the deployed value is confirmed.
+ */
 export function TrustTripwire({ duration }: SceneProps) {
   const frame = useCurrentFrame();
-  const level = interpolate(frame, [20, duration - 60], [0.82, 0.12], {
+  const startLevel = 0.86;
+  const wire = 0.38;
+  const level = interpolate(frame, [20, duration - 50], [startLevel, 0.3], {
     extrapolateLeft: 'clamp',
     extrapolateRight: 'clamp',
   });
-  const wire = 0.25;
   const tripped = level <= wire;
   const width = 1600;
+  const tag = {
+    ...body(26, C.muted, 700),
+    position: 'absolute',
+    fontFamily: F.mono,
+    textTransform: 'uppercase',
+    letterSpacing: '0.1em',
+    whiteSpace: 'nowrap',
+  } as const;
   return (
     <SceneShell duration={duration}>
-      <Rule n={2} title="A balance tripwire that halts films." />
-      <div style={{ position: 'absolute', left: SIDE, top: 470, width }}>
-        <p style={body(30, C.muted, 700)}>Balance</p>
-        <PixelBox lift={8} style={{ marginTop: 18, height: 96, position: 'relative' }}>
+      <Rule n={2} title="A tripwire that halts films if the balance falls too far in a day." />
+      <div style={{ position: 'absolute', left: SIDE, top: 480, width }}>
+        <p style={body(30, C.muted, 700)}>Balance today</p>
+        <PixelBox lift={8} style={{ marginTop: 56, height: 96, position: 'relative' }}>
           <div
             style={{
               position: 'absolute',
@@ -87,6 +106,16 @@ export function TrustTripwire({ duration }: SceneProps) {
           <div
             style={{
               position: 'absolute',
+              left: `${startLevel * 100}%`,
+              top: -24,
+              bottom: -24,
+              width: 6,
+              background: C.ink,
+            }}
+          />
+          <div
+            style={{
+              position: 'absolute',
               left: `${wire * 100}%`,
               top: -24,
               bottom: -24,
@@ -94,26 +123,35 @@ export function TrustTripwire({ duration }: SceneProps) {
               background: C.attentionInk,
             }}
           />
+          <div
+            style={{
+              position: 'absolute',
+              left: `${wire * 100}%`,
+              width: `${(startLevel - wire) * 100}%`,
+              top: -40,
+              height: 4,
+              background: C.attentionInk,
+            }}
+          />
         </PixelBox>
+        <p style={{ ...tag, color: C.ink, left: startLevel * width - 180, top: 4 }}>Start of day</p>
         <p
           style={{
-            ...body(28, C.attentionInk, 700),
-            position: 'absolute',
-            left: wire * width - 60,
-            top: 190,
-            fontFamily: F.mono,
-            textTransform: 'uppercase',
-            letterSpacing: '0.1em',
+            ...tag,
+            color: C.attentionInk,
+            left: ((wire + startLevel) / 2) * width - 150,
+            top: 4,
           }}
         >
-          Tripwire
+          Most it may fall
         </p>
+        <p style={{ ...tag, color: C.attentionInk, left: wire * width - 60, top: 232 }}>Tripwire</p>
       </div>
       <div
         style={{
           position: 'absolute',
           left: SIDE,
-          top: 780,
+          top: 830,
           opacity: tripped ? enter(frame, 0) : 0,
         }}
       >
@@ -123,7 +161,7 @@ export function TrustTripwire({ duration }: SceneProps) {
           drop={C.pink}
           style={{ padding: '26px 44px', display: 'inline-block' }}
         >
-          <p style={display(64, C.attentionInk)}>Below the line, films halt.</p>
+          <p style={display(60, C.attentionInk)}>Too far down in one day: films halt.</p>
         </PixelBox>
       </div>
     </SceneShell>

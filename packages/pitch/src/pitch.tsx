@@ -5,6 +5,7 @@ import type { Manifest } from './manifest.ts';
 import { CloseLogo, CloseMontage } from './scenes/close.tsx';
 import {
   CompanyCycle,
+  CompanyDeadlock,
   CompanyGtm,
   CompanyIntro,
   CompanyOrg,
@@ -28,6 +29,7 @@ export const SCENES: Record<string, ComponentType<SceneProps>> = {
   'company-org': CompanyOrg,
   'company-cycle': CompanyCycle,
   'company-pr': CompanyPr,
+  'company-deadlock': CompanyDeadlock,
   'company-gtm': CompanyGtm,
   'trust-caps': TrustCaps,
   'trust-tripwire': TrustTripwire,
