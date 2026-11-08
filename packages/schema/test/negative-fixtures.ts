@@ -841,6 +841,62 @@ export const negativeFixtures: NegativeFixture[] = [
     },
   },
   {
+    name: 'a percentage glued to the word before it',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Cut build costs by40%';
+    },
+  },
+  {
+    name: 'a multiplier glued to a letter',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Ship l0x faster';
+    },
+  },
+  {
+    name: 'a percentage behind an invisible letter',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds \u316470% faster';
+    },
+  },
+  {
+    name: 'a percentage in Arabic-Indic digits',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds ٧٠٪ faster';
+    },
+  },
+  {
+    name: 'a percentage in Devanagari digits',
+    code: 'CLAIM_UNBACKED',
+    path: 'scenes[0].text[0].value',
+    build: (c) => {
+      at(at(c.scenes, 0).text, 0).value = 'Builds ७०% faster';
+    },
+  },
+  {
+    name: 'a percentage glued to a word in a hook',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.hooks[0].text[0].value',
+    build: (c) => {
+      at(at(c.variants.hooks, 0).text, 0).value = 'Waiting on CI? Save up to90%';
+    },
+  },
+  {
+    name: 'a percentage glued to a word in a variant CTA label',
+    code: 'CLAIM_UNBACKED',
+    path: 'variants.ctas[0].label',
+    build: (c) => {
+      at(c.variants.ctas, 0).label = 'Get50% off';
+    },
+  },
+  {
     name: 'copy with a number smuggled into scene props',
     code: 'CLAIM_UNBACKED',
     path: 'scenes[0].props.stat',

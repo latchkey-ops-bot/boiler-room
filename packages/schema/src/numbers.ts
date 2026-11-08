@@ -103,6 +103,8 @@ const SCALES = new Map(
   }),
 );
 
+const SCALE_WORDS = [...SCALES.keys()].sort((a, b) => b.length - a.length).join('|');
+
 const CURRENCIES = new Map(
   Object.entries({
     $: 'USD',
@@ -250,7 +252,6 @@ const TOKEN = new RegExp(
   'giu',
 );
 
-const SCALE_WORDS = [...SCALES.keys()].sort((a, b) => b.length - a.length).join('|');
 const UNIT_OR_CURRENCY_WORDS = [...UNIT_WORDS, ...CURRENCY_WORDS]
   .sort((a, b) => b.length - a.length)
   .join('|');
@@ -309,9 +310,47 @@ function readMultiples(text: string, mode: ReadMode): string {
     .replace(MULTIPLES, multiple);
 }
 
+/** A decimal digit of any script but Latin. NFKC folds full width digits, and not these. */
+const OTHER_DIGIT = /[^\P{Nd}0-9]/gu;
+const IS_DIGIT = /\p{Nd}/u;
+
+/**
+ * A digit's value. Unicode encodes every script's decimal digits as runs of ten, 0 to 9, some runs
+ * back to back, so the value is the distance from where the run starts, modulo ten.
+ */
+function digitValue(char: string): number {
+  const code = char.codePointAt(0) ?? 0;
+  let start = code;
+  while (start > 0 && IS_DIGIT.test(String.fromCodePoint(start - 1))) start -= 1;
+  return (code - start) % 10;
+}
+
+/** Arabic's own percent sign and separators, which NFKC leaves as they are. */
+const ARABIC_PUNCTUATION: Record<string, string> = { '٪': '%', '٫': '.', '٬': ',' };
+
+/** Latin digits for every script's, so "٧٠٪" and "७०%" read as 70%. */
+const latinDigits = (text: string) =>
+  text
+    .replace(OTHER_DIGIT, (char) => String(digitValue(char)))
+    .replace(/[٪٫٬]/g, (char) => ARABIC_PUNCTUATION[char] ?? char);
+
+const SIGNS = '[$€£¥₹₩#]';
+const STATEMENT_SUFFIX = `\\s?(?:${SCALE_WORDS})?\\s?(?:%|per[\\s-]?cent\\b|pct\\b|[x×](?![\\p{L}\\p{N}])|times\\b|fold\\b)`;
+/**
+ * A number glued to the letter before it, where it reads as a percentage, a multiplier, money or
+ * a rank: "by40%", "l0x", "Get$50", "Rated#1". A space is put before it, so it is read. A plain
+ * number glued to letters, as in "Web3" or "B2B", is still part of a name.
+ */
+// Not inside a prefixed dollar sign, such as the "CA" of "CA$10", which is its own currency.
+const NOT_DOLLAR_PREFIX = '(?!(?<=(?<![\\p{L}\\p{N}_])(?:us|ca|au|nz|hk|a|c|s|r))\\$)';
+const GLUED_STATEMENT = new RegExp(
+  `(?<=\\p{L})${NOT_DOLLAR_PREFIX}(?:(?=(?:${SIGNS}\\s?)?\\.?\\d[\\d,]*(?:\\.\\d+)?${STATEMENT_SUFFIX})|(?=${SIGNS}\\s?\\.?\\d))`,
+  'giu',
+);
+
 function spelledToDigits(text: string, mode: ReadMode): string {
-  const digits = text
-    .normalize('NFKC')
+  const digits = latinDigits(text.normalize('NFKC'))
+    .replace(GLUED_STATEMENT, ' ')
     .replace(/\bnumber[\s-]one\b/gi, '#1')
     .replace(new RegExp(`\\b(${CARDINAL}|${MAGNITUDE})fold\\b`, 'gi'), '$1 fold')
     .replace(
