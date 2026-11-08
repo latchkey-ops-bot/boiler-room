@@ -971,6 +971,34 @@ describe('small rules', () => {
     });
   });
 
+  it('refuses a scout line from the terms page: copy quotes the homepage or the about page', async () => {
+    const store = emptyStore();
+    const clock = clockAt(NOW.toISOString());
+    const { ports } = livePorts(clock, {
+      agents: new ScriptedRunner({
+        'br-scout': [
+          scoutQualifies({ line: { page: 'p3', quote: 'We are not HIPAA compliant.' } }),
+        ],
+      }),
+    });
+    const { files } = await day(store, ports, clock, { forcedDryRun: true });
+    expect(store.leads[0]?.verdict).toMatchObject({ verdict: 'qualified', line: null });
+    expect(files.get('review.md')).toContain(
+      'c01: line refused (not_homepage_or_about: terms page)',
+    );
+  });
+
+  it('asks for the postal address and the cold sender only while email may go live', async () => {
+    const store = emptyStore();
+    const clock = clockAt(NOW.toISOString());
+    const { ports } = livePorts(clock, {
+      agents: new ScriptedRunner({ 'br-scout': [scoutQualifies()] }),
+    });
+    // This harness lifts EMAIL_FORCED_DRY_RUN; gtm-day.test.ts proves the cards stay away under it.
+    const { result } = await day(store, ports, clock, { forcedDryRun: true });
+    expect(result.needs).toContain('postal-address');
+  });
+
   it("does not read Apple's AirDrop as a token airdrop", () => {
     expect(brandFlags('Send your drawings to a friend over AirDrop.')).toEqual([]);
     expect(brandFlags('Claim your airdrop before the snapshot.')).toEqual(['crypto_sale:airdrop']);
@@ -1010,6 +1038,29 @@ describe('the agents', () => {
       detail: 'x none, email 1',
     });
     expect(logs.join('\n')).toMatch(/br-social could not start: budget is \$0/);
+  });
+
+  it('reports a scout that could not start as not judged, and says why', async () => {
+    const runner = new ScriptedRunner({});
+    runner.start = async () => {
+      throw new Error("a session budget cannot exceed the agent's budget cap (0 micro-USD)");
+    };
+    const store = emptyStore();
+    const clock = clockAt(NOW.toISOString());
+    const { ports } = livePorts(clock, { agents: runner });
+    const { result, files } = await day(store, ports, clock, { forcedDryRun: true });
+    const qualify = result.phases.find((item) => item.phase === 'qualify');
+    expect(qualify?.status).toBe('skipped');
+    expect(qualify?.detail).toMatch(
+      /^1 candidates not judged: br-scout could not start: .*company:sync has not run since GTM_ACTIVE/,
+    );
+    expect(files.get('review.md')).toContain(
+      'The scout did not run, so no candidate was judged and none is qualified',
+    );
+    expect(files.get('report.txt')).toMatch(
+      /Leads: 1 found, 0 judged by the scout, 0 qualified .*The scout did not run/,
+    );
+    expect(files.get('board.md')).toContain('LEADS · 2026-11-08 · not judged');
   });
 
   it('writes the quote pack a person needs to quote-post the launch post', async () => {

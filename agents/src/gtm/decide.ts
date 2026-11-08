@@ -49,6 +49,9 @@ export function provenJurisdiction(
   return jurisdictionOverride(candidate.lead.domain, candidate.read) ?? proven;
 }
 
+/** The pages a scout's line may come from. */
+export const LINE_PAGES: readonly string[] = ['homepage', 'about page'];
+
 export function checkScout(
   output: unknown,
   batch: readonly Candidate[],
@@ -68,8 +71,13 @@ export function checkScout(
     }
     let line: LeadVerdict['line'] = null;
     if (verdict.line) {
-      const problem = quoteProblem(candidate.read, verdict.line.page, verdict.line.quote);
       const page = candidate.read.pages.find((item) => item.id === verdict.line?.page);
+      // Copy quotes what the product does, from its homepage or about page: never a privacy
+      // policy, terms, an imprint or a contact page ("Their website says: We never sell your data").
+      const problem =
+        page && !LINE_PAGES.includes(page.label)
+          ? `not_homepage_or_about: ${page.label}`
+          : quoteProblem(candidate.read, verdict.line.page, verdict.line.quote);
       if (problem || !page)
         corrections.push(`${candidate.candidate_id}: line refused (${problem ?? 'no page'})`);
       else line = { page: page.id, url: page.final_url, quote: verdict.line.quote.trim() };

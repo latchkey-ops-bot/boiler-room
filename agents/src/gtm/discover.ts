@@ -5,6 +5,7 @@ import {
   hnName,
   jurisdictionHint,
   noSolicitationNotice,
+  phCoreName,
   phMatches,
   productName,
   publishedAddresses,
@@ -68,8 +69,9 @@ async function mapLimit<T, R>(
 /**
  * Finds today's candidates: the three sources, then the drop rules (suppressed, emailed in 90
  * days, filmed, well-known, already a lead today), then each site read and checked. A Product Hunt
- * entry whose site does not carry its tagline is dropped: it is likely another company of the same
- * name. At most 40 reach the scout.
+ * entry whose site does not carry its name, and its tagline or a Product Hunt link, is dropped: it
+ * is likely a news site that listed it, a rival, or another company of the same name. At most 40
+ * reach the scout.
  */
 export async function discover(context: DiscoverContext): Promise<DiscoverResult> {
   const { store, transport, userAgent, now, date, log } = context;
@@ -158,11 +160,12 @@ export async function discover(context: DiscoverContext): Promise<DiscoverResult
       continue;
     }
     const home = read.pages.find((page) => page.id === 'p1');
-    if (raw.ph && !phMatches(home, raw.ph.tagline)) {
+    if (raw.ph && !phMatches(home, raw.ph)) {
       drop('ph_site_mismatch');
       continue;
     }
-    const sourceName = raw.source === 'hn' ? hnName(raw.title) : (raw.ph?.name ?? null);
+    const sourceName =
+      raw.source === 'hn' ? hnName(raw.title) : raw.ph ? phCoreName(raw.ph.name) : null;
     const xPost = xPosts.get(domain) ?? null;
     // Only published addresses here. The paid finder runs after the scout, for qualified leads only
     // (day.ts `findAddresses`), so it is never spent on a candidate the scout then rejects.

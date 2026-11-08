@@ -22,6 +22,7 @@ import {
   AT_MOST_ONCE,
   BOT_USER_AGENT,
   DISCOVERY,
+  EMAIL_FORCED_DRY_RUN,
   type FounderNeed,
   type GtmAgentName,
   HOLD_WINDOW_MINUTES,
@@ -157,6 +158,16 @@ interface TakeDown {
   waiting: string[];
 }
 
+/**
+ * What a refused session start means when the agent's stored budget is $0: the stored GTM agents
+ * predate `GTM_ACTIVE`, because `company:sync` has not run since.
+ */
+export function unsyncedHint(message: string): string {
+  return /budget cap \(0 micro-USD\)/i.test(message)
+    ? '. The agent stored on Naive has a $0 budget: company:sync has not run since GTM_ACTIVE.'
+    : '';
+}
+
 /** A ledger outcome as a board comment's state. */
 function outcomeState(state: string, pack: boolean, done = 'live'): string {
   if (state === 'done') return done;
@@ -192,6 +203,8 @@ class Day {
   untampered: boolean | null = null;
   holdCards: string[] = [];
   socialReady = false;
+  /** Why an agent's session did not start, by agent, for the review and the phase's detail. */
+  readonly notStarted = new Map<GtmAgentName, string>();
 
   constructor(options: DayOptions) {
     this.o = options;
@@ -400,8 +413,11 @@ class Day {
     if (!naive) await this.founder('executor-key');
     if (naive && this.untampered === false) await this.founder('tampered', this.date);
     if (naive && this.lockdownOk === false) await this.founder('lockdown');
-    if (!this.store.flags.postal_address) await this.founder('postal-address');
-    if (this.ports.sender.kind === 'dry-run') await this.founder('cold-sender');
+    // Email is dry run in code for the hackathon: asking for its address and sender is noise.
+    if (!(this.o.emailForcedDryRun ?? EMAIL_FORCED_DRY_RUN)) {
+      if (!this.store.flags.postal_address) await this.founder('postal-address');
+      if (this.ports.sender.kind === 'dry-run') await this.founder('cold-sender');
+    }
     const minted = this.store.flags.executor_key_minted_at;
     if (minted && daysSince(minted, this.now()) >= KEY_ROTATION_DAY)
       await this.founder('rotate-key', minted.slice(0, 10));
@@ -758,6 +774,7 @@ class Day {
     const { budget } = sessionBudget(agent);
     const check = canSpend(this.store, this.today, budget);
     if (!check.ok) {
+      this.notStarted.set(agent, `${agent} skipped: ${check.reason}`);
       this.log(`${purpose.padEnd(9)} ${agent} skipped: ${check.reason}`);
       return null;
     }
@@ -772,9 +789,9 @@ class Day {
       });
     } catch (error) {
       // One agent that cannot start (a $0 budget, a refused session) costs only its own step.
-      this.log(
-        `${purpose.padEnd(9)} ${agent} could not start: ${error instanceof Error ? error.message.slice(0, 160) : String(error)}`,
-      );
+      const message = error instanceof Error ? error.message.slice(0, 160) : String(error);
+      this.notStarted.set(agent, `${agent} could not start: ${message}${unsyncedHint(message)}`);
+      this.log(`${purpose.padEnd(9)} ${this.notStarted.get(agent)}`);
       return null;
     }
     const result = await runner.wait(id, this.o.sessionWaitMs ?? 8 * 60_000);
@@ -836,6 +853,20 @@ class Day {
           };
         }
       }
+    }
+    if (!sessions.length) {
+      // Nobody judged a candidate: say so, rather than report every one as not qualified.
+      const why = this.notStarted.get(SCOUT) ?? 'br-scout did not start';
+      this.review.push(
+        `## Scout verdicts\n\nThe scout did not run, so no candidate was judged and none is qualified: ${why}\n`,
+      );
+      await this.comment('LEADS', this.date, 'not judged', [
+        `${candidates.length} candidate(s) found; the scout did not run, so none was judged.`,
+      ]);
+      return {
+        status: 'skipped' as const,
+        detail: `${candidates.length} candidates not judged: ${why}`,
+      };
     }
     // At most 15 qualified a day, best fit first.
     const qualified = this.todayLeads().filter((lead) => lead.verdict?.verdict === 'qualified');
@@ -965,7 +996,7 @@ class Day {
     if (!result)
       return {
         status: 'skipped' as const,
-        detail: 'the GTM lead could not start (spend cap or a refused session; see the log)',
+        detail: this.notStarted.get(GTM_LEAD) ?? 'the GTM lead could not start; see the log',
       };
     sessions.push(result.sessionId);
     const leads = new Map(qualified.map((lead) => [lead.id, lead]));

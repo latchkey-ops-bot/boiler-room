@@ -434,11 +434,11 @@ All discovery is code. It costs under $0.01 a day before the scout, plus up to $
 address finder is needed (at most 5 runs a day). Every data run counts against the data caps in
 section 14.
 
-| Source       | Call                                                                                                                                                                          | Keep                                                                                                                                                                                                                |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Hacker News  | Algolia `search_by_date?tags=show_hn` with `created_at_i` in the last 72 h                                                                                                    | A URL, 5 or more points, and a startup's own site: not a platform host, a repository, a gist, a paper or a blog post                                                                                                |
-| Product Hunt | Atom feed `https://www.producthunt.com/feed`, published in the last 72 h, at most 10 entries; one `Search Google` run per entry (`"<name>" <tagline>`, $0.00015) for the site | **Only if the site's homepage carries the tagline (80% of its words) or links to producthunt.com.** An older company with the same name fails both, and is dropped.                                                 |
-| X            | 3 `Search Google` runs, `site:x.com` with launch phrases, `tbs: qdr:d3`; 1 `Search Web Pages`, `site: x.com`, `published_after: 3d` ($0.004)                                  | The status id's date is in the last 72 h; X's oEmbed endpoint confirms the post; the site is the post's own link, resolved through `t.co` by the `Location` header or the meta-refresh or `location.replace` target |
+| Source       | Call                                                                                                                                                                                                                                                                                                                                                                                                                                        | Keep                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Hacker News  | Algolia `search_by_date?tags=show_hn` with `created_at_i` in the last 72 h                                                                                                                                                                                                                                                                                                                                                                  | A URL, 5 or more points, and a startup's own site: not a platform host, a repository, a gist, a paper, a blog post or a forum thread                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Product Hunt | Atom feed `https://www.producthunt.com/feed`, published in the last 72 h, at most 10 entries, leaving out a well-known company's entries (`products/openai`, `products/instagram`); one `Search Google` run per entry (`"<name>" <tagline>`, $0.00015) for the site: the first result whose host is the entry's name, else the first that is not a platform                                                                                 | **Only if the site's homepage title, `og:site_name` or first `<h1>` carries the entry's name (without its maker: "Sage2 by Levanto Labs" is "Sage2"), or its host does, and the homepage carries the tagline (80% of its words) or links to producthunt.com.** A news site that lists the launch, or a rival with the same tagline, fails the name (seen live on 2026-11-08: "Zigzag Browser" resolved to a news aggregator, "NotchX" to a rival notch app); an older company with the same name fails the tagline. Each is dropped. |
+| X            | 3 `Search Google` runs, `site:x.com` with the phrases a founder uses for a product ("live on Product Hunt", "today we're launching", "now in public beta"), minus broadcasts (stream, game, match, episode, podcast) and posts that keep their link for a reply, `tbs: qdr:d3`; 1 `Search Web Pages`, `site: x.com`, `published_after: 3d` ($0.004). "We're live" alone found sports teams, TV shows and a professional body on 2026-11-08. | The status id's date is in the last 72 h; X's oEmbed endpoint confirms the post; the site is the post's own link, resolved through `t.co` by the `Location` header or the meta-refresh or `location.replace` target. A post whose only link is its picture ("link in the reply") names no site and is dropped.                                                                                                                                                                                                                       |
 
 Then, per candidate:
 
@@ -468,7 +468,9 @@ Then, per candidate:
    domain ("logo.deal" is refused: X would link it), and pass the claims screen every line passes
    (no superlative, no claim about funding, backers, customers or partners: "Best Stripe Partner"
    is no name). The name the source gives (an HN title, a PH entry) is preferred when the site
-   carries it. With no valid name the lead cannot qualify, and code records `no_product_name`.
+   carries it, then the site's own `og:site_name`. A name found only in the title or the first
+   heading must also name the host (a host label holds the name, or the name holds a label of four
+   letters or more): "Board", the page title of a forum on `zenmemes.com`, is no name. With no valid name the lead cannot qualify, and code records `no_product_name`.
 7. Brand safety: a word-list screen over the site text and, before an X post, the film's script
    (slurs, adult, gambling, weapons, token sales, health claims). Any match closes the X lane.
    Apple's "AirDrop", spelled with its capital D, is not a token airdrop unless the text also talks
@@ -507,10 +509,18 @@ says "Shopping lists that keep working on the subway." Its contact page lists
 **Quotes.** A GTM quote must be `found` by `checkQuote` on its page, hold **no digit** (a plain fetch
 cannot tell a mockup's sample figures from a claim), be at most 100 characters, and start and end at
 a block or sentence boundary: "HIPAA compliant" cut from "We are not HIPAA compliant." is refused.
+A line break inside a sentence is no boundary: a whole line with no end mark whose next line goes
+on in lower case ("No account, and no video" / "leaving your machine.") is refused, and so is that
+next line. In a caption, a quote with no end mark that the template continues after ends its
+sentence outside the quotation marks (`Their website says: "Caption-first screen communication for
+Mac". We made ...`), so the quote stays verbatim. The scout's line comes from the homepage or the about page only (`LINE_PAGES` in `decide.ts`):
+code refuses one from a privacy, terms, imprint or contact page, because a caption that quotes a
+privacy policy says nothing about the product.
 
 **What the source shows.** Code states only what the source shows: "posted a Show HN on
-<weekday>", "is on Product Hunt this week" or "announced on X on <weekday>". Never "launched this
-week": a Show HN can be an old product, and PH feed dates are featured dates. The film's length comes
+<weekday>", "was on Product Hunt on <weekday>" or "announced on X on <weekday>". Never "launched this
+week": a Show HN can be an old product, and PH feed dates are featured dates. Never "this week"
+either: a Friday entry posted on Monday was not on Product Hunt "this week". The film's length comes
 from `FilmFile.durationSeconds` and is left out when there is no file.
 
 ### 10.1 The X post (template-only)
@@ -949,7 +959,7 @@ table of the last N days).
 
 ```text
 GTM 2026-11-08 · mode dry_run · x dry_run · email dry_run · films dry_run · replies off
-Leads: 13 found, 0 qualified (hn 0, ph 0, x 0)
+Leads: 13 found, 0 judged by the scout, 0 qualified (hn 0, ph 0, x 0). The scout did not run: see the review file
 Spend: $0.000 (agents $0.000, data $0.000, posts $0.000, email $0.000, films $0.000)
 Picks: x 0, email 0
 Films: 0 ordered, 0 dry run, 0 ready, 0 failed, 0 late
@@ -959,8 +969,15 @@ Email: 0 sent, 0 drafts, skipped: none
 Replies: 0 in, 0 answered, 0 to a person. Opt-outs 0. Removals 0 (0 for domains we never touched). Bounces 0. Complaints 0.
 Cost per qualified lead: n/a. Last 7 days: 0 qualified, $0.000, n/a per lead
 Unknown sends: 0
-Holds: none. Needs: FOUNDER: gtm executor-key, FOUNDER: gtm postal-address, FOUNDER: gtm cold-sender
+Holds: none. Needs: FOUNDER: gtm executor-key
 ```
+
+"Judged by the scout" counts the leads the scout gave a verdict. When the scout could not start
+(a spend cap, or a stored agent at a $0 budget because `company:sync` has not run), `qualify` is
+`skipped` with the reason, the review file says no candidate was judged, and the day card's `LEADS`
+comment reads `not judged`, so a day without a scout never reads as a day of rejections. While email
+is dry run in code (`EMAIL_FORCED_DRY_RUN`), the `open` phase raises no `postal-address` or
+`cold-sender` card: the founder ruled that email waits.
 
 **CEO procedure** (in `agents/skills/ceo/SKILL.md` and `ceo.ts`): cards titled `GTM:`, `REMOVE:` and
 `FOUNDER: gtm ...` are the executor's; never create, move, assign or comment on them, except a
@@ -1092,11 +1109,13 @@ skipped; nothing was posted, sent or ordered, and nothing was spent.
 
 1. After the day's run, open `FOUNDER: gtm pack <date>` on the company board. It is there only when a
    real, QC-passed sample film is ready; otherwise the review file says why not.
-2. For each post on it: open the film page, download the film, and post it on X from
+2. Before the first post, set the `@boilerroomstudi` bio to say how to ask for a removal: every
+   caption ends "Removal on request: see our bio".
+3. For each post on it: open the film page, download the film, and post it on X from
    `@boilerroomstudi` with the caption exactly as written. Where the card names an X post,
    quote-post it; otherwise post the film on its own. Any number you add must be quoted from the
    startup's own site.
-3. Move the card to `done`. Until then nothing counts as posted; the next day's report counts the
+4. Move the card to `done`. Until then nothing counts as posted; the next day's report counts the
    posts on a done pack card as POSTED and every other as NOT POSTED.
-4. To stop a day, comment `HOLD` on the `GTM: <date>` card; to take a startup's film down, comment
+5. To stop a day, comment `HOLD` on the `GTM: <date>` card; to take a startup's film down, comment
    `REMOVE <lead id>`. A startup can press "Remove this film" on its own film page.

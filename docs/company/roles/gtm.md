@@ -105,13 +105,15 @@ reader are specified in gtm-operations.md sections 10.3, 10.4 and 12; none sends
 1. After the day's run, open `FOUNDER: gtm pack <date>` on the company board. The run is by hand,
    `pnpm gtm:day --live --board`; the systemd timer stays off. The card is there only when a real,
    QC-passed sample film is ready.
-2. For each post on it: open the film page, download the film, and post it on X from
+2. Before the first post, set the `@boilerroomstudi` bio to say how to ask for a removal: every
+   caption ends "Removal on request: see our bio".
+3. For each post on it: open the film page, download the film, and post it on X from
    `@boilerroomstudi` with the caption exactly as written. Where the card names an X post, quote-post
    it; otherwise post the film on its own. Every number in a caption must be quoted from the
    startup's own site; the code's captions hold none.
-3. Move the card to `done`. Until then, nothing counts as posted: the next day's report counts the
+4. Move the card to `done`. Until then, nothing counts as posted: the next day's report counts the
    posts on a done pack card as POSTED and every other as NOT POSTED.
-4. To stop a day, comment `HOLD` on the `GTM: <date>` card. To take a film down, comment
+5. To stop a day, comment `HOLD` on the `GTM: <date>` card. To take a film down, comment
    `REMOVE <lead id>`; a startup can also press "Remove this film" on its film page.
 
 ## Activation checklist

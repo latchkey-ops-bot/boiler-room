@@ -69,7 +69,7 @@ const FOUNDER_STEPS: Record<FounderNeed, string> = {
   reply: 'A reply needs a person. The draft is in the review file.',
   removal:
     'A removal request could not take everything down yet: an X post or a film of ours may still be up. The executor retries it on every run, and needs live ports to delete or withdraw. If this stays open, delete the post or withdraw the film by hand.',
-  pack: `Post each film below on X by hand, from ${X_ACCOUNT}: open its film page, download the film, and post it with its caption exactly as written. Where an X post is named, quote-post it; otherwise post the film on its own. Then move this card to done. The next day's report counts the posts on a done pack card as POSTED and the rest as NOT POSTED; nothing is called posted before that.`,
+  pack: `Post each film below on X by hand, from ${X_ACCOUNT}: open its film page, download the film, and post it with its caption exactly as written. Every caption ends "Removal on request: see our bio", so before the first post the ${X_ACCOUNT} bio must say how to ask for a removal. Where an X post is named, quote-post it; otherwise post the film on its own. Then move this card to done. The next day's report counts the posts on a done pack card as POSTED and the rest as NOT POSTED; nothing is called posted before that.`,
 };
 
 export const founderTitle = (need: FounderNeed) => `FOUNDER: gtm ${need}`;

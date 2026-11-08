@@ -265,10 +265,41 @@ const validName = (name: string) =>
   !GENERIC_NAMES.has(name.toLowerCase()) &&
   claimProblems(name).length === 0;
 
+/** Letters and digits only, lower case: "Where Were We" and `wherewerewe.app` compare equal. */
+const compact = (text: string) => normalise(text).replace(/[^\p{L}\p{N}]+/gu, '');
+
+/**
+ * Whether a name is the name of the site at `url`: it is one of the host's labels, a label holds it
+ * (`Seam` and `getseam.app`), or it holds a label of four letters or more (`Zigzag Browser` and
+ * `zigzag.so`). `www` and the public suffix are no labels.
+ */
+export function namesHost(name: string, url: string | undefined): boolean {
+  const wanted = compact(name);
+  if (wanted.length < 3 || !url) return false;
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return false;
+  }
+  const registrable = registrableDomain(host);
+  if (!registrable) return false;
+  const sub = host.slice(0, Math.max(0, host.length - registrable.length - 1));
+  const labels = [registrable.split('.')[0] ?? '', ...sub.split('.')]
+    .map(compact)
+    .filter((label) => label && label !== 'www');
+  return labels.some(
+    (label) =>
+      label === wanted || label.includes(wanted) || (label.length >= 4 && wanted.includes(label)),
+  );
+}
+
 /**
  * The product name copy may use. It must appear in the homepage's `<title>`, `og:site_name` or
  * first `<h1>`, be at most 30 characters, and hold only letters, digits, spaces, `.` and `-`. A
- * name the source gives (an HN title, a Product Hunt entry) is preferred when the site carries it.
+ * name the source gives (an HN title, a Product Hunt entry) is preferred when the site carries it,
+ * then the site's own `og:site_name`. A name taken only from the title or the first heading must
+ * also name the host: "Board", the page title of a forum on `zenmemes.com`, is no product name.
  */
 export function productName(home: SitePage | undefined, sourceName: string | null): string | null {
   if (!home) return null;
@@ -288,7 +319,11 @@ export function productName(home: SitePage | undefined, sourceName: string | nul
   }
   const site = home.parsed.siteName ? normaliseWhitespace(home.parsed.siteName) : null;
   if (site && candidates.includes(site)) return site;
-  return candidates.find((name) => name.split(' ').length <= 3) ?? null;
+  return (
+    candidates.find(
+      (name) => name.split(' ').length <= 3 && namesHost(name, home.final_url ?? home.url),
+    ) ?? null
+  );
 }
 
 /** The name an HN title gives: "Show HN: Quillbox – shared lists" gives "Quillbox". */
@@ -320,11 +355,46 @@ export function tokenOverlap(needle: string, haystack: string): number {
  * A Product Hunt lead is the right company only when its homepage carries the PH tagline (at least
  * 80% of its words) or links to producthunt.com. An older company with the same name fails both.
  */
-export function phMatches(home: SitePage | undefined, tagline: string): boolean {
+/**
+ * The name a Product Hunt entry goes by, without its maker or edition: "Sage2 by Levanto Labs"
+ * gives "Sage2", "Rex (Beta)" gives "Rex", "DocsAlot for customer support" gives "DocsAlot".
+ */
+export function phCoreName(name: string): string {
+  const core = name.split(/\s+(?:by|for)\s+|\s*\(|\s[|–—:-]\s/)[0] ?? name;
+  return normaliseWhitespace(core);
+}
+
+/** Whether a phrase stands as whole words in a text: "Agent Clan" in "Agent Clan — Maximize". */
+const hasPhrase = (text: string, phrase: string) => {
+  const words = (value: string) =>
+    ` ${normalise(value)
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim()} `;
+  const wanted = words(phrase);
+  return wanted.trim().length > 0 && words(text).includes(wanted);
+};
+
+/**
+ * Whether a site found by searching for a Product Hunt entry is that product. Its homepage title,
+ * `og:site_name` or first heading must carry the entry's name, or its host must be that name; and
+ * the homepage must carry the tagline (80% of its words) or link to Product Hunt. A news site that
+ * lists the launch, or a rival that sells the same thing, has the tagline's words or a Product Hunt
+ * link but not the name, and is dropped: copy would otherwise say the wrong company was on Product
+ * Hunt.
+ */
+export function phMatches(
+  home: SitePage | undefined,
+  entry: { name: string; tagline: string },
+): boolean {
   if (!home) return false;
+  const name = phCoreName(entry.name);
+  const fields = [home.parsed.title, home.parsed.siteName ?? '', home.parsed.h1 ?? ''];
+  const named =
+    fields.some((field) => hasPhrase(field, name)) || namesHost(name, home.final_url ?? home.url);
+  if (!named) return false;
   if (home.parsed.links.some((link) => registrableDomain(link) === 'producthunt.com')) return true;
   const text = [home.parsed.title, home.parsed.description ?? '', home.parsed.text].join('\n');
-  return tokenOverlap(tagline, text) >= DISCOVERY.ph_tagline_overlap;
+  return tokenOverlap(entry.tagline, text) >= DISCOVERY.ph_tagline_overlap;
 }
 
 const EU_TLDS = new Set([

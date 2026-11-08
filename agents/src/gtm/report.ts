@@ -10,7 +10,8 @@ import type { Source, StoreData } from './store.ts';
 
 export interface DayMetrics {
   date: string;
-  leads: { found: number; qualified: number; bySource: Record<Source, number> };
+  /** `judged`: leads the scout gave a verdict. Zero with leads found means the scout did not run. */
+  leads: { found: number; judged: number; qualified: number; bySource: Record<Source, number> };
   picks: { x: number; email: number };
   films: { ordered: number; dryRun: number; ready: number; failed: number; late: number };
   x: { posted: number; drafts: number; skipped: number };
@@ -87,7 +88,12 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
   }
   return {
     date,
-    leads: { found: leads.length, qualified: qualified.length, bySource },
+    leads: {
+      found: leads.length,
+      judged: leads.filter((lead) => lead.verdict).length,
+      qualified: qualified.length,
+      bySource,
+    },
     picks: {
       x: leads.filter((lead) => lead.picked.includes('x')).length,
       email: leads.filter((lead) => lead.picked.includes('email')).length,
@@ -163,7 +169,7 @@ export function reportText(
   const m = metrics;
   return [
     `GTM ${m.date} · mode ${input.mode} · x ${lanes.x} · email ${lanes.email} · films ${lanes.film} · replies ${lanes.reply}`,
-    `Leads: ${m.leads.found} found, ${m.leads.qualified} qualified (hn ${m.leads.bySource.hn}, ph ${m.leads.bySource.ph}, x ${m.leads.bySource.x})`,
+    `Leads: ${m.leads.found} found, ${m.leads.judged} judged by the scout, ${m.leads.qualified} qualified (hn ${m.leads.bySource.hn}, ph ${m.leads.bySource.ph}, x ${m.leads.bySource.x})${m.leads.found && !m.leads.judged ? '. The scout did not run: see the review file' : ''}`,
     `Spend: ${usd(m.spend.total)} (agents ${usd(m.spend.agents)}, data ${usd(m.spend.data)}, posts ${usd(m.spend.posts)}, email ${usd(m.spend.email)}, films ${usd(m.spend.films)})`,
     `Picks: x ${m.picks.x}, email ${m.picks.email}`,
     `Films: ${m.films.ordered} ordered, ${m.films.dryRun} dry run, ${m.films.ready} ready, ${m.films.failed} failed, ${m.films.late} late`,
