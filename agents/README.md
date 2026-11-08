@@ -5,7 +5,8 @@ The company's agents, defined in code and run on Naive through `@usenaive-sdk/ma
 ## Agents as code
 
 Each agent is an `AgentDefinition` in `src/definitions/`: name, model, system prompt, tools,
-skills, budget and output schema. Skills live in `skills/<slug>/SKILL.md`.
+skills, budget and output schema. Skills live in `agents/skills/<slug>/SKILL.md`, or in the repo's
+top-level `skills/<slug>/SKILL.md` for a definition that sets `root: 'repo'`, as the Director's do.
 
 ```sh
 pnpm agents:sync
@@ -125,6 +126,102 @@ on a live session.
 | `submission-N.json` | Each result the agent submitted                            |
 
 Asset `src` values name Naive files as `naive://files/<fil_ id>`; `fileIdOf` reads them.
+
+## The Director
+
+```sh
+pnpm direct out/research/linear.app/research.json --order
+pnpm direct out/research/danluu.com/research.json            # an outreach sample, the default brief
+pnpm direct <research.json> --brief brief.json --model sonnet --out <dir>
+```
+
+Input is a `research.json` and the asset list beside it (the `files/` folder the Researcher
+saves), plus a brief: outreach sample or customer order, whether `extracted` claims may be cited,
+formats, CTA pages, narration and music (`directorBriefSchema`). The default brief is an outreach
+sample in 16:9 with no music or narration, where extracted claims may be cited.
+
+1. `br-director` is synced: Opus 5.5, `pi`, deny by default with only `read_skill` and
+   `session_spend` allowed. It has no shell, files or web, and Naive gives it no computer. The
+   `director` skill and its four companions (`director-beat-templates`, `director-scene-types`,
+   `director-seams`, `director-copy-and-claims`) are pushed from `skills/` and attached by slug.
+2. One session starts with the brief, the facts the pipeline can count (approved claims, quotes
+   with numbers, product surfaces, captured tiles), the asset list and the research.
+   `output_schema` is `{campaign, handoff}`: `campaignJsonSchema` unchanged under `campaign`, and
+   a typed handoff (template and why, counts, substitutions, tier 4 scene ids, issues left to
+   others), with `structured_output_required`.
+3. Each submission is checked by `checkSubmission`: `validateCampaign` with `sceneRegistry`, then
+   the section 10 checks of the skill that the validator does not make, in `src/director/checks.ts`:
+   - the template §1 picks for this brief and these counts, its rows in order, each row's frames
+     exactly, and only the substitutions `director-beat-templates` allows;
+   - the default seam plan after those substitutions, hooks (1 to 3 `word-slam`s on the opening
+     seam), CTAs (1 to 3, 4 words and 24 characters, on the customer's site, the end card's CTA
+     the first label) and formats;
+   - roles, slot counts and word limits per scene type, `card.min` on every `type-card`, the name
+     and pivot cards, accents and digit-free text ids;
+   - claim status against the brief, a cited superlative its quote must state, no capture props
+     (the research holds no DOM boxes), no audio without a track, no narration unpaid;
+   - brand, claims and assets copied from the research unchanged.
+4. Every issue the Director owns goes back into the same session with its fix text, up to
+   `--max-repairs` rounds (3). Then the run fails loudly: it prints every remaining issue, writes
+   `director-failures.json`, writes no `campaign.json`, and exits 1. `CONTRAST_LOW` is the Art
+   Director's and `ASSET_UNAVAILABLE` the Researcher's: they never block, and land in the handoff.
+5. `campaign.json` and `handoff.json` are saved beside the research, with `director-report.json`
+   (rounds, issues, tokens, session cost), each `director-submission-N.json` and the events. The
+   run prints the rounds and the cost. The agent is kept: it is a crew agent and has no computer.
+
+`--drill-repair` sends the first submission back on purpose, to prove the repair loop live.
+
+Each submission is read from the event stream, not from `sessions.get`. On a live repair round
+`sessions.get` still answered the previous `structured_output` after the turn had ended, so the
+loop checked a stale campaign and sent back issues the agent had already fixed. The `session.idle`
+event that ends each turn carries the fresh output, and the accepted `submit_output` arguments are
+the fallback. `test/director-loop.test.ts` covers it with a fake client.
+
+### Model choice
+
+Sonnet 5.5 and Opus 5.5 ran on the same research, one session each. Every film outside the drills
+passed on its first submission. The first drill ran before the stale-read fix described above, and
+the second after it. Costs are each session's `consumed_micro_usd`. The org balance moved more,
+because other agents were running at the same time.
+
+| Site         | Brief           | Model  | Template             | Submissions        | Session cost | Time  |
+| ------------ | --------------- | ------ | -------------------- | ------------------ | ------------ | ----- |
+| linear.app   | customer order  | Sonnet | Standard, 18 scenes  | 1                  | $0.2443      | 82 s  |
+| linear.app   | customer order  | Opus   | Standard, 18 scenes  | 1                  | $0.5200      | 125 s |
+| plausible.io | customer order  | Sonnet | Standard, 18 scenes  | 1                  | $0.2542      | 93 s  |
+| plausible.io | customer order  | Opus   | Standard, 18 scenes  | 1                  | $0.5164      | 123 s |
+| danluu.com   | outreach        | Sonnet | Short, 11 scenes     | 1                  | $0.1838      | 68 s  |
+| danluu.com   | outreach        | Opus   | Short, row 7 swapped | 1                  | $0.5121      | 122 s |
+| danluu.com   | outreach, drill | Opus   | Short, row 7 swapped | 3 (stale read)     | $0.6669      | 186 s |
+| danluu.com   | outreach, drill | Opus   | Short, row 7 swapped | 2 (1 is the drill) | $0.4640      | 115 s |
+
+The customer-order briefs allow extracted claims, because every claim the Researcher returns is
+`extracted` and approval comes after the Director. With 0 approved claims, Long cannot apply, so
+both models correctly chose Standard; outreach samples are Short by rule 1.
+
+Writing, read side by side:
+
+- **Hooks and callbacks.** Opus wrote the skill's default problem hook both times
+  ("Feedback lost in Slack threads?", "Still showing cookie banners?") and a callback card that
+  answers it. On Linear, Sonnet opened on a claim line and its hook variants slammed different
+  words from the main hook, while the callback echoed the hook sentence.
+- **Claim judgement.** On plausible.io, Opus dropped "54 times smaller" because the quote names no
+  comparator; Sonnet put "Tracking script, 54 times smaller" on screen. On danluu.com, Opus saw
+  that the only numbers were years and a model name, took the "no numeric proof" substitution and
+  flagged a claim whose quote does not say what its text says. Sonnet showed the essay title's
+  year range "1977-2017" as a stat-counter proof and cited that mismatched claim for the name card.
+- **Assets.** Opus put captured mockup crops on the Linear feature cards (tier 1 to 3); Sonnet
+  left three greeked (tier 4), which is allowed but weaker.
+- **Repetition.** Sonnet's plausible.io hook and logo tagline were the same line.
+
+Opus made one real error in these runs: in the first drill its first draft had a 41-character
+`type-card` headline (`TEXT_TOO_LONG`, limit 40). It fixed it in one round; the stale read made
+the loop send the issue back once more. Sonnet made none
+that the checks catch; its weaknesses are the judgement calls above, which no check catches.
+
+**Pick: Opus 5.5.** It costs about twice as much, about $0.25 more per film, and needed no more
+rounds. It made the calls that the checks cannot make, which are the ones that matter for a film
+that must not overstate a claim. Sonnet is the fallback if cost matters more than those calls.
 
 ## Testing the capture tool locally
 
