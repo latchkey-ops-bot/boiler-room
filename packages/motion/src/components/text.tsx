@@ -1,12 +1,12 @@
 import type { TextItem, TextRole } from '@boiler-room/schema';
-import { fitTextOnNLines, measureText } from '@remotion/layout-utils';
+import { measureText } from '@remotion/layout-utils';
 import { type CSSProperties, type ReactNode, useMemo } from 'react';
 import { useBrand } from '../brand/brand-context.tsx';
 import type { BrandTheme } from '../brand/theme.ts';
 import { type PresenceWindow, presence, springAt } from '../core/presence.ts';
 import { staggerDelays } from '../core/stagger.ts';
 import { textDirection, wordMarks } from '../layout/bidi.ts';
-import { type FitResult, fitBlock } from '../layout/fit.ts';
+import { type FitResult, fitBlock, type TextMeasure } from '../layout/fit.ts';
 import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
 import { spring as springs, stagger, travel, type as typography } from '../tokens.ts';
@@ -27,13 +27,8 @@ export interface TextSpec {
 /** Keeps the measured width just inside the box, since words are measured apart from each other. */
 const WIDTH_MARGIN = 0.985;
 
-function measurer(
-  text: string,
-  fontFamily: string,
-  spec: TextSpec,
-  maxWidth: number,
-  maxSize: number,
-) {
+/** Measures lines with `@remotion/layout-utils`, in the role's font as it will be drawn. */
+function measurer(fontFamily: string, spec: TextSpec): TextMeasure {
   const shared = {
     fontFamily,
     fontWeight: spec.weight,
@@ -42,14 +37,12 @@ function measurer(
     validateFontIsLoaded: true,
   };
   return {
-    fitLines: (maxLines: number) =>
-      fitTextOnNLines({ ...shared, text, maxLines, maxBoxWidth: maxWidth, maxFontSize: maxSize }),
     widthOf: (line: string, fontSize: number) =>
       measureText({ ...shared, text: line, fontSize }).width,
   };
 }
 
-/** Fits text to a box with `@remotion/layout-utils`. Fonts are loaded before any scene mounts. */
+/** Fits text to a box, measured in the browser. Fonts are loaded before any scene mounts. */
 function fitText(
   text: string,
   fontFamily: string,
@@ -67,7 +60,7 @@ function fitText(
       maxLines: spec.maxLines,
       lineHeight: spec.lineHeight,
     },
-    measurer(text, fontFamily, spec, maxWidth, maxSize),
+    measurer(fontFamily, spec),
   );
 }
 
@@ -167,7 +160,9 @@ export const WordReveal = ({
 }) => {
   const { frame, fps } = useScene();
   const style = useTextStyle(spec, fit);
-  const delays = staggerDelays(text.split(' ').length, fps, { each: stagger.word });
+  // Counted from the lines, since a line may also break inside a word, after a hyphen or in Chinese.
+  const wordCount = fit.lines.reduce((sum, line) => sum + line.split(' ').length, 0);
+  const delays = staggerDelays(wordCount, fps, { each: stagger.word });
   const { exit } = presence(frame, window);
   // Each word is a box, which the line orders by the line's direction alone, so the line reads in
   // the copy's direction and each box carries marks of its own: Hebrew stays right to left, and a

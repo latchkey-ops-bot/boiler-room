@@ -48,8 +48,10 @@ the change that fixes it.
   headline, which sets each word as a box of its own, marks each box with its word's direction, so
   Hebrew and Arabic read right to left and a Latin name inside them left to right.
 - Layouts are computed from the composition size, never from a format name, and a browser frame is
-  always sized to show its whole image. Text is fitted to its box with `@remotion/layout-utils`
-  and is only ever made smaller to fit.
+  always sized to show its whole image. Text is measured with `@remotion/layout-utils` and only
+  ever made smaller to fit. Lines break at spaces, after a hyphen inside a compound, and between
+  words of Chinese, Japanese and Thai (`Intl.Segmenter`), never before closing punctuation. A word
+  that would still be set below a third of its role's size is broken between its characters.
 - Transitions take no timeline time. Each scene is mounted for its own frames plus the frames it
   shares with a neighbour, so the film keeps the length the campaign gives it.
 
