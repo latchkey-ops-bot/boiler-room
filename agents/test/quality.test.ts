@@ -29,7 +29,7 @@ import {
 import { qcReviewJsonSchema, qcReviewSchema } from '../src/quality/output.ts';
 import { reviewTask, VISUAL_CHECKS } from '../src/quality/prompt.ts';
 import { cutOf, readRenderDir } from '../src/quality/render-dir.ts';
-import { runReview, ViewTracker } from '../src/quality/review.ts';
+import { mergeReviews, runReview, ViewTracker } from '../src/quality/review.ts';
 import { finalVerdict, readResearch } from '../src/quality/run.ts';
 import { contactFrames, transitionStills } from '../src/quality/sheets.ts';
 import { PageIndex, type PagesBundle } from '../src/researcher/verify.ts';
@@ -712,6 +712,7 @@ describe('the verdict', () => {
     review: { verdict, inspected: [], checks: [], issues: [], summary: 's' },
     problem: null,
     costMicroUsd: 1,
+    sessions: [],
   });
 
   it('passes only when nothing failed and every image was opened', () => {
@@ -862,6 +863,167 @@ describe('the review session', () => {
     });
     expect(client.sessions.interrupt).toHaveBeenCalledWith('ses_qc');
     expect(client.files.delete).toHaveBeenCalledWith('fil_frame');
+  });
+
+  const review = (verdict: 'pass' | 'fail', result: 'pass' | 'fail' | 'n/a', frames: number[]) => ({
+    verdict,
+    inspected: [{ file_id: 'fil_a', saw: 'a frame' }],
+    checks: [{ id: 'frame-0', result, measured: `${result} here`, frames }],
+    issues: [],
+    summary: `${verdict}.`,
+  });
+
+  /** A review client whose sessions each run `turn(session)` as their one stream. */
+  function reviewClient(
+    turn: (session: number) => {
+      events: Record<string, unknown>[];
+      state: Record<string, unknown>;
+    },
+    images = 1,
+  ) {
+    let sessions = 0;
+    let uploads = 0;
+    const states = new Map<string, Record<string, unknown>>();
+    const client = {
+      skills: { push: vi.fn(async () => ({ version: 1 })) },
+      agents: {
+        list: vi.fn(async () => ({ data: [], has_more: false, next_cursor: null })),
+        create: vi.fn(async () => ({ id: 'agt_qc', current_version: 1 })),
+      },
+      files: {
+        upload: vi.fn(async () => {
+          uploads += 1;
+          return { id: `fil_${'abcdefgh'[uploads - 1]}` };
+        }),
+        delete: vi.fn(async () => ({ deleted: true })),
+      },
+      sessions: {
+        create: vi.fn(async () => {
+          sessions += 1;
+          return { id: `ses_${sessions}` };
+        }),
+        get: vi.fn(async (id: string) => states.get(id) ?? {}),
+        send: vi.fn(async () => ({ accepted_seq: 0 })),
+        interrupt: vi.fn(async () => ({})),
+        cancel: vi.fn(async (id: string) => ({ id, status: 'cancelled' })),
+      },
+      stream: vi.fn((id: string) => {
+        const { events, state } = turn(Number(id.slice(4)));
+        states.set(id, state);
+        return (async function* () {
+          for (const [index, event] of events.entries()) yield { seq: index + 1, ...event };
+        })();
+      }),
+    };
+    const dir = mkdtempSync(join(tmpdir(), 'qc-review-'));
+    const files = Array.from({ length: images }, (_, index) => {
+      const file = join(dir, `frame-${index}.png`);
+      writeFileSync(file, 'not really a png');
+      return { file, name: `frame-${index}.png`, what: `frame ${index}` };
+    });
+    const start = () =>
+      runReview({
+        client: client as unknown as Naive,
+        definition: qualityCheck,
+        images: files,
+        folder: 'test',
+        task: (shown) => `Review ${shown.map((image) => image.fileId).join(' ')}.`,
+        budgetMicroUsd: 1_000_000,
+        eventsFile: join(dir, 'events.jsonl'),
+        say: () => {},
+        streamRetry: { retries: 0, delayMs: 0 },
+      });
+    return { client, start };
+  }
+
+  /** A turn that views `ids` and submits `output`, which only the idle event carries. */
+  const submitted = (ids: string[], output: unknown) => [
+    {
+      type: 'tool.started',
+      data: { tool_call_id: 'v', name: 'view_image', args: { file_ids: ids } },
+    },
+    {
+      type: 'tool.completed',
+      data: { tool_call_id: 'v', name: 'view_image', output: ids.join(' ') },
+    },
+    { type: 'tool.started', data: { tool_call_id: 's', name: 'submit_output', args: output } },
+    { type: 'tool.completed', data: { tool_call_id: 's', name: 'submit_output', is_error: false } },
+    {
+      type: 'session.usage',
+      data: {
+        token_usage: { input: 2, cache_write: 30, cache_read: 10, output: 5 },
+        consumed_micro_usd: 160_000,
+      },
+    },
+    { type: 'session.idle', data: { stop_reason: 'end_turn', structured_output: output } },
+  ];
+
+  it('takes the review from the idle event, not from a stale sessions.get', async () => {
+    const fresh = review('pass', 'pass', [0]);
+    const { start } = reviewClient(() => ({
+      events: submitted(['fil_a'], fresh),
+      state: {
+        status: 'idle',
+        stop_reason: 'end_turn',
+        consumed_micro_usd: 160_000,
+        structured_output: review('fail', 'fail', [9]),
+      },
+    }));
+    const run = await start();
+    expect(run.review).toEqual(fresh);
+    expect(run.sessions).toEqual([
+      expect.objectContaining({ session_id: 'ses_1', input_tokens: 42, budget_paused: false }),
+    ]);
+  });
+
+  it('cancels a review paused on its budget and retries it in halves, merging both', async () => {
+    const { client, start } = reviewClient(
+      (session) =>
+        session === 1
+          ? {
+              events: [{ type: 'session.idle', data: { stop_reason: 'budget_paused' } }],
+              state: { status: 'idle', stop_reason: 'budget_paused', consumed_micro_usd: 900_000 },
+            }
+          : {
+              events: submitted(
+                session === 2 ? ['fil_a', 'fil_b'] : ['fil_c'],
+                session === 2 ? review('pass', 'pass', [0]) : review('pass', 'n/a', [30]),
+              ),
+              state: { status: 'idle', stop_reason: 'end_turn', consumed_micro_usd: 100_000 },
+            },
+      3,
+    );
+    const run = await start();
+    expect(client.sessions.cancel).toHaveBeenCalledWith('ses_1');
+    expect(client.sessions.create).toHaveBeenCalledTimes(3);
+    expect(run.sessions.map((each) => [each.session_id, each.images, each.budget_paused])).toEqual([
+      ['ses_1', 3, true],
+      ['ses_2', 2, false],
+      ['ses_3', 1, false],
+    ]);
+    expect(run.images.every((image) => image.viewed)).toBe(true);
+    expect(run.review?.checks).toEqual([
+      { id: 'frame-0', result: 'pass', measured: 'pass here | n/a here', frames: [0, 30] },
+    ]);
+    expect(run.costMicroUsd).toBe(1_100_000);
+    expect(client.files.delete).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('mergeReviews', () => {
+  it('fails a check either half fails, and fails the verdict either half fails', () => {
+    const half = (verdict: 'pass' | 'fail', result: 'pass' | 'fail' | 'n/a') => ({
+      verdict,
+      inspected: [],
+      checks: [{ id: 'c', result, measured: result, frames: [1] }],
+      issues: [],
+      summary: verdict,
+    });
+    expect(mergeReviews([half('pass', 'pass'), half('fail', 'fail')])).toMatchObject({
+      verdict: 'fail',
+      checks: [{ id: 'c', result: 'fail', frames: [1] }],
+    });
+    expect(mergeReviews([half('pass', 'n/a'), half('pass', 'n/a')]).checks[0]?.result).toBe('n/a');
   });
 });
 

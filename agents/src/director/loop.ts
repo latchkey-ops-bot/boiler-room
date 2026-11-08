@@ -1,4 +1,5 @@
 import { type Naive, sessionEvents } from '../naive/client.ts';
+import { closeSession, type InputSize, pausedOnBudget, SessionTracker } from '../naive/session.ts';
 import type { DirectorIssue } from './checks.ts';
 import { CONTINUE_MESSAGE, repairMessage } from './prompt.ts';
 
@@ -47,6 +48,7 @@ export type LoopResult =
       rounds: RoundRecord[];
       output: unknown;
       consumedMicroUsd: number;
+      input: InputSize;
     }
   | {
       ok: false;
@@ -56,6 +58,9 @@ export type LoopResult =
       reason: string;
       remaining: DirectorIssue[];
       consumedMicroUsd: number;
+      input: InputSize;
+      /** The session was paused on its budget, and has been cancelled. */
+      budgetPaused: boolean;
     };
 
 /** Stop reasons after which the agent can be asked to carry on. */
@@ -63,42 +68,17 @@ const RESUMABLE = new Set(['end_turn', 'max_iterations', 'awaiting_input']);
 const MAX_CONTINUES = 3;
 
 /**
- * Follows `submit_output` in the event stream: how many calls Naive accepted, and the latest
- * accepted output. `sessions.get` can still return the previous `structured_output` just after a
- * turn ends (seen live on a repair round), so the output is read from the events: the
- * `session.idle` event that ends the turn carries it, and the accepted call's arguments are the
- * fallback.
- */
-export class SubmissionTracker {
-  count = 0;
-  latest: unknown = undefined;
-  private readonly pending = new Map<string, unknown>();
-
-  handle(event: { type: string; data: Record<string, unknown> }): void {
-    const data = event.data ?? {};
-    if (event.type === 'tool.started' && data.name === 'submit_output') {
-      this.pending.set(String(data.tool_call_id), data.args);
-    }
-    if (event.type === 'tool.completed' && data.name === 'submit_output' && !data.is_error) {
-      this.count += 1;
-      this.latest = this.pending.get(String(data.tool_call_id)) ?? this.latest;
-    }
-    if (event.type === 'session.idle' && this.count > 0 && data.structured_output != null) {
-      this.latest = data.structured_output;
-    }
-  }
-}
-
-/**
  * One Director session with its repair loop. The agent submits `{campaign, handoff}` through
  * `output_schema`; `check` runs `validateCampaign` and the Director checks; any issue the Director
  * owns goes back into the same session with its fix, up to `maxRepairs` rounds. Only a submission
- * seen since the last check counts, because a session keeps its last `structured_output`.
+ * seen since the last check counts, because a session keeps its last `structured_output`, and the
+ * output is read from the `session.idle` event that ends the turn, never from `sessions.get`. A
+ * session paused on its budget is cancelled and the loop fails, so it never waits for anyone.
  */
 export async function runDirectorSession(options: LoopOptions): Promise<LoopResult> {
   const { client } = options;
   const sleep = options.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
-  const counter = new SubmissionTracker();
+  const counter = new SessionTracker();
   const rounds: RoundRecord[] = [];
 
   const session = await client.sessions.create({
@@ -138,20 +118,32 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
     }
   };
 
-  try {
-    return await repairLoop();
-  } catch (cause) {
-    // The stream or the API failed for good, and the session may still be running and spending.
-    await client.sessions.interrupt(session.id).catch(() => {});
-    const after = await client.sessions.get(session.id).catch(() => undefined);
+  const failed = async (reason: string, remaining: DirectorIssue[]): Promise<LoopResult> => {
+    // Whatever stopped the loop, the session is left neither spending nor waiting.
+    const closed = await closeSession(client, session.id);
+    const budgetPaused = closed.budgetPaused || counter.budgetPaused;
     return {
       ok: false,
       sessionId: session.id,
       rounds,
-      reason: `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
-      remaining: rounds.at(-1)?.blocking ?? [],
-      consumedMicroUsd: after?.consumed_micro_usd ?? options.budgetMicroUsd,
+      reason: budgetPaused
+        ? `the session was paused on its budget of $${(options.budgetMicroUsd / 1e6).toFixed(2)} and ${closed.cancelled ? 'has been cancelled' : 'could not be cancelled'}`
+        : reason,
+      remaining,
+      consumedMicroUsd: closed.consumedMicroUsd ?? options.budgetMicroUsd,
+      input: counter.inputSize(),
+      budgetPaused,
     };
+  };
+
+  try {
+    return await repairLoop();
+  } catch (cause) {
+    // The stream or the API failed for good, and the session may still be running and spending.
+    return failed(
+      `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
+      rounds.at(-1)?.blocking ?? [],
+    );
   }
 
   // Each round: wait for a submission, check it, and send back what blocks it.
@@ -159,8 +151,10 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
     for (;;) {
       const state = await settle();
       const consumedMicroUsd = state.consumed_micro_usd;
-      const output = counter.latest ?? state.structured_output;
-      const fresh = counter.count > checked && output != null;
+      const paused = pausedOnBudget(counter, state);
+      const output = counter.output;
+      const fresh = counter.submissions > checked && output != null;
+      if (paused && !fresh) return failed('', rounds.at(-1)?.blocking ?? []);
       if (!fresh) {
         const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
         if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
@@ -172,34 +166,37 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
           afterSeq = sent.accepted_seq;
           continue;
         }
-        return {
-          ok: false,
-          sessionId: session.id,
-          rounds,
-          reason: `the session stopped (${state.status}/${state.stop_reason}) without a new submission`,
-          remaining: rounds.at(-1)?.blocking ?? [],
-          consumedMicroUsd,
-        };
+        return failed(
+          `the session stopped (${state.status}/${state.stop_reason}) without a new submission`,
+          rounds.at(-1)?.blocking ?? [],
+        );
       }
-      checked = counter.count;
+      checked = counter.submissions;
       const { blocking, other } = await options.check(output);
       rounds.push({ round: rounds.length + 1, output, blocking, other });
       if (blocking.length === 0) {
-        return { ok: true, sessionId: session.id, rounds, output, consumedMicroUsd };
-      }
-      const repair = rounds.length;
-      if (repair > options.maxRepairs || Date.now() > deadline) {
+        // A submission that passes is kept even when the turn then paused, and the pause is
+        // cancelled all the same.
+        const closed = paused ? await closeSession(client, session.id) : undefined;
         return {
-          ok: false,
+          ok: true,
           sessionId: session.id,
           rounds,
-          reason:
-            repair > options.maxRepairs
-              ? `${options.maxRepairs} repair rounds did not clear every issue`
-              : 'the time limit was reached',
-          remaining: blocking,
-          consumedMicroUsd,
+          output,
+          consumedMicroUsd: closed?.consumedMicroUsd ?? consumedMicroUsd,
+          input: counter.inputSize(),
         };
+      }
+      // A paused session cannot take a repair: it is cancelled with the issues it left.
+      if (paused) return failed('', blocking);
+      const repair = rounds.length;
+      if (repair > options.maxRepairs || Date.now() > deadline) {
+        return failed(
+          repair > options.maxRepairs
+            ? `${options.maxRepairs} repair rounds did not clear every issue`
+            : 'the time limit was reached',
+          blocking,
+        );
       }
       const sent = await client.sessions.send(session.id, {
         message: repairMessage(blocking, repair, options.maxRepairs),

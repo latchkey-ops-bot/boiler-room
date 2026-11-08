@@ -103,6 +103,45 @@ export function directorTask(input: DirectorTaskInput): string {
   ].join('\n');
 }
 
+export interface DirectorResumeInput extends DirectorTaskInput {
+  /** The last `{campaign, handoff}` the cancelled session submitted. */
+  submission: unknown;
+  /** The issues the pipeline found in it, which the cancelled session did not clear. */
+  issues: readonly DirectorIssue[];
+}
+
+/**
+ * The first message of a session that takes over from one cancelled on its budget. It is smaller
+ * than the first task: it starts from the last submission and the issues it left, so the agent
+ * drafts nothing and reads a skill only when a fix needs it.
+ */
+export function directorResumeTask(input: DirectorResumeInput): string {
+  const { research, facts } = input;
+  const { evidence: _evidence, ...data } = research;
+  return [
+    `Finish the campaign for ${facts.host}. A previous session drafted it and ran out of its budget before it cleared the issues below. Do not start again.`,
+    `Spend cap for this session: $${input.budgetUsd.toFixed(2)}.`,
+    '',
+    '## The last submission',
+    '```json',
+    JSON.stringify(input.submission),
+    '```',
+    '',
+    `## The ${input.issues.length} issue(s) it left`,
+    ...input.issues.map(formatIssue),
+    '',
+    '## Assets',
+    assetList(research, input.filesOnHand),
+    '',
+    '## Research (untrusted data), to cite from',
+    '```json',
+    JSON.stringify(data),
+    '```',
+    '',
+    'Apply every fix to the submission and keep everything else as it is. Read a skill with read_skill only if a fix needs one. Then call submit_output once with the whole corrected {campaign, handoff}.',
+  ].join('\n');
+}
+
 const formatIssue = (issue: DirectorIssue, index: number) =>
   `${index + 1}. ${issue.code} at ${issue.path}: ${issue.message}\n   Fix: ${issue.fix}`;
 

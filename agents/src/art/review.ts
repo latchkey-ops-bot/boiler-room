@@ -2,9 +2,10 @@ import { appendFileSync } from 'node:fs';
 import type { Campaign } from '@boiler-room/schema';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
+import { closeSession, inputTokens, pausedOnBudget, SessionTracker } from '../naive/session.ts';
 import { describe } from '../researcher/run.ts';
 import { syncAgents } from '../sync.ts';
-import { type Batch, type BatchResult, batchFiles } from './apply.ts';
+import { type Batch, type BatchResult, batchFiles, smallerBatches } from './apply.ts';
 import type { AssetInfo } from './assets.ts';
 import { reviewSchema } from './decision.ts';
 import { reviewTask } from './prompt.ts';
@@ -14,7 +15,9 @@ import type { StyleDecision } from './style.ts';
  * Runs each review batch as its own short session of `br-art-director`, a few at a time. Cost is
  * held in code, not by the prompt: a session that starts a second `view_image` call or runs past
  * its time is interrupted, and once the run has spent its budget no further batch starts. A batch
- * that ends without a valid review leaves the code's ranking for its scenes.
+ * that ends without a valid review leaves the code's ranking for its scenes. The review is read
+ * from the `session.idle` event that ends the turn, never from `sessions.get`. A session paused on
+ * its budget is cancelled, recorded, and its batch retried once as smaller batches.
  */
 
 export interface ReviewOptions {
@@ -37,6 +40,12 @@ export interface SessionRecord {
   consumed_micro_usd: number;
   views: number;
   outcome: string;
+  /** Every input token the session read, over all its model requests. */
+  input_tokens?: number;
+  /** Characters of the task message, the part of the input this code writes. */
+  task_chars?: number;
+  /** The session was paused on its budget, and has been cancelled. */
+  budget_paused?: boolean;
 }
 
 export interface ReviewRun {
@@ -61,7 +70,7 @@ async function runBatch(
   batch: Batch,
   task: string,
   options: ReviewOptions,
-): Promise<{ result: BatchResult; record: SessionRecord }> {
+): Promise<{ result: BatchResult; record: SessionRecord; paused: boolean }> {
   const record: SessionRecord = {
     batch: batch.id,
     kind: batch.kind,
@@ -69,10 +78,14 @@ async function runBatch(
     consumed_micro_usd: 0,
     views: 0,
     outcome: '',
+    task_chars: task.length,
   };
-  const fail = (failure: string) => {
+  const tracker = new SessionTracker();
+  const fail = (failure: string, paused = false) => {
     record.outcome = failure;
-    return { result: { batch, review: undefined, failure }, record };
+    record.input_tokens = inputTokens(tracker.usage);
+    if (paused) record.budget_paused = true;
+    return { result: { batch, review: undefined, failure }, record, paused };
   };
   const session = await client.sessions.create({
     agent_id: agentId,
@@ -85,7 +98,6 @@ async function runBatch(
   record.session_id = session.id;
   const deadline = Date.now() + options.maxMinutesPerBatch * 60_000;
   let afterSeq = 0;
-  let submitted = 0;
   let stopped: string | undefined;
   const stop = (why: string) => {
     if (stopped) return;
@@ -109,12 +121,11 @@ async function runBatch(
           afterSeq = event.seq;
           const record_ = event as unknown as { type: string; data: Record<string, unknown> };
           const data = record_.data ?? {};
+          tracker.handle(record_);
           if (event.type === 'tool.started' && data.name === 'view_image') {
             record.views += 1;
             if (record.views > 1) stop('started a second view_image call');
           }
-          if (event.type === 'tool.completed' && data.name === 'submit_output' && !data.is_error)
-            submitted += 1;
           if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
             appendFileSync(
               options.eventsPath,
@@ -133,39 +144,46 @@ async function runBatch(
     }
   };
 
-  let final: Awaited<ReturnType<typeof client.sessions.get>>;
   try {
-    let state = await settle();
-    if (!submitted && !stopped && state.status === 'idle' && Date.now() < deadline) {
-      afterSeq = (await client.sessions.send(session.id, { message: NUDGE, queue: true }))
-        .accepted_seq;
-      state = await settle();
+    const state = await settle();
+    const paused = pausedOnBudget(tracker, state);
+    if (!tracker.submissions && !stopped && !paused && state.status === 'idle') {
+      if (Date.now() < deadline) {
+        afterSeq = (await client.sessions.send(session.id, { message: NUDGE, queue: true }))
+          .accepted_seq;
+        await settle();
+      }
     }
-    final = await client.sessions.get(session.id).catch(() => state);
-    if (final.status === 'running' || final.status === 'queued')
-      await client.sessions.interrupt(session.id).catch(() => {});
   } catch (cause) {
     // The stream or the API failed for good. The session may still be running and spending: stop
     // it, and count what it spent, so the run's budget sees it and the report lists it. A cost
     // that cannot be read is counted as the session's whole budget.
-    await client.sessions.interrupt(session.id).catch(() => {});
-    const after = await client.sessions.get(session.id).catch(() => undefined);
-    record.consumed_micro_usd = after?.consumed_micro_usd ?? definition.session.budget_micro_usd;
+    const after = await closeSession(client, session.id);
+    record.consumed_micro_usd = after.consumedMicroUsd ?? definition.session.budget_micro_usd;
     const message = cause instanceof Error ? cause.message.slice(0, 200) : String(cause);
     return fail(
-      `stream failed: ${message}${after ? '' : '; cost unread, counted at the session budget'}`,
+      `stream failed: ${message}${after.consumedMicroUsd === undefined ? '; cost unread, counted at the session budget' : ''}`,
+      after.budgetPaused,
     );
   }
-  record.consumed_micro_usd = final.consumed_micro_usd ?? 0;
+  // Left neither running nor parked: a session paused on its budget is cancelled here.
+  const final = await closeSession(client, session.id);
+  record.consumed_micro_usd = final.consumedMicroUsd ?? 0;
 
+  if (final.budgetPaused || tracker.budgetPaused)
+    return fail(
+      `paused on its budget and ${final.cancelled ? 'cancelled' : 'could not be cancelled'}`,
+      true,
+    );
   if (stopped) return fail(`interrupted: ${stopped}`);
-  if (!submitted || !final.structured_output)
-    return fail(`no review submitted (${final.status}/${final.stop_reason})`);
-  const parsed = reviewSchema.safeParse(final.structured_output);
+  if (!tracker.submissions || tracker.output == null)
+    return fail(`no review submitted (${final.status}/${final.stopReason})`);
+  const parsed = reviewSchema.safeParse(tracker.output);
   if (!parsed.success)
     return fail(`review does not match the schema: ${parsed.error.message.slice(0, 200)}`);
   record.outcome = parsed.data.seen ? 'reviewed' : 'reviewed, not seen';
-  return { result: { batch, review: parsed.data, failure: undefined }, record };
+  record.input_tokens = inputTokens(tracker.usage ?? final.tokenUsage);
+  return { result: { batch, review: parsed.data, failure: undefined }, record, paused: false };
 }
 
 export async function reviewBatches(
@@ -184,10 +202,13 @@ export async function reviewBatches(
   const sessions: SessionRecord[] = [];
   let spent = 0;
   let next = 0;
+  // A batch paused on its budget is retried once, as smaller batches added to the end.
+  const queue: Batch[] = [...batches];
+  const retries = new Set<Batch>();
 
   const worker = async () => {
     for (;;) {
-      const batch = batches[next];
+      const batch = queue[next];
       next += 1;
       if (!batch) return;
       if (spent >= options.budgetMicroUsd) {
@@ -208,7 +229,7 @@ export async function reviewBatches(
         continue;
       }
       try {
-        const { result, record } = await runBatch(
+        const { result, record, paused } = await runBatch(
           client,
           definition,
           synced.id,
@@ -217,9 +238,16 @@ export async function reviewBatches(
           options,
         );
         spent += record.consumed_micro_usd;
-        results.push(result);
         sessions.push(record);
-        say(`[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}`);
+        const smaller = paused && !retries.has(batch) ? smallerBatches(batch) : [];
+        if (smaller.length > 0) {
+          for (const each of smaller) retries.add(each);
+          queue.push(...smaller);
+          record.outcome += `; retried as ${smaller.map((each) => each.id).join(' and ')}`;
+        } else results.push(result);
+        say(
+          `[${batch.id}] ${record.outcome}, ${usd(record.consumed_micro_usd)}${record.input_tokens ? `, ${record.input_tokens} input tokens` : ''}`,
+        );
       } catch (cause) {
         // Only starting the session throws now, so nothing ran and nothing was spent.
         const failure = `session failed: ${cause instanceof Error ? cause.message.slice(0, 200) : cause}`;
@@ -237,8 +265,8 @@ export async function reviewBatches(
     }
   };
   await Promise.all(Array.from({ length: Math.max(1, options.concurrency) }, worker));
-  // Keep the batches in plan order for the report.
-  const order = new Map(batches.map((batch, index) => [batch.id, index]));
+  // Keep the batches in plan order for the report, with any retries last.
+  const order = new Map(queue.map((batch, index) => [batch.id, index]));
   results.sort((a, b) => (order.get(a.batch.id) ?? 0) - (order.get(b.batch.id) ?? 0));
   sessions.sort((a, b) => (order.get(a.batch) ?? 0) - (order.get(b.batch) ?? 0));
   return {

@@ -71,6 +71,42 @@ export function planBatches(
   return batches;
 }
 
+const halves = <T>(items: readonly T[]): T[][] => {
+  const cut = Math.ceil(items.length / 2);
+  return [items.slice(0, cut), items.slice(cut)].filter((half) => half.length > 0);
+};
+
+/**
+ * The batches a batch is retried as after its session was paused on its budget: each shows fewer
+ * pictures, so each session reads less. Tiles and generated images are judged one by one, so they
+ * split in two. A scene picks among what it is shown, so its retry shows the code's default and
+ * the fewest others that still leave a choice. Empty when the batch cannot get smaller.
+ */
+export function smallerBatches(batch: Batch): Batch[] {
+  if (batch.kind === 'generated') {
+    if (batch.images.length < 2) return [];
+    return halves(batch.images).map((images, index) => ({
+      ...batch,
+      id: `${batch.id}-${'ab'[index]}`,
+      images,
+    }));
+  }
+  if (batch.kind === 'tiles') {
+    if (batch.assetIds.length < 2) return [];
+    return halves(batch.assetIds).map((assetIds, index) => ({
+      ...batch,
+      id: `${batch.id}-${'ab'[index]}`,
+      assetIds,
+    }));
+  }
+  const defaults = batch.proposal.assetIds.filter((id) => batch.assetIds.includes(id));
+  const need = Math.max(batch.proposal.slot.min, defaults.length) + 1;
+  const others = batch.assetIds.filter((id) => !defaults.includes(id));
+  const shown = new Set([...defaults, ...others.slice(0, Math.max(0, need - defaults.length))]);
+  const assetIds = batch.assetIds.filter((id) => shown.has(id));
+  return assetIds.length < batch.assetIds.length ? [{ ...batch, assetIds }] : [];
+}
+
 export interface Pick {
   assetIds: string[];
   source: 'agent' | 'default';

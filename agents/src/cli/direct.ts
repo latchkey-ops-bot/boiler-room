@@ -81,6 +81,14 @@ if (report) {
     microUsd: Number(report.session_micro_usd ?? 0),
     session: typeof report.session_id === 'string' ? report.session_id : null,
     note: code === 0 ? 'campaign written' : 'no campaign written',
+    ...(report.input_tokens && typeof report.input_tokens === 'object'
+      ? {
+          inputTokens: Object.values(report.input_tokens as Record<string, number>).reduce(
+            (sum, each) => sum + each,
+            0,
+          ),
+        }
+      : {}),
   });
 }
 process.exit(code);

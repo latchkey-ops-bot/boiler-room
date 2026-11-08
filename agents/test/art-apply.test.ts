@@ -7,6 +7,7 @@ import {
   batchFiles,
   gateReviews,
   planBatches,
+  smallerBatches,
   VIEW_LIMIT,
 } from '../src/art/apply.ts';
 import { classifyAssets, distinctAssets, proposeAssets } from '../src/art/assets.ts';
@@ -315,5 +316,30 @@ describe('checkBrand', () => {
     const check = checkBrand(campaign);
     expect(check.flags.join(' ')).toMatch(/generated wordmark/);
     expect(check.brand.logoAssetId).toBe('logo');
+  });
+});
+
+describe('smallerBatches', () => {
+  it('splits tiles in two, and shows a scene its default and one other', () => {
+    const { proposals, generated } = setup('#5850EC', true);
+    const batches = planBatches(proposals, generated);
+    const tiles = batches.find((batch) => batch.kind === 'tiles' && batch.assetIds.length > 1);
+    if (!tiles || tiles.kind !== 'tiles') throw new Error('the fixture has no tile group of two');
+    const halves = smallerBatches(tiles);
+    expect(halves.map((half) => half.id)).toEqual([`${tiles.id}-a`, `${tiles.id}-b`]);
+    expect(halves.flatMap((half) => (half.kind === 'tiles' ? half.assetIds : []))).toEqual(
+      tiles.assetIds,
+    );
+
+    const scene = batches.find((batch) => batch.kind === 'scene' && batch.assetIds.length > 2);
+    if (scene?.kind === 'scene') {
+      const [retry] = smallerBatches(scene);
+      if (retry?.kind !== 'scene') throw new Error('no smaller scene batch');
+      expect(retry.assetIds.length).toBe(
+        Math.max(scene.proposal.slot.min, scene.proposal.assetIds.length) + 1,
+      );
+      for (const id of scene.proposal.assetIds) expect(retry.assetIds).toContain(id);
+      expect(smallerBatches(retry)).toEqual([]);
+    }
   });
 });

@@ -108,6 +108,18 @@ export interface QcReport {
     images: { fileId: string; name: string; what: string; viewed: boolean }[];
     modelVerdict: 'pass' | 'fail' | null;
     summary: string | null;
+    /** Each session the review ran: input tokens, task size, spend and how it ended. */
+    sessions?: {
+      session_id: string;
+      images: number;
+      task_chars: number;
+      input_tokens: number;
+      model_requests: number;
+      largest_request_input_tokens: number;
+      consumed_micro_usd: number;
+      budget_paused: boolean;
+      outcome: string;
+    }[];
   } | null;
   createdAt: string;
 }

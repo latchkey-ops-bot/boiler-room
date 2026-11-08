@@ -33,6 +33,8 @@ const entrySchema = z.object({
   at: z.string(),
   session: z.string().nullable(),
   note: z.string(),
+  /** Every input token the step's sessions read, when the step measured it. */
+  inputTokens: z.number().int().min(0).optional(),
 });
 
 const ledgerSchema = z.object({

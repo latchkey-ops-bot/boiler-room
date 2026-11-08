@@ -7,6 +7,8 @@ import { exampleBrief, exampleResearch, exampleSubmission } from './director-fix
 
 /** A turn that ends without calling submit_output. */
 const NO_SUBMISSION = Symbol('no submission');
+/** A turn that ends parked on the session's budget, without calling submit_output. */
+const PAUSED = Symbol('paused');
 
 /**
  * A fake Naive client. Each stream is one turn of the agent: it submits the next scripted output,
@@ -14,16 +16,18 @@ const NO_SUBMISSION = Symbol('no submission');
  * the idle event that ends a turn carries it. With `staleGet`, `sessions.get` answers the output
  * before the latest, as Naive did live on a repair round.
  */
-function fakeClient(turns: unknown[], { staleGet = false } = {}) {
+function fakeClient(turns: unknown[], { staleGet = false, pauseAfter = false } = {}) {
   let turn = 0;
   let seq = 0;
+  let stop = 'end_turn';
+  let status = 'idle';
   const outputs: unknown[] = [];
   const client = {
     sessions: {
       create: vi.fn(async (_body: Record<string, unknown>) => ({ id: 'ses_director' })),
       get: vi.fn(async (_id: string) => ({
-        status: 'idle',
-        stop_reason: 'end_turn',
+        status,
+        stop_reason: stop,
         structured_output: outputs.at(staleGet && outputs.length > 1 ? -2 : -1) ?? null,
         consumed_micro_usd: 100_000 * turn,
       })),
@@ -31,11 +35,21 @@ function fakeClient(turns: unknown[], { staleGet = false } = {}) {
         accepted_seq: seq,
       })),
       interrupt: vi.fn(async () => ({})),
+      cancel: vi.fn(async (_id: string) => {
+        status = 'cancelled';
+        return { status: 'cancelled' };
+      }),
     },
     stream: vi.fn((_id: string, _query: { afterSeq: number }) =>
       (async function* () {
         const next = turns[turn];
         turn += 1;
+        if (next === PAUSED) {
+          stop = 'budget_paused';
+          seq += 1;
+          yield { seq, type: 'session.idle', data: { stop_reason: stop, structured_output: null } };
+          return;
+        }
         if (next !== NO_SUBMISSION && next !== undefined) {
           outputs.push(next);
           const call = { tool_call_id: `call_${turn}`, name: 'submit_output' };
@@ -44,11 +58,12 @@ function fakeClient(turns: unknown[], { staleGet = false } = {}) {
           seq += 1;
           yield { seq, type: 'tool.completed', data: { ...call, is_error: false } };
         }
+        if (pauseAfter && turn === turns.length) stop = 'budget_paused';
         seq += 1;
         yield {
           seq,
           type: 'session.idle',
-          data: { stop_reason: 'end_turn', structured_output: outputs.at(-1) ?? null },
+          data: { stop_reason: stop, structured_output: outputs.at(-1) ?? null },
         };
       })(),
     ),
@@ -182,6 +197,54 @@ describe('runDirectorSession', () => {
       { good: false, n: 1 },
       { good: true, n: 2 },
     ]);
+  });
+
+  it('takes the output from the idle event that ends the turn, not from the call or a get', async () => {
+    const client = fakeClient([{ good: false }]);
+    client.stream.mockImplementationOnce(() =>
+      (async function* () {
+        const call = { tool_call_id: 'call_1', name: 'submit_output' };
+        yield { seq: 1, type: 'tool.started', data: { ...call, args: { good: false } } };
+        yield { seq: 2, type: 'tool.completed', data: { ...call, is_error: false } };
+        yield {
+          seq: 3,
+          type: 'session.idle',
+          data: { stop_reason: 'end_turn', structured_output: { good: true, from: 'idle' } },
+        };
+      })(),
+    );
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: true, output: { good: true, from: 'idle' } });
+  });
+
+  it('cancels a session paused on its budget and fails, never leaving it waiting', async () => {
+    const client = fakeClient([{ good: false }, PAUSED]);
+    const result = await run(client);
+    expect(result).toMatchObject({
+      ok: false,
+      budgetPaused: true,
+      reason: expect.stringContaining('paused on its budget'),
+      remaining: [issue('CLAIM_UNBACKED')],
+    });
+    expect(result.ok ? '' : result.reason).toContain('has been cancelled');
+    expect(client.sessions.cancel).toHaveBeenCalledWith('ses_director');
+    // The paused session is not sent another message.
+    expect(client.sessions.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a passing submission whose turn then paused, and still cancels the session', async () => {
+    const client = fakeClient([{ good: true }], { pauseAfter: true });
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: true, output: { good: true } });
+    expect(client.sessions.cancel).toHaveBeenCalledWith('ses_director');
+  });
+
+  it('cancels a paused session with issues instead of sending it a repair', async () => {
+    const client = fakeClient([{ good: false }], { pauseAfter: true });
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: false, budgetPaused: true });
+    expect(client.sessions.cancel).toHaveBeenCalledTimes(1);
+    expect(client.sessions.send).not.toHaveBeenCalled();
   });
 
   it('ignores a submit_output call that Naive refused against the schema', async () => {

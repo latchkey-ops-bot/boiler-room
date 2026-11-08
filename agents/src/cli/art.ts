@@ -86,7 +86,7 @@ const code = await artDirect({
   agent: !values['no-agent'],
 });
 const cost = freshReport(`${outPath.replace(/\.json$/, '')}.report.json`, started)?.cost as
-  | { session_micro_usd?: number; images_micro_usd?: number }
+  | { session_micro_usd?: number; images_micro_usd?: number; input_tokens?: number }
   | undefined;
 if (cost) {
   recordSpend(ledger, film, {
@@ -94,6 +94,7 @@ if (cost) {
     microUsd: cost.session_micro_usd ?? 0,
     session: null,
     note: 'review sessions',
+    ...(cost.input_tokens !== undefined ? { inputTokens: cost.input_tokens } : {}),
   });
   if (cost.images_micro_usd) {
     recordSpend(ledger, film, {

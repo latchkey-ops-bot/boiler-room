@@ -362,6 +362,12 @@ export async function artDirect(options: ArtOptions): Promise<number> {
     validation: { ok: validation.ok, issues: validation.issues },
     cost: {
       session_micro_usd: sessionMicro,
+      /** Every input token of every review session, and the most one session read. */
+      input_tokens: run?.sessions.reduce((sum, each) => sum + (each.input_tokens ?? 0), 0) ?? 0,
+      max_session_input_tokens: Math.max(
+        0,
+        ...(run?.sessions ?? []).map((each) => each.input_tokens ?? 0),
+      ),
       images_micro_usd: generation.spentMicroUsd,
       balance_delta_micro_usd: balanceAfter === undefined ? null : balanceBefore - balanceAfter,
     },
@@ -384,7 +390,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
   for (const back of sentBack)
     say(`sent back: ${back.scene_id}: ${back.substitution}. ${back.why}`);
   say(
-    `cost: ${run?.sessions.filter((each) => each.session_id).length ?? 0} review session(s) ${usd(sessionMicro)}, images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `. Org balance moved ${usd(report.cost.balance_delta_micro_usd)} meanwhile, which includes any other agent running in the org` : ''}.`,
+    `cost: ${run?.sessions.filter((each) => each.session_id).length ?? 0} review session(s) ${usd(sessionMicro)} (${report.cost.input_tokens} input tokens, at most ${report.cost.max_session_input_tokens} in one), images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `. Org balance moved ${usd(report.cost.balance_delta_micro_usd)} meanwhile, which includes any other agent running in the org` : ''}.`,
   );
   if (!validation.ok) return 1;
   return sentBack.length > 0 ? 3 : 0;

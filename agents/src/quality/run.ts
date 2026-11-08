@@ -399,7 +399,9 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
       eventsFile: join(work, 'events.jsonl'),
       say,
     });
-    say(`review cost ${usd(run.costMicroUsd)}`);
+    say(
+      `review cost ${usd(run.costMicroUsd)}, ${run.sessions.map((each) => `${each.input_tokens} input tokens`).join(' + ')}`,
+    );
   } else if (options.model) {
     say('not starting a review: the film is not a valid render of this campaign');
   }
@@ -483,6 +485,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
           })),
           modelVerdict: run.review?.verdict ?? null,
           summary: run.review?.summary ?? run.problem,
+          sessions: run.sessions,
         }
       : null,
     createdAt: new Date().toISOString(),

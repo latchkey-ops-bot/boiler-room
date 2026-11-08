@@ -2,11 +2,16 @@
  * The model's part of a review: upload the images taken from the film to Naive files, start one
  * `br-quality-check` session with a typed result, and record which images it actually opened. The
  * images are deleted afterwards; the agent is kept, as it is part of the crew.
+ *
+ * The review is read from the `session.idle` event that ends the turn, never from `sessions.get`,
+ * which can still answer the previous turn's output. A session paused on its budget is cancelled,
+ * recorded, and the review retried once as two smaller sessions, each with half the images.
  */
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
+import { closeSession, type InputSize, pausedOnBudget, SessionTracker } from '../naive/session.ts';
 import { syncAgents } from '../sync.ts';
 import { type QcReview, qcReviewSchema } from './output.ts';
 import { CONTINUE_MESSAGE, type ReviewImage } from './prompt.ts';
@@ -55,12 +60,50 @@ export class ViewTracker {
 export interface ReviewRun {
   agentId: string;
   agentVersion: number;
+  /** The session, or the sessions joined by ", " when a paused review was retried in halves. */
   sessionId: string;
   images: (ReviewImage & { viewed: boolean })[];
   review: QcReview | null;
   /** Why the typed result is missing or was refused. */
   problem: string | null;
   costMicroUsd: number;
+  /** Each session the review ran, with what it read and how it ended. */
+  sessions: ReviewSession[];
+}
+
+export interface ReviewSession extends InputSize {
+  session_id: string;
+  images: number;
+  task_chars: number;
+  consumed_micro_usd: number;
+  /** The session was paused on its budget, and has been cancelled. */
+  budget_paused: boolean;
+  outcome: string;
+}
+
+const worst = (results: readonly QcReview['checks'][number]['result'][]) =>
+  results.includes('fail') ? 'fail' : results.includes('pass') ? 'pass' : 'n/a';
+
+/**
+ * One review from the reviews of two halves of the images: a check fails when either half fails
+ * it and passes when either passes it and neither fails it, on the frames of both.
+ */
+export function mergeReviews(reviews: readonly QcReview[]): QcReview {
+  const checks = new Map<string, QcReview['checks']>();
+  for (const check of reviews.flatMap((review) => review.checks))
+    checks.set(check.id, [...(checks.get(check.id) ?? []), check]);
+  return {
+    verdict: reviews.every((review) => review.verdict === 'pass') ? 'pass' : 'fail',
+    inspected: reviews.flatMap((review) => review.inspected),
+    checks: [...checks.entries()].map(([id, parts]) => ({
+      id,
+      result: worst(parts.map((part) => part.result)),
+      measured: parts.map((part) => part.measured).join(' | '),
+      frames: [...new Set(parts.flatMap((part) => part.frames))].sort((a, b) => a - b),
+    })),
+    issues: reviews.flatMap((review) => review.issues),
+    summary: reviews.map((review) => review.summary).join(' '),
+  };
 }
 
 export async function uploadImages(
@@ -106,11 +149,157 @@ function describe(event: { type: string; data: Record<string, unknown> }): strin
   return undefined;
 }
 
-/**
- * Runs one review session. `say` prints progress; `eventsFile` keeps every event with the key
- * scrubbed. Images are uploaded before and deleted after, whatever happens.
- */
-export async function runReview(options: {
+interface SessionOutcome {
+  record: ReviewSession;
+  review: QcReview | null;
+  problem: string | null;
+  viewed: ReadonlySet<string>;
+  paused: boolean;
+}
+
+/** One review session over `images`, which are already uploaded. */
+async function reviewSession(
+  options: ReviewOptions,
+  agentId: string,
+  images: readonly ReviewImage[],
+): Promise<SessionOutcome> {
+  const { client, definition, say } = options;
+  const views = new ViewTracker();
+  const tracker = new SessionTracker();
+  const task = options.task(images);
+  const record: ReviewSession = {
+    session_id: '',
+    images: images.length,
+    task_chars: task.length,
+    consumed_micro_usd: 0,
+    budget_paused: false,
+    outcome: '',
+    ...tracker.inputSize(),
+  };
+  const done = (
+    problem: string | null,
+    review: QcReview | null,
+    consumed: number | undefined,
+    paused = false,
+  ): SessionOutcome => {
+    Object.assign(record, tracker.inputSize(), {
+      consumed_micro_usd: consumed ?? options.budgetMicroUsd,
+      budget_paused: paused,
+      outcome: problem ?? `reviewed: ${review?.verdict}`,
+    });
+    return { record, review, problem, viewed: views.viewed, paused };
+  };
+
+  const session = await client.sessions.create({
+    agent_id: agentId,
+    message: task,
+    budget_micro_usd: options.budgetMicroUsd,
+    ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
+    structured_output_required: definition.structured_output_required,
+    metadata: { run: 'quality-check', folder: options.folder },
+  });
+  record.session_id = session.id;
+  say(
+    `session ${session.id} started, ${images.length} images, budget ${usd(options.budgetMicroUsd)}`,
+  );
+  const deadline = Date.now() + definition.session.max_minutes * 60_000;
+  let afterSeq = 0;
+  let continues = 0;
+
+  const settle = async () => {
+    for (;;) {
+      const timer = setTimeout(
+        () => client.sessions.interrupt(session.id).catch(() => {}),
+        Math.max(1000, deadline - Date.now()),
+      );
+      try {
+        for await (const event of sessionEvents(
+          client,
+          session.id,
+          afterSeq,
+          options.streamRetry,
+        )) {
+          afterSeq = event.seq;
+          const record_ = event as unknown as { type: string; data: Record<string, unknown> };
+          views.handle(record_);
+          tracker.handle(record_);
+          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+            appendFileSync(options.eventsFile, `${scrub(JSON.stringify(event))}\n`);
+          const line = describe(record_);
+          if (line) say(line);
+        }
+      } finally {
+        clearTimeout(timer);
+      }
+      const state = await client.sessions.get(session.id);
+      if ((state.status !== 'running' && state.status !== 'queued') || Date.now() > deadline)
+        return state;
+      await sleep(1000);
+    }
+  };
+
+  try {
+    let state = await settle();
+    while (
+      !(tracker.submissions > 0 && tracker.output != null) &&
+      !pausedOnBudget(tracker, state) &&
+      state.status === 'idle' &&
+      RESUMABLE.has(state.stop_reason ?? '') &&
+      continues < MAX_CONTINUES &&
+      Date.now() < deadline
+    ) {
+      continues += 1;
+      say(`no review submitted yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`);
+      const sent = await client.sessions.send(session.id, {
+        message: CONTINUE_MESSAGE,
+        queue: true,
+      });
+      afterSeq = sent.accepted_seq;
+      state = await settle();
+    }
+  } catch (cause) {
+    // The stream or the API failed for good, and the session may still be running and
+    // spending: stop it, and keep its cost for the report. A cost that cannot be read is
+    // counted as the session's whole budget.
+    const after = await closeSession(client, session.id);
+    say(`the event stream failed; session ${session.id} stopped`);
+    return done(
+      `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
+      null,
+      after.consumedMicroUsd,
+      after.budgetPaused,
+    );
+  }
+  // Left neither running nor parked: a session paused on its budget is cancelled here.
+  const final = await closeSession(client, session.id);
+  if (final.budgetPaused || tracker.budgetPaused) {
+    say(`session ${session.id} was paused on its budget and has been cancelled`);
+    return done(
+      `the session was paused on its budget and ${final.cancelled ? 'has been cancelled' : 'could not be cancelled'}`,
+      null,
+      final.consumedMicroUsd,
+      true,
+    );
+  }
+  if (tracker.output == null || tracker.submissions === 0) {
+    return done(
+      `the session stopped (${final.status}/${final.stopReason ?? 'none'}) without submitting a review`,
+      null,
+      final.consumedMicroUsd,
+    );
+  }
+  const parsed = qcReviewSchema.safeParse(tracker.output);
+  if (!parsed.success) {
+    return done(
+      `the submitted review does not match the schema: ${parsed.error.message.slice(0, 300)}`,
+      null,
+      final.consumedMicroUsd,
+    );
+  }
+  return done(null, parsed.data, final.consumedMicroUsd);
+}
+
+interface ReviewOptions {
   client: Naive;
   definition: AgentDefinition;
   images: readonly LocalImage[];
@@ -121,7 +310,15 @@ export async function runReview(options: {
   say: (line: string) => void;
   /** How a dropped event stream is resumed before the session is stopped. */
   streamRetry?: StreamRetry;
-}): Promise<ReviewRun> {
+}
+
+/**
+ * Runs the review. `say` prints progress; `eventsFile` keeps every event with the key scrubbed.
+ * Images are uploaded before and deleted after, whatever happens. A session paused on its budget
+ * is cancelled and the review retried once in two smaller sessions, each with half the images,
+ * whose reviews are merged; the halves are not split again.
+ */
+export async function runReview(options: ReviewOptions): Promise<ReviewRun> {
   const { client, definition, say } = options;
   const [synced] = await syncAgents(client, [definition]);
   if (!synced) throw new Error('Agent sync returned nothing.');
@@ -129,116 +326,37 @@ export async function runReview(options: {
   writeFileSync(options.eventsFile, '');
   const images = await uploadImages(client, options.images, options.folder);
   say(`uploaded ${images.length} images: ${images.map((image) => image.fileId).join(', ')}`);
-  const tracker = new ViewTracker();
-  let sessionId = '';
+  const sessions: ReviewSession[] = [];
+  const viewed = new Set<string>();
+  const result = (review: QcReview | null, problem: string | null): ReviewRun => ({
+    agentId: synced.id,
+    agentVersion: synced.version,
+    sessionId: sessions.map((each) => each.session_id).join(', '),
+    images: images.map((image) => ({ ...image, viewed: viewed.has(image.fileId) })),
+    review,
+    problem,
+    costMicroUsd: sessions.reduce((sum, each) => sum + each.consumed_micro_usd, 0),
+    sessions,
+  });
+  const run = async (shown: readonly ReviewImage[]) => {
+    const outcome = await reviewSession(options, synced.id, shown);
+    sessions.push(outcome.record);
+    for (const id of outcome.viewed) viewed.add(id);
+    return outcome;
+  };
   try {
-    const session = await client.sessions.create({
-      agent_id: synced.id,
-      message: options.task(images),
-      budget_micro_usd: options.budgetMicroUsd,
-      ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
-      structured_output_required: definition.structured_output_required,
-      metadata: { run: 'quality-check', folder: options.folder },
-    });
-    sessionId = session.id;
-    say(`session ${session.id} started, budget ${usd(options.budgetMicroUsd)}`);
-    const deadline = Date.now() + definition.session.max_minutes * 60_000;
-    let afterSeq = 0;
-    let continues = 0;
-
-    const settle = async () => {
-      for (;;) {
-        const timer = setTimeout(
-          () => client.sessions.interrupt(session.id).catch(() => {}),
-          Math.max(1000, deadline - Date.now()),
-        );
-        try {
-          for await (const event of sessionEvents(
-            client,
-            session.id,
-            afterSeq,
-            options.streamRetry,
-          )) {
-            afterSeq = event.seq;
-            const record = event as unknown as { type: string; data: Record<string, unknown> };
-            tracker.handle(record);
-            if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-              appendFileSync(options.eventsFile, `${scrub(JSON.stringify(event))}\n`);
-            const line = describe(record);
-            if (line) say(line);
-          }
-        } finally {
-          clearTimeout(timer);
-        }
-        const state = await client.sessions.get(session.id);
-        if ((state.status !== 'running' && state.status !== 'queued') || Date.now() > deadline)
-          return state;
-        await sleep(1000);
-      }
-    };
-
-    let state: Awaited<ReturnType<typeof settle>>;
-    try {
-      state = await settle();
-      while (
-        !(tracker.submissions > 0 && state.structured_output) &&
-        state.status === 'idle' &&
-        RESUMABLE.has(state.stop_reason ?? '') &&
-        continues < MAX_CONTINUES &&
-        Date.now() < deadline
-      ) {
-        continues += 1;
-        say(
-          `no review submitted yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`,
-        );
-        const sent = await client.sessions.send(session.id, {
-          message: CONTINUE_MESSAGE,
-          queue: true,
-        });
-        afterSeq = sent.accepted_seq;
-        state = await settle();
-      }
-      if (state.status === 'running' || state.status === 'queued') {
-        await client.sessions.interrupt(session.id).catch(() => {});
-        state = await client.sessions.get(session.id);
-      }
-    } catch (cause) {
-      // The stream or the API failed for good, and the session may still be running and
-      // spending: stop it, and keep its cost for the report. A cost that cannot be read is
-      // counted as the session's whole budget.
-      await client.sessions.interrupt(session.id).catch(() => {});
-      const after = await client.sessions.get(session.id).catch(() => undefined);
-      say(`the event stream failed; session ${session.id} stopped`);
-      return {
-        agentId: synced.id,
-        agentVersion: synced.version,
-        sessionId,
-        images: images.map((image) => ({ ...image, viewed: tracker.viewed.has(image.fileId) })),
-        review: null,
-        problem: `the event stream failed: ${cause instanceof Error ? cause.message.slice(0, 200) : String(cause)}`,
-        costMicroUsd: after?.consumed_micro_usd ?? options.budgetMicroUsd,
-      };
-    }
-
-    let review: QcReview | null = null;
-    let problem: string | null = null;
-    if (!state.structured_output || tracker.submissions === 0) {
-      problem = `the session stopped (${state.status}/${state.stop_reason ?? 'none'}) without submitting a review`;
-    } else {
-      const parsed = qcReviewSchema.safeParse(state.structured_output);
-      if (parsed.success) review = parsed.data;
-      else
-        problem = `the submitted review does not match the schema: ${parsed.error.message.slice(0, 300)}`;
-    }
-    return {
-      agentId: synced.id,
-      agentVersion: synced.version,
-      sessionId,
-      images: images.map((image) => ({ ...image, viewed: tracker.viewed.has(image.fileId) })),
-      review,
-      problem,
-      costMicroUsd: state.consumed_micro_usd ?? 0,
-    };
+    const first = await run(images);
+    if (!first.paused || images.length < 2) return result(first.review, first.problem);
+    const cut = Math.ceil(images.length / 2);
+    say(`retrying the review in two sessions of ${cut} and ${images.length - cut} images`);
+    const halves = [await run(images.slice(0, cut)), await run(images.slice(cut))];
+    const problems = halves.flatMap((half, index) =>
+      half.problem ? [`half ${index + 1}: ${half.problem}`] : [],
+    );
+    const reviews = halves.flatMap((half) => (half.review ? [half.review] : []));
+    return reviews.length === halves.length
+      ? result(mergeReviews(reviews), null)
+      : result(null, `${first.problem}; the retry in halves failed (${problems.join('; ')})`);
   } finally {
     const deleted = await deleteImages(client, images);
     say(`deleted ${deleted} of ${images.length} uploaded images`);

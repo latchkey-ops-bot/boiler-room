@@ -10,12 +10,13 @@ import { dirname, join } from 'node:path';
 import type { AgentDefinition } from '../define.ts';
 import { director } from '../definitions/director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
+import { closeSession, inputTokens } from '../naive/session.ts';
 import { type ResearchOutput, researchOutputSchema } from '../researcher/output.ts';
 import { syncAgents } from '../sync.ts';
 import { checkSubmission, type DirectorIssue, researchFacts, type Verdict } from './checks.ts';
-import { type LoopClient, runDirectorSession, type StreamEvent } from './loop.ts';
+import { type LoopClient, type LoopResult, runDirectorSession, type StreamEvent } from './loop.ts';
 import type { DirectorBrief } from './output.ts';
-import { directorTask } from './prompt.ts';
+import { directorResumeTask, directorTask } from './prompt.ts';
 
 export const MODELS: Record<string, string> = {
   sonnet: 'anthropic/claude-sonnet-5.5',
@@ -129,6 +130,7 @@ export async function direct(options: DirectOptions): Promise<number> {
   const verdicts: Verdict[] = [];
   let exitCode = 1;
   let sessionId: string | undefined;
+  const sessionIds: string[] = [];
 
   try {
     const [synced] = await syncAgents(client, [definition]);
@@ -136,51 +138,97 @@ export async function direct(options: DirectOptions): Promise<number> {
     say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action}), model ${model}`);
     Object.assign(report, { agent_id: synced.id, agent_version: synced.version });
 
-    const result = await runDirectorSession({
-      client: client as LoopClient,
-      agentId: synced.id,
-      task: directorTask({
-        research,
-        brief: options.brief,
-        facts,
-        filesOnHand: filesOnHand(researchDir),
-        budgetUsd: budgetMicro / 1e6,
-      }),
-      outputSchema: definition.output_schema ?? {},
-      budgetMicroUsd: budgetMicro,
-      maxRepairs: options.maxRepairs,
-      maxMinutes: definition.session.max_minutes,
-      metadata: { run: 'direct', host: facts.host },
-      onSession: (id) => {
-        sessionId = id;
-        report.session_id = id;
-        say(`session ${id} started, budget ${usd(budgetMicro)}`);
-      },
-      onEvent: (event) => {
-        if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-          appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
-        const line = describe(event);
-        if (line) say(line);
-      },
-      check: async (output) => {
-        const verdict = await checkSubmission(output, research, options.brief);
-        if (options.drillRepair && verdicts.length === 0) verdict.blocking.push(DRILL_ISSUE);
-        verdicts.push(verdict);
-        const round = verdicts.length;
-        writeFileSync(
-          join(outDir, `director-submission-${round}.json`),
-          `${JSON.stringify(output, null, 1)}\n`,
-        );
-        say(
-          verdict.blocking.length
-            ? `submission ${round}: ${verdict.blocking.length} issue(s) to repair: ${[...new Set(verdict.blocking.map((issue) => issue.code))].join(', ')}`
-            : `submission ${round}: passed${verdict.other.length ? ` (${verdict.other.length} left to other agents or warnings)` : ''}`,
-        );
-        return verdict;
-      },
-    });
+    const taskInput = {
+      research,
+      brief: options.brief,
+      facts,
+      filesOnHand: filesOnHand(researchDir),
+      budgetUsd: budgetMicro / 1e6,
+    };
+    const sessions: Record<string, unknown>[] = [];
+    report.sessions = sessions;
+    const runSession = (task: string, maxRepairs: number, label: string) =>
+      runDirectorSession({
+        client: client as LoopClient,
+        agentId: synced.id,
+        task,
+        outputSchema: definition.output_schema ?? {},
+        budgetMicroUsd: budgetMicro,
+        maxRepairs,
+        maxMinutes: definition.session.max_minutes,
+        metadata: { run: 'direct', host: facts.host, attempt: label },
+        onSession: (id) => {
+          sessionId = id;
+          sessionIds.push(id);
+          report.session_id = id;
+          say(`session ${id} (${label}) started, budget ${usd(budgetMicro)}`);
+        },
+        onEvent: (event) => {
+          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
+            appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
+          const line = describe(event);
+          if (line) say(line);
+        },
+        check: async (output) => {
+          const verdict = await checkSubmission(output, research, options.brief);
+          if (options.drillRepair && verdicts.length === 0) verdict.blocking.push(DRILL_ISSUE);
+          verdicts.push(verdict);
+          const round = verdicts.length;
+          writeFileSync(
+            join(outDir, `director-submission-${round}.json`),
+            `${JSON.stringify(output, null, 1)}\n`,
+          );
+          say(
+            verdict.blocking.length
+              ? `submission ${round}: ${verdict.blocking.length} issue(s) to repair: ${[...new Set(verdict.blocking.map((issue) => issue.code))].join(', ')}`
+              : `submission ${round}: passed${verdict.other.length ? ` (${verdict.other.length} left to other agents or warnings)` : ''}`,
+          );
+          return verdict;
+        },
+      });
+    const recordSession = (label: string, outcome: LoopResult) => {
+      sessions.push({
+        attempt: label,
+        session_id: outcome.sessionId,
+        consumed_micro_usd: outcome.consumedMicroUsd,
+        ...outcome.input,
+        budget_paused: !outcome.ok && outcome.budgetPaused,
+        outcome: outcome.ok ? 'passed' : outcome.reason,
+      });
+    };
 
-    report.rounds = result.rounds.map(({ round, blocking, other }) => ({ round, blocking, other }));
+    let result = await runSession(directorTask(taskInput), options.maxRepairs, 'first');
+    recordSession('first', result);
+    // A session paused on its budget has been cancelled. It is retried once, smaller: a fresh
+    // session that starts from the last submission and the issues it left, with no drafting and no
+    // skills to read again. With no submission to start from, a retry would be the same task, so
+    // there is none.
+    const lastSubmitted = verdicts.at(-1);
+    if (!result.ok && result.budgetPaused) {
+      if (lastSubmitted?.campaign) {
+        say(`${result.reason}; retrying once from submission ${verdicts.length}`);
+        const repairsLeft = Math.max(0, options.maxRepairs - result.rounds.length);
+        result = await runSession(
+          directorResumeTask({
+            ...taskInput,
+            submission: result.rounds.at(-1)?.output,
+            issues: lastSubmitted.blocking,
+          }),
+          repairsLeft,
+          'resume',
+        );
+        recordSession('resume', result);
+      } else {
+        say(
+          `${result.reason}, before any submission; not retried, as a retry would be the same task`,
+        );
+      }
+    }
+    report.rounds = verdicts.map(({ blocking, other }, index) => ({
+      round: index + 1,
+      blocking,
+      other,
+    }));
     const last = verdicts.at(-1);
     if (result.ok && last?.campaign && last.handoff) {
       writeFileSync(join(outDir, 'campaign.json'), `${JSON.stringify(last.campaign, null, 2)}\n`);
@@ -214,14 +262,20 @@ export async function direct(options: DirectOptions): Promise<number> {
     report.error = cause instanceof Error ? cause.message : String(cause);
     say(`error: ${report.error}`);
   } finally {
-    if (sessionId) {
-      const session = await client.sessions.get(sessionId).catch(() => null);
-      if (session && (session.status === 'running' || session.status === 'queued'))
-        await client.sessions.interrupt(sessionId).catch(() => {});
-      if (session) {
-        report.session_micro_usd = session.consumed_micro_usd;
-        report.token_usage = session.token_usage;
-      }
+    // Every session the run started is left neither spending nor waiting: one still running is
+    // interrupted and one paused on its budget is cancelled.
+    let spent = 0;
+    const tokens: Record<string, number> = {};
+    for (const id of sessionIds) {
+      const closed = await closeSession(client, id);
+      spent += closed.consumedMicroUsd ?? 0;
+      tokens[id] = inputTokens(closed.tokenUsage);
+      if (closed.cancelled) say(`session ${id} was paused on its budget and has been cancelled`);
+      if (id === sessionId) report.token_usage = closed.tokenUsage;
+    }
+    if (sessionIds.length) {
+      report.session_micro_usd = spent;
+      report.input_tokens = tokens;
     }
     if (report.agent_id) {
       const computer = await client.agents.computer(String(report.agent_id)).catch(() => null);

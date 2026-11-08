@@ -101,6 +101,11 @@ try {
       microUsd: report.review.costMicroUsd,
       session: report.review.sessionId,
       note: `verdict ${report.verdict}`,
+      ...(report.review.sessions
+        ? {
+            inputTokens: report.review.sessions.reduce((sum, each) => sum + each.input_tokens, 0),
+          }
+        : {}),
     });
     const owners = [...routable(report).entries()]
       .map(([owner, list]) => `${list.length} for ${owner}`)

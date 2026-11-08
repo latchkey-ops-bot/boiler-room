@@ -41,6 +41,10 @@ function fakeClient(options: {
         log.push(`interrupt ${id}`);
         return {};
       }),
+      cancel: vi.fn(async (id: string) => {
+        log.push(`cancel ${id}`);
+        return { id, status: 'cancelled' };
+      }),
     },
     stream: vi.fn((_id: string, _query: { afterSeq?: number }) => {
       calls += 1;
@@ -138,7 +142,11 @@ describe('art review sessions', () => {
             type: 'tool.completed',
             data: { name: 'submit_output', tool_call_id: 'b', is_error: false },
           };
-          yield { seq: 3, type: 'session.idle', data: { stop_reason: 'end_turn' } };
+          yield {
+            seq: 3,
+            type: 'session.idle',
+            data: { stop_reason: 'end_turn', structured_output: review },
+          };
         })(),
       get: () => ({
         status: 'idle',
@@ -151,8 +159,104 @@ describe('art review sessions', () => {
       ...options(),
       budgetMicroUsd: 1_000_000,
     });
-    expect(run.sessions[0]?.outcome).not.toMatch(/failed/);
+    expect(run.sessions[0]?.outcome).toBe('reviewed');
+    expect(run.results[0]?.review).toEqual(review);
     expect(run.spentMicroUsd).toBe(50_000);
+  });
+
+  it('reads the review from the idle event, not from a stale sessions.get', async () => {
+    const review = { seen: true, scene: null, tiles: [], generated: [], flags: ['from idle'] };
+    const stale = { seen: false, scene: null, tiles: [], generated: [], flags: ['stale'] };
+    const { client } = fakeClient({
+      stream: () =>
+        (async function* () {
+          yield {
+            seq: 1,
+            type: 'tool.started',
+            data: { name: 'submit_output', tool_call_id: 'b', args: review },
+          };
+          yield {
+            seq: 2,
+            type: 'tool.completed',
+            data: { name: 'submit_output', tool_call_id: 'b', is_error: false },
+          };
+          yield {
+            seq: 3,
+            type: 'session.usage',
+            data: {
+              token_usage: { input: 10, cache_write: 17_000, cache_read: 9_000, output: 400 },
+              consumed_micro_usd: 50_000,
+            },
+          };
+          yield {
+            seq: 4,
+            type: 'session.idle',
+            data: { stop_reason: 'end_turn', structured_output: review },
+          };
+        })(),
+      get: () => ({
+        status: 'idle',
+        stop_reason: 'end_turn',
+        consumed_micro_usd: 50_000,
+        structured_output: stale,
+      }),
+    });
+    const run = await reviewBatches(client, artDirector, batches.slice(0, 1), context, {
+      ...options(),
+      budgetMicroUsd: 1_000_000,
+    });
+    expect(run.results[0]?.review).toEqual(review);
+    expect(run.sessions[0]).toMatchObject({ outcome: 'reviewed', input_tokens: 26_010 });
+  });
+
+  it('cancels a review paused on its budget and retries it smaller', async () => {
+    const two = {
+      kind: 'generated',
+      id: 'generated-1',
+      images: [1, 2].map((index) => ({
+        need: {
+          assetId: `g${index}`,
+          purpose: 'event-field',
+          sceneIds: ['s'],
+          prompt: 'p',
+          aspectRatio: '16:9',
+        },
+        fileId: `fil_g${index}`,
+      })),
+    } as unknown as Batch;
+    const { client, log, raw } = fakeClient({
+      stream: () =>
+        (async function* () {
+          yield { seq: 1, type: 'session.idle', data: { stop_reason: 'budget_paused' } };
+        })(),
+      get: () => ({ status: 'idle', stop_reason: 'budget_paused', consumed_micro_usd: 1_000 }),
+    });
+    const run = await reviewBatches(client, artDirector, [two], context, {
+      ...options(),
+      budgetMicroUsd: 1_000_000,
+    });
+    // The batch, then its two halves; the halves pause too and are not split again.
+    expect(raw.sessions.create).toHaveBeenCalledTimes(3);
+    expect(log.filter((line) => line.startsWith('cancel'))).toEqual([
+      'cancel ses_1',
+      'cancel ses_2',
+      'cancel ses_3',
+    ]);
+    expect(run.sessions.map((each) => [each.batch, each.budget_paused])).toEqual([
+      ['generated-1', true],
+      ['generated-1-a', true],
+      ['generated-1-b', true],
+    ]);
+    expect(run.sessions[0]?.outcome).toBe(
+      'paused on its budget and cancelled; retried as generated-1-a and generated-1-b',
+    );
+    expect(run.results.map((result) => result.batch.id)).toEqual([
+      'generated-1-a',
+      'generated-1-b',
+    ]);
+    expect(run.results.every((result) => result.review === undefined)).toBe(true);
+    // The send nudge is never sent to a paused session.
+    expect(raw.sessions.send).not.toHaveBeenCalled();
   });
 
   it('records a session that could not start', async () => {

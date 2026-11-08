@@ -265,7 +265,24 @@ Each submission is read from the event stream, not from `sessions.get`. On a liv
 `sessions.get` still answered the previous `structured_output` after the turn had ended, so the
 loop checked a stale campaign and sent back issues the agent had already fixed. The `session.idle`
 event that ends each turn carries the fresh output, and the accepted `submit_output` arguments are
-the fallback. `test/director-loop.test.ts` covers it with a fake client.
+the fallback for a stream that dropped before it. The Director, Art Director and Quality Check
+loops all read it this way, through `SessionTracker` in `src/naive/session.ts`, and the fake
+clients in `test/director-loop.test.ts`, `test/art-review.test.ts` and `test/quality.test.ts`
+answer a stale `sessions.get` to prove it.
+
+### Budget pauses
+
+A session that reaches its budget is parked `idle` with stop reason `budget_paused`, and the
+dashboard shows it as waiting for the founder. No loop leaves one there. `closeSession` runs on
+every way out of every session: it interrupts a session still running and cancels one parked on
+its budget, and the run records the pause (`budget_paused` in the report). The work is then
+retried once, smaller, and never split again:
+
+| Agent         | Retry after a pause                                                                                              |
+| ------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Director      | A fresh session from the last submission and the issues it left, with no drafting. None if nothing was submitted |
+| Art Director  | Tiles and generated images split in two batches; a scene shown only its default and one other picture            |
+| Quality Check | Two sessions, each with half the images, whose reviews are merged: a check either half fails, fails              |
 
 ### Model choice
 
