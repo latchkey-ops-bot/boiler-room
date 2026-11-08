@@ -6,9 +6,11 @@ import type { AgentDefinition, SkillDefinition } from './define.ts';
 import { listAll, type Naive } from './naive/client.ts';
 
 const SKILLS_DIR = new URL('../skills/', import.meta.url);
+const REPO_SKILLS_DIR = new URL('../../skills/', import.meta.url);
 
 export function skillContent(skill: SkillDefinition): string {
-  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, SKILLS_DIR)), 'utf8');
+  const dir = skill.root === 'repo' ? REPO_SKILLS_DIR : SKILLS_DIR;
+  return readFileSync(fileURLToPath(new URL(`${skill.slug}/SKILL.md`, dir)), 'utf8');
 }
 
 /** JSON with object keys sorted, so equal configs hash equally. */

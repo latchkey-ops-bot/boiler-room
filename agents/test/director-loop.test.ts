@@ -1,0 +1,164 @@
+import { describe, expect, it, vi } from 'vitest';
+import { checkSubmission } from '../src/director/checks.ts';
+import { type CheckResult, type LoopClient, runDirectorSession } from '../src/director/loop.ts';
+import { directorOutputJsonSchema } from '../src/director/output.ts';
+import { CONTINUE_MESSAGE } from '../src/director/prompt.ts';
+import { exampleBrief, exampleResearch, exampleSubmission } from './director-fixtures.ts';
+
+/** A turn that ends without calling submit_output. */
+const NO_SUBMISSION = Symbol('no submission');
+
+/**
+ * A fake Naive client. Each stream is one turn of the agent: it submits the next scripted output,
+ * or submits nothing, and goes idle. Like Naive, the session keeps its last structured_output.
+ */
+function fakeClient(turns: unknown[]) {
+  let turn = 0;
+  let seq = 0;
+  let output: unknown = null;
+  const client = {
+    sessions: {
+      create: vi.fn(async (_body: Record<string, unknown>) => ({ id: 'ses_director' })),
+      get: vi.fn(async (_id: string) => ({
+        status: 'idle',
+        stop_reason: 'end_turn',
+        structured_output: output,
+        consumed_micro_usd: 100_000 * turn,
+      })),
+      send: vi.fn(async (_id: string, _body: { message: string; queue?: boolean }) => ({
+        accepted_seq: seq,
+      })),
+      interrupt: vi.fn(async () => ({})),
+    },
+    stream: vi.fn((_id: string, _query: { afterSeq: number }) =>
+      (async function* () {
+        const next = turns[turn];
+        turn += 1;
+        if (next !== NO_SUBMISSION && next !== undefined) {
+          output = next;
+          seq += 1;
+          yield { seq, type: 'tool.started', data: { name: 'submit_output', args: {} } };
+          seq += 1;
+          yield { seq, type: 'tool.completed', data: { name: 'submit_output', is_error: false } };
+        }
+        seq += 1;
+        yield { seq, type: 'session.idle', data: { stop_reason: 'end_turn' } };
+      })(),
+    ),
+  };
+  return client;
+}
+
+const issue = (code: string) => ({
+  code,
+  severity: 'error' as const,
+  path: 'campaign.scenes[6].text[0].value',
+  message: `${code} message`,
+  fix: `${code} fix text`,
+  owner: 'director' as const,
+});
+
+/** Passes an output marked good, and returns one issue for anything else. */
+const fakeCheck = async (output: unknown): Promise<CheckResult> =>
+  (output as { good?: boolean }).good
+    ? { blocking: [], other: [] }
+    : { blocking: [issue('CLAIM_UNBACKED')], other: [] };
+
+const run = (client: ReturnType<typeof fakeClient>, check = fakeCheck) =>
+  runDirectorSession({
+    client: client as unknown as LoopClient,
+    agentId: 'agt_director',
+    task: 'Write the campaign.',
+    outputSchema: directorOutputJsonSchema,
+    budgetMicroUsd: 1_500_000,
+    maxRepairs: 3,
+    maxMinutes: 5,
+    check,
+    sleep: async () => {},
+  });
+
+const sentMessages = (client: ReturnType<typeof fakeClient>) =>
+  client.sessions.send.mock.calls.map(([id, body]) => ({ id, message: body.message }));
+
+describe('runDirectorSession', () => {
+  it('starts one typed session and accepts a first submission that passes', async () => {
+    const client = fakeClient([{ good: true }]);
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: true, sessionId: 'ses_director', output: { good: true } });
+    expect(result.rounds).toHaveLength(1);
+    expect(client.sessions.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agent_id: 'agt_director',
+        budget_micro_usd: 1_500_000,
+        output_schema: directorOutputJsonSchema,
+        structured_output_required: true,
+      }),
+    );
+    expect(client.sessions.send).not.toHaveBeenCalled();
+  });
+
+  it('sends the issues with their fix text back into the same session until it passes', async () => {
+    const client = fakeClient([{ good: false }, { good: false }, { good: true }]);
+    const result = await run(client);
+    expect(result.ok).toBe(true);
+    expect(result.rounds.map((round) => round.blocking.length)).toEqual([1, 1, 0]);
+    const sent = sentMessages(client);
+    expect(sent).toHaveLength(2);
+    for (const [index, { id, message }] of sent.entries()) {
+      expect(id).toBe('ses_director');
+      expect(message).toContain('CLAIM_UNBACKED at campaign.scenes[6].text[0].value');
+      expect(message).toContain('Fix: CLAIM_UNBACKED fix text');
+      expect(message).toContain(`repair round ${index + 1} of 3`);
+    }
+    expect(client.sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('gives up after 3 repair rounds and returns the remaining issues', async () => {
+    const client = fakeClient([{}, {}, {}, {}, { good: true }]);
+    const result = await run(client);
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.rounds).toHaveLength(4);
+    expect(result.reason).toBe('3 repair rounds did not clear every issue');
+    expect(result.remaining).toEqual([issue('CLAIM_UNBACKED')]);
+    expect(client.sessions.send).toHaveBeenCalledTimes(3);
+  });
+
+  it('never counts the session’s last output twice, and nudges a turn that submitted nothing', async () => {
+    const client = fakeClient([{ good: false }, NO_SUBMISSION, { good: true }]);
+    const result = await run(client);
+    expect(result.ok).toBe(true);
+    expect(result.rounds).toHaveLength(2);
+    expect(sentMessages(client).map(({ message }) => message.split('\n')[0])).toEqual([
+      expect.stringContaining('repair round 1 of 3'),
+      CONTINUE_MESSAGE,
+    ]);
+  });
+
+  it('fails when the agent stops submitting', async () => {
+    const client = fakeClient([NO_SUBMISSION, NO_SUBMISSION, NO_SUBMISSION, NO_SUBMISSION]);
+    const result = await run(client);
+    expect(result).toMatchObject({
+      ok: false,
+      rounds: [],
+      reason: expect.stringMatching(/without a new submission/),
+    });
+    expect(client.sessions.send).toHaveBeenCalledTimes(3);
+  });
+
+  it('repairs a real validator issue with the real checks', async () => {
+    const wrong = exampleSubmission();
+    const proof = wrong.campaign.scenes[6]?.text[0];
+    if (proof) proof.value = 'Under 60 s';
+    const client = fakeClient([wrong, exampleSubmission()]);
+    const result = await run(client, (output) =>
+      checkSubmission(output, exampleResearch(), exampleBrief()),
+    );
+    expect(result.ok).toBe(true);
+    const [message] = sentMessages(client).map((sent) => sent.message);
+    expect(message).toContain('CLAIM_UNBACKED at campaign.scenes[6].text[0].value');
+    expect(message).toContain(
+      'Fix: Cite a claim whose quote states "60" in scenes[6].text[0].claimIds, or remove "60" from the text.',
+    );
+  });
+});
