@@ -74,5 +74,8 @@ These are in `CLAUDE.md`, and the crew must follow them:
 ## A caveat to keep
 
 Naive seats every agent in the org on the **company board** once an agent is bound as the platform
-CEO. This spec binds none. If anyone ever binds one, the crew agents would join that board and
-receive board tools automatically.
+CEO, and `br-ceo` is bound. So every crew agent sits on that board and is offered both board tools
+unless its own toolset names them off, which `toolset()` in `agents/src/define.ts` does. A crew
+agent synced from a branch without that `define.ts`, or a per-run Researcher made from one, can
+create and assign company cards, and an assigned card starts its assignee at once. `company:verify`
+fails while any agent is offered a board tool its definition does not give it.

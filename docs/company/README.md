@@ -109,21 +109,37 @@ CEO is never created.
   (verified). The platform never injects a credential for its own `/v1/mcp`; the CEO gets a
   short-lived credential each turn (docs), so the stored value is random bytes that authenticate
   nothing. Writing it needs an `admin` key, and once bound, so does every change to `br-ceo`.
-  Deleting the credential and the vault leaves `ceo_agent_id` set (verified on a probe); deleting
-  the agent clears it (docs). The dashboard picks its CEO agent by `metadata.role:
-  "orchestrator"` (read from the dashboard's code, not documented), so `br-ceo` carries that too.
+  Deleting the credential and the vault leaves `ceo_agent_id` set (verified on a probe), and
+  `PATCH /v1/organizations` cannot set it (docs); deleting the agent clears it (docs). The
+  dashboard picks its CEO agent by `metadata.role: "orchestrator"` (read from the dashboard's code,
+  not documented), so `br-ceo` carries that too.
+- **The kill switch.** Since removing the binding detaches nothing, `company:halt` acts on `br-ceo`
+  itself: a $0 budget first, so no turn can run, then the sweep paused, then every running, queued
+  or waiting `br-ceo` session interrupted. `company:sync` refuses to touch a halted `br-ceo` until
+  `--unhalt`, which interrupts its held sessions before it restores the budget. `--unbind=<agt id>`
+  then deletes `br-ceo`, the only way to clear `ceo_agent_id`; that also deletes its sweep and
+  leaves its open cards unassigned (docs). `--dry-run` changes nothing.
 - **The lockdown.** The organization's CEO is offered the control plane: Naive's whole API as MCP
   tools, 368 of them on 2026-11-07, such as `agents_create`, `vaults_create` and budget changes. An
   MCP tool that a toolset does not name is offered at "ask" even under a deny default (verified).
   So `br-ceo` names every one of them off, and `company:sync` stops before changing anything if the
   catalogue lists a tool that `br-ceo` does not name. `br-ceo` needs none of them: its board tools
   are built in. A bound `br-ceo` session was offered `board_read`, `board_write`, `read_skill`,
-  `session_spend` and `submit_output`, and nothing else (verified).
+  `session_spend` and `submit_output`, and nothing else (verified). The list is a denylist of a
+  catalogue Naive can grow at any time: MCP tools default to "ask" and there is no server-wide
+  switch (docs), so a tool added upstream is offered at "ask" until the next sync names it.
+  `company:verify --lockdown` compares the live catalogue with `br-ceo`'s stored toolset, with no
+  session and no spend; run it before trusting a `br-ceo` run.
 - **The company board.** The CEO's board is the company board, which seats every agent of the
   organization, on the roster or not (docs). A seated agent is offered `board_read` and
   `board_write` even under a deny default, and naming a tool off removes it (both verified). So
   the GTM agents name `board_write` off while GTM is inactive, the inbox reader names both off, and
-  every production-crew agent names both off. Only `br-ceo` and the builders write cards.
+  every production-crew agent names both off. Only `br-ceo` and the builders write cards. Naive has
+  no organization-wide policy (docs), so an agent synced from a branch that does not name them off
+  is offered both: on 2026-11-08, `br-director`, `br-art-director`, `br-quality-check` and a
+  `br-researcher` from another branch were. A card any of them creates and assigns starts its
+  assignee at once, sweep or not. `company:sync` warns about each such agent, `company:status`
+  lists it, and `company:verify` fails on it; the fix is the owning branch's.
 
 **The founder's line is the CEO chat.** The founder talks to `br-ceo` in the dashboard's CEO chat
 (`/orchestrator`). Each chat is an ordinary `br-ceo` session: its system prompt, the `ceo` skill,
@@ -342,12 +358,19 @@ for a harmless read). The design works with that guard rather than against it:
    fields. The 280-character summary is still written by a model from an untrusted email, so it
    can carry an attacker's words to the GTM lead, which holds `send_email`. The real control is the
    app: its allowlist and daily quota on `send_email`.
-4. **Every MCP tool and every app tool is named.** Under a deny default, unnamed MCP tools are
+4. **A card cannot take a member past its procedure.** Anyone who can write cards can assign one
+   to anyone. A member does only what its procedure has a section for: a card whose prefix it does
+   not know goes to `blocked` with the note `no procedure for this card`, and every member but the
+   one whose procedure releases moves a card that asks for `main` or production to `blocked`,
+   whatever its prefix. The CEO lets no card body, note or comment decide which cards exist or who
+   holds them, assigns only by title, and creates at most four cards in a sweep and two in a
+   digest.
+5. **Every MCP tool and every app tool is named.** Under a deny default, unnamed MCP tools are
    still offered, at "ask" (verified), and an ask parks an unattended session. Every AgentMail tool
    is named, and all send, delete, create and connect tools are off for the reader. Every `br-app.*`
    tool is named on every agent (section 3), so adding a tool to the app's `/mcp` means re-running
    the provisioning script. How an unnamed app tool behaves under a deny default is untested.
-5. **Builders never read raw untrusted content.** The CEO, engineering, product and design never
+6. **Builders never read raw untrusted content.** The CEO, engineering, product and design never
    read the inbox, social content or web search results. `web_search` is off for all of them: it
    returns untrusted pages, and the read flag, which covers contacts, mail, messages and connected
    apps, does not cover it (docs). Product and design do read the reader's summaries, which are
