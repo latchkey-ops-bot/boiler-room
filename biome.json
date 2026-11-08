@@ -21,7 +21,7 @@
     }
   },
   "files": {
-    "includes": ["**", "!apps/web/drizzle/meta"]
+    "includes": ["**", "!agents/skills", "!apps/web/drizzle/meta"]
   },
   "overrides": [
     {
