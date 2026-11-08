@@ -170,9 +170,18 @@ describe.each(stages)('colour-event layout in %s', (format, stage) => {
     expect(card.y + card.height / 2).toBeCloseTo(H / 2, 10);
   });
 
-  it('fits a simple headline to 0.60, 0.80 or 0.70 of the width', () => {
+  it('fits a simple headline to 0.60 or 0.70 of the width, and 9:16 inside its slam', () => {
     const share = { '16:9': 0.6, '9:16': 0.8, '1:1': 0.7 }[format];
-    expect(headlineWidth(stage, 'simple')).toBeCloseTo(W * share, 10);
+    const width = headlineWidth(stage, 'simple');
+    if (format === '9:16') {
+      // A 0.80 W headline at the slam's 1.26 on frame 0 would be wider than the frame.
+      expect(W * share * 1.26).toBeGreaterThan(W);
+      expect(width).toBeCloseTo(stage.safe.width / 1.26, 10);
+    } else {
+      expect(width).toBeCloseTo(W * share, 10);
+    }
+    // On frame 0 the slammed headline stays inside the safe area, in every format.
+    expect(width * slamScale(0)).toBeLessThanOrEqual(stage.safe.width + 1e-9);
   });
 
   it('keeps a frosted headline inside its card, so one ink reads on all of it', () => {

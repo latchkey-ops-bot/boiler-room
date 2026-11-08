@@ -84,15 +84,22 @@ export function frostedRect(stage: Pick<Stage, 'width' | 'height' | 'orientation
   return { x: (W - width) / 2, y: (H - height) / 2, width, height };
 }
 
-/** The width the headline is fitted to: its box, and on a frosted card no wider than the card. */
+/**
+ * The width the headline is fitted to: its box, on a frosted card no wider than the card less its
+ * inset, and never so wide that the slam's first frame, 1.26 times the rest, leaves the safe area.
+ * Only 9:16 meets that last limit: its 0.80 W box would put a full-width headline 1.008 W wide on
+ * frame 0, cutting its first and last letters at the frame's edges, so it is fitted to
+ * `0.90 W / 1.26`, about 0.71 W. 16:9 and 1:1 are already under it. [N]
+ */
 export function headlineWidth(
-  stage: Pick<Stage, 'width' | 'orientation'>,
+  stage: Pick<Stage, 'width' | 'orientation' | 'safe'>,
   card: EventCard,
 ): number {
-  const own = colourEvent.headlineWidth[stage.orientation];
-  if (card === 'simple') return stage.width * own;
-  const onCard = colourEvent.frosted[stage.orientation].width - 2 * colourEvent.frostedInset;
-  return stage.width * Math.min(own, onCard);
+  const own = stage.width * colourEvent.headlineWidth[stage.orientation];
+  const slamPeak = stage.safe.width / (1 + colourEvent.slamExcess);
+  const onCard =
+    stage.width * (colourEvent.frosted[stage.orientation].width - 2 * colourEvent.frostedInset);
+  return Math.min(own, slamPeak, card === 'frosted' ? onCard : Number.POSITIVE_INFINITY);
 }
 
 /**
