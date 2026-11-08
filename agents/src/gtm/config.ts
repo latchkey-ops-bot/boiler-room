@@ -36,7 +36,8 @@ export type CapName = keyof typeof CAPS;
 /** One session's budget, and the most code may raise it to when Naive quotes a higher floor. */
 export const SESSION_BUDGETS: Readonly<Record<GtmAgentName, { default: number; max: number }>> = {
   [SCOUT]: { default: 150_000, max: 300_000 },
-  [GTM_LEAD]: { default: 1_000_000, max: 1_500_000 },
+  // At most the lead's $1.00 task maximum (GTM_ACTIVE_BUDGETS): Naive refuses a session above it.
+  [GTM_LEAD]: { default: 1_000_000, max: 1_000_000 },
   [SOCIAL_AGENT]: { default: 100_000, max: 200_000 },
   [INBOX_READER]: { default: 50_000, max: 100_000 },
 };

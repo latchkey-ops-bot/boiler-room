@@ -217,15 +217,15 @@ session, after stripping control, bidirectional and zero-width characters and ev
 | Agent             | Model                         | Started by                     | Decides                                                                                                                               | Session budget (hard maximum) | Daily cap           |
 | ----------------- | ----------------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------- |
 | `br-scout`        | `anthropic/claude-haiku-5.5`  | `qualify`, up to 4 a day       | Is this a real startup launch, worth a film? Which line from the site, which published address, which jurisdiction, with which quote? | $0.15 ($0.30)                 | $5.00, $1.00 a task |
-| `br-gtm-lead`     | `anthropic/claude-sonnet-5.5` | `pick` once a day              | Which startup for X and which for email; each email's subject and opener                                                              | $1.00 ($1.50)                 | $4.00, $1.00 a task |
+| `br-gtm-lead`     | `anthropic/claude-sonnet-5.5` | `pick` once a day              | Which startup for X and which for email; each email's subject and opener                                                              | $1.00 ($1.00)                 | $4.00, $1.00 a task |
 | `br-social`       | `anthropic/claude-haiku-5.5`  | `pick`, once a day             | Which caption template, and which verified quote                                                                                      | $0.10 ($0.20)                 | $2.00, $1.00 a task |
 | `br-inbox-reader` | `anthropic/claude-haiku-5.5`  | `inbox`, once per message (S6) | What the sender wants, in fixed fields                                                                                                | $0.05 ($0.10)                 | $1.00, $0.15 a task |
 
 These budgets are in code (`GTM_ACTIVE_BUDGETS`, the daily caps from roles/gtm.md, and
 `SESSION_BUDGETS`) behind the activation flag `GTM_ACTIVE` in
 `agents/src/definitions/company/gtm.ts`, which is `true` since 2026-11-08. While it is `false` every
-agent's budget is $0, and the executor starts no session. A session the platform caps at the
-agent's $1.00 task maximum cannot use the GTM lead's $1.50 session maximum. Turning it on is a reviewed change to that line, never an
+agent's budget is $0, and the executor starts no session. The GTM lead's session maximum is its
+$1.00 task maximum, since Naive refuses a session above it. Turning it on is a reviewed change to that line, never an
 environment variable, so `company:sync` cannot raise a budget by accident. The Haiku session budgets
 are a guess: no Haiku pre-flight floor has been measured. Code may raise a session budget to a
 pre-flight quote only up to its hard maximum; a quote above that leaves the lane in dry run and opens
