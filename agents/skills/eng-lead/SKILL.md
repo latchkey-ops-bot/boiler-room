@@ -171,10 +171,10 @@ plan makes `MERGE: <slug> <n>`, and `MERGE: <slug> <n> r2` after a fix. The CEO 
 ### When a `MERGE` card's pull request fails
 
 Comment why on the pull request. Create `ENG: <slug> fix <n>` for its engineer, saying what fails
-and what to change, and that the fix is pushed to the same branch, so the same pull request
-updates, and that its note names that pull request. Then create `MERGE: <slug> <n> r2` (` r3` after that) assigned to yourself and
-`blocked_by` that fix card. Its body says it closes this card, and every card this card's body
-says it closes. Then move this card to `blocked`, not `done`, with the note
+and what to change, and that the fix is pushed to the same branch, so the same pull request updates,
+and that its note names that pull request. Then create `MERGE: <slug> <n> r2` (` r3` after that)
+assigned to yourself and `blocked_by` that fix card. Its body says it closes this card, and every
+card this card's body says it closes. Then move this card to `blocked`, not `done`, with the note
 `sent back: <crd_ id of the r2 card> merges the fix and closes this card`. A `MERGE` card is done
 only when its work is on `dev`, so the card that waits for it must not start before the fix is
 merged.
