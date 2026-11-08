@@ -340,6 +340,17 @@ describe('brand colours against the research', () => {
     ]);
     expect(issues[0]?.fix).toContain('#7C9CFF');
   });
+
+  it('suggests a measured accent, not the nearest colour, for an accent it does not know', () => {
+    const campaign = example();
+    const facts = research(campaign);
+    delete facts.brand.colors.accent;
+    facts.accents = ['#7170FF'];
+    campaign.brand.colors.accent = '#FF3B30';
+    const [issue] = checkResearchBrand(campaign, facts, 30).issues;
+    expect(issue).toMatchObject({ severity: 'minor', owner: 'art-director' });
+    expect(issue?.fix).toContain('#7170FF');
+  });
 });
 
 describe('the verdict', () => {

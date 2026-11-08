@@ -788,7 +788,8 @@ export function checkResearchBrand(
   const off = rules.flatMap((rule) => {
     const value = campaign.brand.colors[rule.key]?.toUpperCase();
     if (!value || palette.has(value) || rule.extra.includes(value)) return [];
-    const measured = research.brand.colors[rule.key];
+    const measured =
+      research.brand.colors[rule.key] ?? (rule.key === 'accent' ? research.accents[0] : undefined);
     const nearest = [...palette]
       .map((hex) => ({ hex, distance: channelDistance(hexToRgb(hex), hexToRgb(value)) }))
       .sort((a, b) => a.distance - b.distance)[0];

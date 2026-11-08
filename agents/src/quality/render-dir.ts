@@ -23,7 +23,6 @@ const manifestSchema = z.looseObject({
     durationInFrames: z.number(),
     muted: z.boolean().optional(),
   }),
-  template: z.looseObject({ commit: z.string().optional() }).optional(),
 });
 
 const frameRef = z.looseObject({ frame: z.number().int().min(0) });

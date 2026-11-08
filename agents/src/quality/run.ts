@@ -341,7 +341,9 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
     ...issue,
     sceneId:
       issue.sceneId ?? (frames && issue.frame !== null ? sceneAt(frames, issue.frame) : null),
-    timecode: issue.timecode ?? (issue.frame === null ? null : timecode(issue.frame, fps)),
+    // The frame is what the agent read off a labelled still; the timecode is worked out from it,
+    // because the agent's own arithmetic was wrong in the drill (F80 written as 0:02.80).
+    timecode: issue.frame === null ? issue.timecode : timecode(issue.frame, fps),
     source: 'model',
   }));
   const inspected: QcCheck[] = run
