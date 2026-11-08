@@ -6,6 +6,20 @@ test('the landing page sells one thing, with one field', async ({ page }) => {
     'Give us a URL. Get your launch video.',
   );
   await expect(page.getByLabel("Your product's URL").first()).toBeVisible();
+  // Every section of the sample, in order, ending on the call to action.
+  for (const name of [
+    'Four stops through the boiler room',
+    "Cut for every place you'll post it",
+    'Your launch team, minus the hiring',
+    'No made-up stats. Ever.',
+    'Fresh out of the boiler room',
+    'Launching soon? Fire up the boiler.',
+  ]) {
+    await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible();
+  }
+  // The steam trail rises only from the crew at work in the hero, never from an idle Boyle.
+  await expect(page.locator('.art .puff')).toHaveCount(2);
+  await expect(page.locator('.cta-band .puff, .wall-empty .puff')).toHaveCount(0);
   // The marketing site draws its pixel at 3px.
   const pixel = await page
     .locator('.surface-marketing')
@@ -18,21 +32,40 @@ test('the landing page sells one thing, with one field', async ({ page }) => {
   expect(overflows).toBe(false);
 });
 
-test('the URL field sends a signed-out founder to sign in, then back to the new video', async ({
-  page,
-}) => {
+test('the URL field sends a new founder to sign up, then on to the new video', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel("Your product's URL").first().fill('nova.com');
   await page.getByRole('button', { name: 'Fire it up' }).first().click();
-  await page.waitForURL(/\/sign-in/);
+  await page.waitForURL(/\/sign-up/);
   const redirect = new URL(page.url()).searchParams.get('redirect_url') ?? '';
   expect(redirect).toContain('/films/new?url=nova.com');
-  await expect(page.getByRole('heading', { name: 'Welcome back' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Start your launch video' })).toBeVisible();
 });
 
-test('the showcase renders', async ({ page }) => {
+test('a URL that is not a public website stays on the page, with the reason', async ({ page }) => {
+  await page.goto('/');
+  const field = page.getByLabel("Your product's URL").first();
+  await field.fill('localhost:3000');
+  await page.getByRole('button', { name: 'Fire it up' }).first().click();
+  await expect(page.getByText('Use the address without a port number.')).toBeVisible();
+  await expect(field).toHaveAttribute('aria-invalid', 'true');
+  expect(new URL(page.url()).pathname).toBe('/');
+});
+
+test('without JavaScript, /start sends a bad URL back to the hero with the reason', async ({
+  request,
+}) => {
+  const response = await request.get('/start?url=nova', { maxRedirects: 0 });
+  expect(response.status()).toBe(303);
+  expect(response.headers().location).toBe('/?url=nova#start');
+});
+
+test('the showcase renders real films only, or says none are up yet', async ({ page }) => {
   await page.goto('/showcase');
   await expect(page.getByRole('heading', { name: 'Fresh out of the boiler room' })).toBeVisible();
+  const films = page.locator('.wall .launch');
+  const empty = page.getByRole('heading', { name: 'The first launch videos are on their way' });
+  await expect(films.first().or(empty)).toBeVisible();
 });
 
 test('app pages need a signed-in founder', async ({ page }) => {
