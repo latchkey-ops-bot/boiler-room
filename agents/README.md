@@ -123,7 +123,8 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   button's fill is its face, the innermost box covering it with a fill of its own (a raised
   button's top, not its darker edge). A brand colour too light for 3:1 is replaced only by another
   colour the site uses widely (two elements or more, at least a quarter of the top score), never
-  by one tab's; with no saturated colour, the neutral fill of the buttons is primary (a near-black
+  by one tab's, and a colour only one button paints is no accent either; with no saturated colour,
+  the neutral fill of the buttons is primary (a near-black
   `#212121` over pure black text), else the text colour; a browser's default link blue a visitor
   sees is listed with the accents, never made primary. A dark scheme kept for
   `prefers-color-scheme: dark` is noted. Muted text has at most 70% of the

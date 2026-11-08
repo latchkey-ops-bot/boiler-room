@@ -420,7 +420,13 @@ export function deriveColors(styles: RawStyles): DerivedColors {
     }
   }
 
+  // A colour only one button paints, such as one tab's fill or a chip in another company's colour,
+  // is that element's, not an accent of the brand.
   const accents = candidates
+    .filter(
+      (item) =>
+        !((item.count ?? 2) < 2 && item.sources.every((source) => source.includes('button'))),
+    )
     .map((item) => item.hex)
     .filter((hex) => hex !== primary && distance(hex, primary) >= SAME)
     .filter((hex, index, list) => list.findIndex((other) => distance(other, hex) < 40) === index)

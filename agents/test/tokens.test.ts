@@ -388,6 +388,8 @@ describe('deriveColors', () => {
     );
     expect(result.primary).toBe('#111111');
     expect(result.accent).toBe('#EB9D2A');
+    // The tab's purple is one element's colour, not an accent.
+    expect(result.accents).toEqual(['#EB9D2A']);
     expect(result.notes.join(' ')).toContain('no other colour the site uses widely');
   });
 
