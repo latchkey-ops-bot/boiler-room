@@ -941,10 +941,12 @@ failure, below. A failed render is counted at what its computers cost, which `re
 attaches to its error.
 
 **A finished chunk with no exit code.** Naive sometimes ends a command's stream with an exit frame
-whose `exit_code` is null. `runCommand` reports that as an unknown status, as it does a stream
-with no exit frame, so a chunk whose worker printed `done` is fetched and checked against the
-size and SHA-256 measured on the computer, rather than rendered again. On 8 November two
-posthog.com chunks were lost on both tries this way.
+whose `exit_code` is -1 or null, which no process exits with. `runCommand` reports that as an
+unknown status, as it does a stream with no exit frame, so a chunk whose worker printed `done` is
+fetched and checked against the size and SHA-256 measured on the computer, rather than rendered
+again. On 8 November four posthog.com chunks over two films were lost on both tries this way.
+Each had been silent for about 45 s before its first frame, on a fresh fork of the base snapshot,
+so the worker now prints its heartbeat before it loads the renderer and the browser.
 
 **Route-back.** A failed review's issues are sorted by `routable()` (no minor issue and no
 expected placeholder failure ever sends a film back). The Director's go back to the Director,

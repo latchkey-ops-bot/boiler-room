@@ -36,19 +36,21 @@ describe('runCommand', () => {
     );
   });
 
-  it('treats an exit frame with a null exit code as an unknown status', async () => {
-    // Seen live: a chunk that printed `done` with its bytes, then an exit frame with no code.
-    const frames = [
-      { stdout: '{"type":"done","seconds":8.7,"bytes":3449236}\n' },
-      { exit: { exit_code: null, timed_out: false } },
-    ];
-    const result = await runCommand(streaming(frames), 'cmp_1', 'node worker.ts', {
-      check: false,
-    });
-    expect(result).toMatchObject({ exitCode: -1, exited: false, timedOut: false });
-    await expect(runCommand(streaming(frames), 'cmp_1', 'node worker.ts')).rejects.toThrow(
-      CommandFailed,
-    );
+  it('treats an exit frame with no real exit code as an unknown status', async () => {
+    // Seen live: chunks that printed `done` with their bytes, then an exit frame with code -1.
+    for (const code of [-1, null]) {
+      const frames = [
+        { stdout: '{"type":"done","seconds":8.7,"bytes":3567488}\n' },
+        { exit: { exit_code: code, timed_out: false } },
+      ];
+      const result = await runCommand(streaming(frames), 'cmp_1', 'node worker.ts', {
+        check: false,
+      });
+      expect(result).toMatchObject({ exitCode: -1, exited: false, timedOut: false });
+      await expect(runCommand(streaming(frames), 'cmp_1', 'node worker.ts')).rejects.toThrow(
+        CommandFailed,
+      );
+    }
   });
 
   it('keeps what a command printed before its stream broke', async () => {

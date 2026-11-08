@@ -37,12 +37,14 @@ export class Aborted extends Error {
 export interface CommandResult {
   stdout: string;
   stderr: string;
-  /** -1 when the command's status is not known: the stream had no exit frame, or a null code. */
+  /** -1 when the command's status is not known: no exit frame, or no real exit code in it. */
   exitCode: number;
   /**
    * False when the command's status is not known. Naive ends some streams without an exit frame,
-   * and ends others with an exit frame whose `exit_code` is null, seen on renders that had printed
-   * `done` and on renders that had failed alike, so neither says how the command ended.
+   * and ends others with an exit frame whose `exit_code` is -1 or null. A process exits with 0 to
+   * 255, so neither is how the command ended: on 8 November renders that had printed `done` and
+   * renders that had thrown both ended with -1, each after its stream had been quiet for about
+   * 45 s before the first frame.
    */
   exited: boolean;
   timedOut: boolean;
@@ -120,7 +122,7 @@ export async function runCommand(
     stdout,
     stderr,
     exitCode: exit?.exit_code ?? -1,
-    exited: exit !== undefined && exit.exit_code !== null,
+    exited: typeof exit?.exit_code === 'number' && exit.exit_code >= 0,
     timedOut: exit?.timed_out ?? false,
     durationMs: performance.now() - started,
   };
