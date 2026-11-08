@@ -13,7 +13,8 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    that has no template yet is refused as `SCENE_TYPE_UNBUILT`, naming it and the types that
    render;
 2. runs `validateFilm`, for the rules only the templates know: props each template accepts, copy
-   each one sets, the images it needs, transitions that exist, and the format, hook and CTA chosen;
+   each one sets, the images it needs, transitions that exist, an end card long enough to finish
+   its build before its hold, and the format, hook and CTA chosen;
 3. resolves the hook and CTA into an ordinary campaign with `resolveCut`, and validates that again,
    since choosing a CTA changes copy;
 4. loads both brand fonts, and refuses one that is missing, corrupt or blocked, naming it;
@@ -29,7 +30,9 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with
-the change that fixes it.
+the change that fixes it, all on its first line, since that is the only line Remotion prints of an
+error thrown in the page. `FilmRejected.report` has the same list one issue a line, which is what
+the render CLI prints.
 
 ## Rules the templates keep
 
@@ -112,6 +115,19 @@ lists, and `validateFilm` checks the counts.
 | `colour-event` | `headline`, 1 to 3 words on one line                                          | `card`: simple, frosted          | none, the ground is the primary |
 | `end-card`     | `cta`, optional `label`, the URL                                              | `urlReveal`                      | none, shows the logo            |
 
+An `end-card` holds still for its last 69 spec frames, and its logo, CTA and URL must be at rest on
+the frame before. The schema allows a 38-character URL, the Standard limit, but how much of it fits
+depends on the card's length and reveal: a 95-frame Short card decodes 20 characters, and a
+113-frame card decodes 38 or types 16. After a cut the logo rises until frame 23; on a T1 entry it
+arrives on the seam, at rest from frame 14, and a long CTA can then be the last thing to settle.
+`validateFilm` refuses a card too short for its logo, CTA or URL as `SCENE_TOO_SHORT`, checking the
+cut being rendered, and names the longest URL that fits and the length that fits this one.
+
+`feature-card` draws no corner mark, as its scene file has none: in 9:16 the mark sat just above
+the headline. Its headline drifts larger to the scene's last frame, so it is set narrower than the
+line box wherever that drift would otherwise carry it out of the safe area, which is every card in
+9:16 and a long one in 1:1. Stacked in 9:16, its connector starts under the cause's label.
+
 `stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
 no quote states. The count-up is built to its scene file and tested, so approving it means removing
 that refusal. Its number is fitted to its box down to 0.13 W and its label is set at the sentence
@@ -174,7 +190,10 @@ A scene type is a `defineScene` entry in `src/scenes/registry.ts`, under its nam
 - `anchors`: each `{ id, entry?, exit?, colour?, box(f, request) }`. Velocities are data, or a
   function of props, so the resolver reads them before anything renders. `box` is the anchor's
   rect in frame pixels at spec frame `f`, from props, text and `specFit` only, never the DOM;
-- `holdFrom`, for a scene that ends still, which stops the ground too.
+- `markAnchor`, only if the scene draws the brand mark, where it draws it;
+- `holdFrom`, for a scene that ends still, which stops the ground too, and `unfinishedAtHold`,
+  which says what that hold would freeze unfinished at a given length, for `validateFilm` to refuse
+  as `SCENE_TOO_SHORT`.
 
 Inside the component, `useSceneClock()` gives `f` and `dur` in spec frames, `abs`, `b` (blank
 frames after a T5) and `inT` and `outT`, the ids the resolver chose. Wrap the anchor in
