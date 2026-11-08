@@ -33,6 +33,14 @@ function drop(px: number, color: string): string[] {
   ];
 }
 
+/**
+ * Clerk styles its inputs and buttons per variant (`[data-variant="default"]`), which outranks a
+ * plain element style. Repeating the class (`&&&`) outranks it in turn, hover and focus included.
+ */
+function strong(style: Record<string, unknown>) {
+  return { '&&&': style };
+}
+
 export function clerkAppearanceFor(px: 2 | 3) {
   // Fields and badges take the small frame in the design: 2px.
   const field = {
@@ -71,9 +79,9 @@ export function clerkAppearanceFor(px: 2 | 3) {
         boxShadow: [...frame(px, DEEP), ...drop(px, SKY)].join(', '),
       },
       card: { boxShadow: 'none', borderRadius: 0 },
-      formFieldInput: field,
-      otpCodeFieldInput: field,
-      formButtonPrimary: {
+      formFieldInput: strong(field),
+      otpCodeFieldInput: strong(field),
+      formButtonPrimary: strong({
         backgroundImage: 'none',
         backgroundColor: DEEP,
         color: '#FFFFFF',
@@ -85,8 +93,8 @@ export function clerkAppearanceFor(px: 2 | 3) {
         '&:hover, &:focus': { backgroundColor: DEEP_PRESS },
         '&::before': { display: 'none' },
         '&::after': { display: 'none' },
-      },
-      socialButtonsBlockButton: { borderRadius: 0, boxShadow: frame(2, STEEL).join(', ') },
+      }),
+      socialButtonsBlockButton: strong({ borderRadius: 0, boxShadow: frame(2, STEEL).join(', ') }),
       avatarBox: { borderRadius: 0 },
       userPreviewAvatarBox: { borderRadius: 0 },
       footer: { backgroundImage: 'none', background: '#FFFBEF' },
@@ -106,7 +114,10 @@ export const clerkAppAppearance = clerkAppearanceFor(2);
  * step keeps a short heading of its own.
  */
 export const clerkLocalization = {
+  // "Log in", as the nav and footer say it, not Clerk's "Sign in".
+  signIn: { start: { actionLink: 'Make an account' } },
   signUp: {
+    start: { actionLink: 'Log in' },
     emailCode: {
       title: 'Check your email',
       subtitle: 'Enter the 6-digit code we just sent you.',

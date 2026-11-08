@@ -16,9 +16,13 @@ test('the landing page sells one thing, with one field', async ({ page }) => {
   ]) {
     await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible();
   }
-  await expect(page.getByRole('heading', { name: 'Your launch team, minus the hiring' })).toHaveCount(0);
+  await expect(
+    page.getByRole('heading', { name: 'Your launch team, minus the hiring' }),
+  ).toHaveCount(0);
   // The hero's frames say they are the sample customer's, not ours.
-  await expect(page.locator('.hero-figure figcaption')).toContainText("nova.example.com's launch video");
+  await expect(page.locator('.hero-figure figcaption')).toContainText(
+    "nova.example.com's launch video",
+  );
   // The steam trail rises only from the crew at work in the hero, never from an idle Boyle.
   await expect(page.locator('.art .puff')).toHaveCount(2);
   await expect(page.locator('.cta-band .puff, .wall-empty .puff')).toHaveCount(0);

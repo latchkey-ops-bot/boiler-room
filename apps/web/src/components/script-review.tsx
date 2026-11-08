@@ -431,7 +431,10 @@ function SceneCard({
       ) : null}
       {scene.voiceover ? (
         <p className="vo">
-          <span className="label">Voiceover</span>"<ClaimText text={scene.voiceover.text} />"
+          <span className="label">Voiceover</span>
+          <span>
+            "<ClaimText text={scene.voiceover.text} />"
+          </span>
         </p>
       ) : null}
       {sources.length > 0 ? (

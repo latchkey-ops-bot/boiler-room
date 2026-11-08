@@ -685,13 +685,13 @@
 .side .me .muted {
   font-size: 12px;
 }
-.crew-person-sm {
+.side .crew-person-sm {
   --frame: var(--br-steel);
   width: 36px;
   height: 36px;
   background: var(--br-cream);
 }
-.crew-person-sm .icon {
+.side .crew-person-sm .icon {
   width: 18px;
   height: 18px;
 }
@@ -710,12 +710,15 @@
 }
 .surface-app .check input,
 .surface-app .toggle input {
+  /* Set here, not inherited: a card's own --frame would otherwise recolour the field. */
+  --frame: var(--br-steel);
+  flex: none;
   margin: var(--br-px);
   box-shadow:
-    0 calc(var(--br-px) * -1) 0 0 var(--frame, var(--br-steel)),
-    0 var(--br-px) 0 0 var(--frame, var(--br-steel)),
-    calc(var(--br-px) * -1) 0 0 0 var(--frame, var(--br-steel)),
-    var(--br-px) 0 0 0 var(--frame, var(--br-steel));
+    0 calc(var(--br-px) * -1) 0 0 var(--frame),
+    0 var(--br-px) 0 0 var(--frame),
+    calc(var(--br-px) * -1) 0 0 0 var(--frame),
+    var(--br-px) 0 0 0 var(--frame);
 }
 .surface-app .check input:checked {
   --frame: var(--br-ink);
@@ -1295,6 +1298,14 @@ textarea.input {
     order: 1;
     margin: 0 0 0 auto;
     padding: 0;
+  }
+  /* On the top bar the tile alone says who is signed in; the name would take a row of its own. */
+  .side .me .who {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
   }
   .app-main {
     padding: var(--br-space-5) var(--br-space-4) var(--br-space-7);

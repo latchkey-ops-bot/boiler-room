@@ -336,6 +336,24 @@ describe('the settings screen', () => {
     expect(text(html)).toContain('Log out');
     expect(text(html)).toContain('Manage profile and password');
     expect(withClass(html, 'btn-primary')).toHaveLength(0);
+    expect(text(html)).toContain('On the public showcase None of your videos.');
+  });
+
+  it('says what the founder put on the showcase, next to who sees the videos here', () => {
+    const html = render(
+      createElement(SettingsScreen, {
+        person: null,
+        owner: { kind: 'user' },
+        showcase: { real: 1, simulated: 1 },
+        accountId: 'acc_4k8d2m0r9t1v3w5x7y9z',
+        memberSince,
+      }),
+    );
+    expect(text(html)).toContain('Who can see them here Only you');
+    expect(text(html)).toContain(
+      '1 video, for anyone to see; 1 simulated video you turned on, which never appears.',
+    );
+    expect(html).toContain('href="/showcase"');
   });
 
   it('says an organisation shares the videos, even when its name is unknown', () => {
