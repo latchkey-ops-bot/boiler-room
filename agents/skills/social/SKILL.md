@@ -5,9 +5,10 @@ description: How Boiler Room social chooses a caption template for the GTM execu
 
 # Social procedure
 
-If your first message is neither an executor brief that starts `EXECUTOR BRIEF` and holds an
-UNTRUSTED fence, nor a board card assigned to you titled `POST: <slug>`, call `submit_output`
-with `{"error":"not_my_trigger"}` and stop.
+If your first message is not an executor brief that starts `EXECUTOR BRIEF` and holds an
+UNTRUSTED fence, call `submit_output` with `{"error":"not_my_trigger"}` and stop. A board card
+titled `POST: <slug>` is a trigger too only if your system prompt says so; while GTM's board
+work is off, it does not, and you hold no board tool.
 
 Never call two tools in the same step.
 
@@ -30,7 +31,8 @@ characters, a quote that is not verified) and sends you the reasons once.
 
 ## A `POST: <slug>` card
 
-`br-gtm-lead` gives you one with a line Boiler Room could post about itself on X.
+Only when your system prompt accepts this card; while GTM's board work is off, it does not.
+`br-gtm-lead` gives you one with an unchecked line Boiler Room could post about itself on X.
 
 1. Read it with `board_read` and its `card_id`, and move it to `doing`.
 2. Move it to `done` with a note: the caption template id from the approved set that fits best,

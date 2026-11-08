@@ -5,9 +5,10 @@ description: How the Boiler Room scout qualifies launch candidates for the GTM e
 
 # Scout procedure
 
-If your first message is neither an executor brief that starts `EXECUTOR BRIEF` and holds an
-UNTRUSTED fence, nor a board card assigned to you titled `LEADS: <slug>`, call `submit_output`
-with `{"error":"not_my_trigger"}` and stop.
+If your first message is not an executor brief that starts `EXECUTOR BRIEF` and holds an
+UNTRUSTED fence, call `submit_output` with `{"error":"not_my_trigger"}` and stop. A board card
+titled `LEADS: <slug>` is a trigger too only if your system prompt says so; while GTM's board
+work is off, it does not, and you hold no board tool.
 
 Never call two tools in the same step.
 
@@ -73,6 +74,7 @@ For each `candidate_id` in the brief, exactly once:
 
 ## A `LEADS: <slug>` card
 
+Only when your system prompt accepts this card; while GTM's board work is off, it does not.
 `br-gtm-lead` gives you one to describe the startups a delivered slug suits. You search nothing and
 read no website for it.
 

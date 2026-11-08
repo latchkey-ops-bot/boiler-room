@@ -65,7 +65,7 @@ const FOUNDER_STEPS: Record<FounderNeed, string> = {
   'ledger-mismatch':
     "The store's spend and the Naive ledger differ this week. Compare them before raising any cap.",
   lockdown:
-    'company:verify --lockdown fails: an agent is offered a board tool its definition does not give it. Films stay in dry run until it passes.',
+    'company:verify --lockdown fails: an agent is offered a board tool its definition does not give it, so an agent that reads untrusted sites could write company cards. Films stay in dry run until it passes.',
   reply: 'A reply needs a person. The draft is in the review file.',
   removal:
     'A removal request could not take everything down yet: an X post or a film of ours may still be up. The executor retries it on every run, and needs live ports to delete or withdraw. If this stays open, delete the post or withdraw the film by hand.',

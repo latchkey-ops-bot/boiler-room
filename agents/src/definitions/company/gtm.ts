@@ -27,12 +27,10 @@ import {
  * sessions with a brief, checks their typed output, and does every action itself: none of them
  * holds a tool that sends, posts, spends or runs code.
  *
- * Activated on 2026-11-08 by the founder's decision: the GTM lead, the scout and social also work
- * board cards (`OUTREACH:` from br-ceo, `LEADS:` and `POST:` from the GTM lead), so they hold
- * `board_read` and `board_write`. That is a deliberate trade the operations spec warns about
- * (section 3): an agent that reads outside text in an executor brief could be talked into writing a
- * card. Their rules forbid any board call while they work a brief; the inbox reader, which reads
- * raw email, stays off the board. `GTM_ON_BOARD` is the one line that turns it back off.
+ * None of them holds a board tool either (`GTM_ON_BOARD` is empty). Every one reads text from
+ * outside the company in its briefs, and `board_write` lets its holder start any agent by assigning
+ * it a card. Naive cannot narrow `board_write` by card prefix or assignee, or narrow tools per
+ * session, so a brief agent on the board is bounded by its prompt alone.
  */
 
 /**
@@ -65,8 +63,19 @@ const sessionOf = (name: GtmName) =>
     ? { budget_micro_usd: SESSION_BUDGETS[name].default, max_minutes: 10 }
     : { budget_micro_usd: 0, max_minutes: 0 };
 
-/** The GTM agents that work board cards. The inbox reader reads raw email and never does. */
-export const GTM_ON_BOARD: readonly GtmName[] = [GTM_LEAD, SCOUT, SOCIAL_AGENT];
+/**
+ * The GTM agents that also work board cards (`OUTREACH:`, `LEADS:`, `POST:`): none. A branch once
+ * put the lead, the scout and social here on a founder ruling that only that branch's text
+ * recorded. Turning any one on needs the founder's ruling confirmed by the main session first, and
+ * should then give card work to an agent that never takes an executor brief, since every agent
+ * here reads outside text in its briefs. The trigger rule, the tools, `company:verify --lockdown`,
+ * the tamper check and br-ceo's roster all follow this list.
+ */
+export const GTM_ON_BOARD: readonly GtmName[] = [];
+
+/** Whether a GTM agent works board cards. */
+export const onBoard = (name: string): boolean =>
+  (GTM_ON_BOARD as readonly string[]).includes(name);
 
 /** The cards each GTM agent works, and who writes them. */
 export const GTM_CARDS = {
@@ -81,9 +90,7 @@ export const GTM_CARDS = {
  * company board offers them to every agent until they are named off (verified).
  */
 const GTM_TOOLS = (name: GtmName) =>
-  GTM_ON_BOARD.includes(name)
-    ? companyToolset({})
-    : companyToolset({ without: ['board_read', 'board_write'] });
+  onBoard(name) ? companyToolset({}) : companyToolset({ without: ['board_read', 'board_write'] });
 
 /** The first thing the inbox reader checks. A card, a chat or a schedule that starts it gets nothing. */
 export const NOT_MY_TRIGGER =
@@ -111,13 +118,16 @@ const RULES_TAIL = [
 /** The inbox reader's rules: executor briefs only. */
 export const GTM_RULES = [NOT_MY_TRIGGER, ...RULES_TAIL];
 
-/** The rules of a GTM agent that also works its own cards. */
-export const boardRules = (name: keyof typeof GTM_CARDS) => [
-  triggerRule(name),
-  BRIEF_BOARD_RULE,
-  CARD_RULE,
-  ...RULES_TAIL,
-];
+/**
+ * A GTM agent's rules: executor briefs only, or, for an agent on `GTM_ON_BOARD`, its own cards as
+ * well, with no board call while a brief is open.
+ */
+export const gtmRules = (name: keyof typeof GTM_CARDS) =>
+  onBoard(name) ? [triggerRule(name), BRIEF_BOARD_RULE, CARD_RULE, ...RULES_TAIL] : GTM_RULES;
+
+/** What a description adds for an agent on `GTM_ON_BOARD`: the cards it works, and from whom. */
+const cardsLine = (name: keyof typeof GTM_CARDS) =>
+  onBoard(name) ? `; works ${GTM_CARDS[name].prefix} cards from ${GTM_CARDS[name].from}` : '';
 
 /** Haiku fires tool calls in parallel unless told not to, which broke ordered steps in probes. */
 const HAIKU_RULE = 'Never call two tools in the same step.';
@@ -125,14 +135,13 @@ const HAIKU_RULE = 'Never call two tools in the same step.';
 export const gtmLead: AgentDefinition = {
   ...BASE,
   name: GTM_LEAD,
-  description:
-    "Boiler Room GTM lead: picks the day's startup for X and up to five for email, and writes each email's subject and opener for the GTM executor; works OUTREACH cards from br-ceo. Holds no tool that posts or sends.",
+  description: `Boiler Room GTM lead: picks the day's startup for X and up to five for email, and writes each email's subject and opener for the GTM executor${cardsLine(GTM_LEAD)}. Holds no tool that posts or sends.`,
   model: SONNET,
   system: companyPrompt({
     name: GTM_LEAD,
     role: 'GTM lead',
     skill: 'gtm-lead',
-    rules: boardRules(GTM_LEAD),
+    rules: gtmRules(GTM_LEAD),
   }),
   tools: GTM_TOOLS(GTM_LEAD),
   skills: [
@@ -151,14 +160,13 @@ export const gtmLead: AgentDefinition = {
 export const scout: AgentDefinition = {
   ...BASE,
   name: SCOUT,
-  description:
-    'Boiler Room scout: qualifies the startups the GTM executor found, from their own websites; works LEADS cards from br-gtm-lead. Holds no tool that posts or sends.',
+  description: `Boiler Room scout: qualifies the startups the GTM executor found, from their own websites${cardsLine(SCOUT)}. Holds no tool that posts or sends.`,
   model: HAIKU,
   system: companyPrompt({
     name: SCOUT,
     role: 'scout',
     skill: 'scout',
-    rules: [HAIKU_RULE, ...boardRules(SCOUT)],
+    rules: [HAIKU_RULE, ...gtmRules(SCOUT)],
   }),
   tools: GTM_TOOLS(SCOUT),
   skills: [
@@ -176,14 +184,13 @@ export const scout: AgentDefinition = {
 export const social: AgentDefinition = {
   ...BASE,
   name: SOCIAL_AGENT,
-  description:
-    "Boiler Room social: chooses the caption template and quote for the day's X post, which code writes and the founder posts; works POST cards from br-gtm-lead. Holds no tool that posts or sends.",
+  description: `Boiler Room social: chooses the caption template and quote for the day's X post, which code writes and the founder posts${cardsLine(SOCIAL_AGENT)}. Holds no tool that posts or sends.`,
   model: HAIKU,
   system: companyPrompt({
     name: SOCIAL_AGENT,
     role: 'social lead',
     skill: 'social',
-    rules: [HAIKU_RULE, ...boardRules(SOCIAL_AGENT)],
+    rules: [HAIKU_RULE, ...gtmRules(SOCIAL_AGENT)],
   }),
   tools: GTM_TOOLS(SOCIAL_AGENT),
   skills: [

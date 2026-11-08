@@ -17,12 +17,12 @@ Two founder decisions hold for the whole hackathon:
 
 ## Agents
 
-| Agent             | Purpose                                                                                                 | Model                         | Started by                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------- |
-| `br-gtm-lead`     | Picks the day's startup for X (and for email drafts), writes email subjects and openers, plans outreach | `anthropic/claude-sonnet-5.5` | The GTM executor's `pick` brief, once a day; and `OUTREACH: <slug>` cards from `br-ceo` |
-| `br-scout`        | Qualifies the startups the executor found, from their own websites                                      | `anthropic/claude-haiku-5.5`  | The executor's `qualify` briefs; and `LEADS: <slug>` cards from `br-gtm-lead`           |
-| `br-social`       | Chooses the caption template and quote for the day's X post                                             | `anthropic/claude-haiku-5.5`  | The executor's `pick` brief; and `POST: <slug>` cards from `br-gtm-lead`                |
-| `br-inbox-reader` | Reads one inbound email the executor fenced, and returns fixed fields. It is not on the board.          | `anthropic/claude-haiku-5.5`  | The executor's `inbox` phase (planned, S6)                                              |
+| Agent             | Purpose                                                                                                 | Model                         | Started by                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------- |
+| `br-gtm-lead`     | Picks the day's startup for X (and for email drafts), writes email subjects and openers, plans outreach | `anthropic/claude-sonnet-5.5` | The GTM executor's `pick` brief, once a day |
+| `br-scout`        | Qualifies the startups the executor found, from their own websites                                      | `anthropic/claude-haiku-5.5`  | The executor's `qualify` briefs             |
+| `br-social`       | Chooses the caption template and quote for the day's X post                                             | `anthropic/claude-haiku-5.5`  | The executor's `pick` brief                 |
+| `br-inbox-reader` | Reads one inbound email the executor fenced, and returns fixed fields                                   | `anthropic/claude-haiku-5.5`  | The executor's `inbox` phase (planned, S6)  |
 
 No GTM agent posts, sends, orders or spends: the executor, which is code, does every action after
 checking their typed output. There is no `br-gtm-inbox` deployment: the executor runs its own
@@ -51,27 +51,27 @@ has a link.
 
 ## Tools
 
-| Tool                                                                                 | GTM lead, scout, social                                               | Inbox reader |
-| ------------------------------------------------------------------------------------ | --------------------------------------------------------------------- | ------------ |
-| `read_skill`, `session_spend`, `submit_output`                                       | allow                                                                 | allow        |
-| `board_read`, `board_write`                                                          | allow, to work their own cards; never while an executor brief is open | off          |
-| Every social, data, app, sandbox, file, web and media tool; every MCP server; `apps` | off, each one named                                                   | same         |
-| Identity, vault, computer                                                            | none                                                                  | none         |
+| Tool                                                                                 | GTM lead, scout, social | Inbox reader |
+| ------------------------------------------------------------------------------------ | ----------------------- | ------------ |
+| `read_skill`, `session_spend`, `submit_output`                                       | allow                   | allow        |
+| `board_read`, `board_write`                                                          | off, each one named     | off          |
+| Every social, data, app, sandbox, file, web and media tool; every MCP server; `apps` | off, each one named     | same         |
+| Identity, vault, computer                                                            | none                    | none         |
 
-`board_write` lets its holder start any agent by assigning it a card, and the scout reads outside
-text in its briefs. The founder accepted that trade at activation; each agent's rules forbid any
-board call while it works a brief, and `GTM_ON_BOARD` in `gtm.ts` is the one line that turns it off.
+No GTM agent is on the board (`GTM_ON_BOARD` in `gtm.ts` is empty). `board_write` lets its holder
+start any agent by assigning it a card, every GTM agent reads outside text in its briefs, and Naive
+cannot narrow `board_write` by prefix, assignee or session. Putting one on the board needs the
+founder's ruling confirmed by the main session first, and should then give card work to an agent
+that never takes an executor brief (gtm-operations.md section 6).
 
 ## Cards
 
-| Card                                         | Written by              | Worked by     | What it asks                                                                                    |
-| -------------------------------------------- | ----------------------- | ------------- | ----------------------------------------------------------------------------------------------- |
-| `OUTREACH: <slug>`                           | `br-ceo`                | `br-gtm-lead` | For a delivered slug: who it is for, one line Boiler Room could post, and any change to the day |
-| `LEADS: <slug>`                              | `br-gtm-lead`           | `br-scout`    | Describe the startups the slug suits, in words                                                  |
-| `POST: <slug>`                               | `br-gtm-lead`           | `br-social`   | Choose the caption template for a line about Boiler Room                                        |
-| `GTM: <date>`, `REMOVE:`, `FOUNDER: gtm ...` | the GTM executor (code) | nobody        | The day's record, removals, and what a person must do                                           |
+| Card                                         | Written by              | Worked by | What it asks                                          |
+| -------------------------------------------- | ----------------------- | --------- | ----------------------------------------------------- |
+| `GTM: <date>`, `REMOVE:`, `FOUNDER: gtm ...` | the GTM executor (code) | nobody    | The day's record, removals, and what a person must do |
 
-Card work is notes for the founder: nothing on a card is posted or sent.
+`OUTREACH:`, `LEADS:` and `POST:` cards, and the skill sections that work them, wait on
+`GTM_ON_BOARD`: while it is empty, no one writes or works them.
 
 ## Email
 
@@ -118,9 +118,10 @@ reader are specified in gtm-operations.md sections 10.3, 10.4 and 12; none sends
 
 ## Activation checklist
 
-Done in code on 2026-11-08 (this branch): `GTM_ACTIVE`, the budgets above, the board tools for the
-GTM lead, the scout and social, `br-gtm-lead` on `br-ceo`'s roster with `OUTREACH:` cards, the
-CEO's rules and skill, the website's sample-film routes, pack mode, and the forced email dry run.
+Done in code on 2026-11-08 (this branch): `GTM_ACTIVE`, the budgets above, the website's
+sample-film routes, pack mode, and the forced email dry run. The GTM agents stay off the board and
+off `br-ceo`'s roster (`GTM_ON_BOARD` is empty) until the main session confirms otherwise with the
+founder.
 
 Left, in order (gtm-operations.md section 15):
 

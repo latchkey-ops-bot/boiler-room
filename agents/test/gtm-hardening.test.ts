@@ -1132,6 +1132,17 @@ describe('sync and the tamper check', () => {
     expect(definitionDrift(stored, reader)).toContain('mcp_servers');
     expect(definitionDrift({ ...stored, mcp_servers: [] }, reader)).not.toContain('mcp_servers');
   });
+
+  it.each(GTM.map((definition) => [definition.name, definition] as const))(
+    'counts a board tool offered to %s as drift: no GTM agent is on the board',
+    (_name, definition) => {
+      const stored = definition as unknown as Record<string, unknown>;
+      expect(definitionDrift(stored, definition)).toEqual([]);
+      const { board_write: _off, ...configs } = definition.tools.configs;
+      const offered = { ...stored, tools: { ...definition.tools, configs } };
+      expect(definitionDrift(offered, definition)).toContain('board');
+    },
+  );
 });
 
 describe('the X pack: the founder posts by hand', () => {

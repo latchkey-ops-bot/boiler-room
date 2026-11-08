@@ -91,7 +91,7 @@ export function resolveLanes(input: LaneInput): LaneState {
   if (input.film.kind !== 'app') film.push('no app film pipeline is configured');
   if (input.lockdownOk !== true) {
     film.push(
-      'company:verify --lockdown does not pass: an agent is offered a board tool its definition does not give it, such as a crew agent that reads the sites GTM chooses',
+      'company:verify --lockdown does not pass: an agent is offered a board tool its definition does not give it, so an agent that reads untrusted sites could write company cards',
     );
   }
   if (!flags.rulings.film_canary_cost_reported)
