@@ -54,14 +54,17 @@ function tally<T extends { hex: string; score: number }>(
   return item;
 }
 
-/** Share of samples the body colour needs to count as the page background. */
+/** Below this share of the samples, the body colour may be painted over by a wrapper. */
 const ROOT_SHARE = 0.25;
+/** The share of the samples one other surface needs to count as a wrapper painted over the body. */
+const WRAPPER_SHARE = 0.5;
 
 /**
- * The colour the page is painted with. The body's own colour wins when it covers at least a
- * quarter of the first screens, so a large dark product shot does not turn a light site dark.
- * Otherwise the most sampled colour wins, which handles a site that paints a wrapper instead of
- * the body.
+ * The colour the page is painted with: what html and body paint. A large dark product shot or a
+ * dialog's scrim does not turn a light site dark. Only a site that paints a wrapper over the body
+ * overrides it, seen as one other surface on at least half of the samples across the first screens
+ * while the body's colour is on less than a quarter. With html and body both transparent, the most
+ * sampled surface wins.
  */
 export function pickBackground(styles: RawStyles): { hex: string; surfaces: string[] } {
   const totals: { hex: string; score: number }[] = [];
@@ -79,8 +82,11 @@ export function pickBackground(styles: RawStyles): { hex: string; surfaces: stri
   const rootShare = root
     ? (totals.find((item) => distance(item.hex, root) < SAME)?.score ?? 0) / (all || 1)
     : 0;
-  if (root && (all === 0 || rootShare >= ROOT_SHARE)) return { hex: root, surfaces };
-  return { hex: totals[0]?.hex ?? root ?? '#FFFFFF', surfaces };
+  const top = totals[0];
+  if (!root || styles.rootSet === false) return { hex: top?.hex ?? root ?? '#FFFFFF', surfaces };
+  if (all === 0 || rootShare >= ROOT_SHARE) return { hex: root, surfaces };
+  const wrapper = top && distance(top.hex, root) >= SAME && top.score >= all * WRAPPER_SHARE;
+  return { hex: wrapper ? top.hex : root, surfaces };
 }
 
 function textTotals(texts: WeightedColor[], background: string): { hex: string; score: number }[] {
@@ -307,6 +313,10 @@ export function deriveColors(styles: RawStyles): DerivedColors {
   let { hex: background, surfaces } = pickBackground(styles);
   if (styles.backgrounds.length === 0)
     notes.push('No painted background was sampled, so white was assumed.');
+  if (styles.overlays)
+    notes.push(
+      `${styles.overlays} cookie banner(s), dialog(s), scrim(s) or fixed overlay(s) were hidden before the colours were measured.`,
+    );
 
   const candidates = brandCandidates(styles, background);
   let primary = candidates[0]?.hex;

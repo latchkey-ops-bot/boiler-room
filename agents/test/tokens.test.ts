@@ -63,6 +63,39 @@ describe('pickBackground', () => {
     ).toBe('#010101');
   });
 
+  it('keeps what html and body paint unless one wrapper covers most of the first screens', () => {
+    const mixed = [
+      { ...color('#222222'), weight: 50 },
+      { ...color('#C9B79C'), weight: 40 },
+      { ...color('#ECE9E2'), weight: 20 },
+    ];
+    expect(pickBackground(styles({ root: '#ECE9E2', rootSet: true, backgrounds: mixed })).hex).toBe(
+      '#ECE9E2',
+    );
+    const wrapped = [
+      { ...color('#222222'), weight: 70 },
+      { ...color('#ECE9E2'), weight: 10 },
+    ];
+    expect(
+      pickBackground(styles({ root: '#ECE9E2', rootSet: true, backgrounds: wrapped })).hex,
+    ).toBe('#222222');
+  });
+
+  it('takes the most sampled surface when html and body paint nothing', () => {
+    const samples = [
+      { ...color('#0B0B0F'), weight: 30 },
+      { ...color('#FFFFFF'), weight: 10 },
+    ];
+    expect(
+      pickBackground(styles({ root: '#FFFFFF', rootSet: false, backgrounds: samples })).hex,
+    ).toBe('#0B0B0F');
+  });
+
+  it('notes the overlays hidden before the colours were measured', () => {
+    const colors = deriveColors(styles({ root: '#FFFFFF', overlays: 2 }));
+    expect(colors.notes.join(' ')).toMatch(/^2 cookie banner/);
+  });
+
   it('falls back to the body colour when nothing was sampled', () => {
     expect(pickBackground(styles({ root: '#0B0B0C', backgrounds: [] })).hex).toBe('#0B0B0C');
   });

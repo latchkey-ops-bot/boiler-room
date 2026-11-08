@@ -100,6 +100,13 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   colour syntax: the painted background, the most used readable text colour, the brand colour from
   button fills, links and headings, accents, muted text, radius, light or dark, and fonts with how
   they load. Text in product mockups does not count.
+- Before any token is read, cookie banners, dialogs, their scrims and fixed overlays are hidden
+  (a fixed layer counts when it covers much of the screen and is on top there, unless it holds the
+  page's main content or first heading). The background is what html and body paint: the body's
+  opaque colour, else html's. Only a wrapper painted over the body overrides it, seen as one other
+  surface on at least half of the samples across the first screens. Each sample is the first fully
+  opaque fill under its point, so a semi-transparent layer, such as a dialog's scrim or a glassy
+  header, never counts.
 - The logo is an SVG file if the header has one, then inline SVG, then a raster logo, then a
   favicon. Each download is checked by its bytes, so an HTML page served as `logo.svg` is refused.
   With no logo at all, the product name is set as a wordmark and marked `generated`, and the

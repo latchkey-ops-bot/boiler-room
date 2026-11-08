@@ -19,11 +19,13 @@ export interface CollectOptions {
 
 /**
  * Runs inside the page through `page.evaluate`, so it must not reference anything outside its own
- * body. It only reads the document. The one thing it writes is a marker attribute: `data-br-overlay`
- * on cookie banners and pop-ups, which the capture hides for every screenshot, and
- * `data-br-header` on a fixed or sticky site header, which it hides for screenshots of product UI
- * further down the page, after the text has been read. It scrolls the window to sample colours
- * and returns to the top.
+ * body. It reads the document and writes marker attributes: `data-br-overlay` on cookie banners,
+ * dialogs, their scrims and other fixed overlays, `data-br-header` on a fixed or sticky site
+ * header, which the capture hides for screenshots of product UI further down the page, and the
+ * concealed and hidden text markers. Once the text has been read, it hides the overlays it marked
+ * with a stylesheet, so nothing after that (buttons, product UI, colours, fonts, logos) is measured
+ * from an overlay; the capture keeps them hidden for every screenshot. It scrolls the window to
+ * sample colours and returns to the top.
  */
 export async function collectPage(options: CollectOptions): Promise<RawPage> {
   const vw = window.innerWidth;
@@ -519,17 +521,41 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     .filter((link) => LOGIN_TEXT.test(link.text) || LOGIN_URL.test(link.url))
     .slice(0, 20);
 
-  // Cookie banners and pop-ups: marked so the screenshot can hide them. Their text is above.
+  // Cookie banners, dialogs, their scrims and other fixed overlays. Their text is read above.
+  // They are marked, then hidden at once, so the buttons, product UI and colours below are never
+  // read from them: a dialog's dark scrim is not the page's background. A fixed layer counts as an
+  // overlay when it covers much of the screen and is on top there, unless it holds the page's own
+  // content (its main element, its first heading or most of its text): then it is the page.
   let hidden = 0;
   const OVERLAY_TEXT =
     /cookie|consent|gdpr|we use|accept all|reject all|newsletter|subscribe|% off|discount|bonus/i;
   const CONSENT_TEXT = /cookie|consent|gdpr|accept all|reject all/i;
+  const firstHeading = body.querySelector('h1');
+  const bodyChars = (body.textContent ?? '').length || 1;
+  const holdsPage = (el: Element) =>
+    el.querySelector('main, [role="main"]') !== null ||
+    (firstHeading !== null && el.contains(firstHeading)) ||
+    (el.textContent ?? '').length > bodyChars * 0.5;
+  const onScreen = (rect: DOMRect) =>
+    (Math.max(0, Math.min(rect.right, vw) - Math.max(rect.left, 0)) *
+      Math.max(0, Math.min(rect.bottom, vh) - Math.max(rect.top, 0))) /
+    (vw * vh);
+  const touchable = document.createElement('style');
+  touchable.textContent = '* { pointer-events: auto !important; }';
+  document.head.appendChild(touchable);
+  const onTop = (el: Element, rect: DOMRect) => {
+    const x = Math.min(vw - 1, Math.max(0, rect.left + rect.width / 2));
+    const y = Math.min(vh - 1, Math.max(0, rect.top + rect.height / 2));
+    const top = document.elementFromPoint(x, y);
+    return top !== null && el.contains(top);
+  };
   for (const el of Array.from(body.querySelectorAll('*'))) {
     const style = styleOf(el);
     const dialog = el.matches(
-      'dialog[open], [role="dialog"][aria-modal="true"], [aria-modal="true"]',
+      'dialog[open], [role="dialog"], [role="alertdialog"], [aria-modal="true"]',
     );
-    if (!dialog && style.position !== 'fixed' && style.position !== 'sticky') continue;
+    const fixed = style.position === 'fixed';
+    if (!dialog && !fixed && style.position !== 'sticky') continue;
     if (el.parentElement?.closest('[data-br-overlay]') || !visible(el)) continue;
     const rect = el.getBoundingClientRect();
     const text = (el as HTMLElement).textContent ?? '';
@@ -542,12 +568,22 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       el.setAttribute('data-br-header', '1');
       continue;
     }
-    const share = (rect.width * rect.height) / (vw * vh);
-    const zIndex = Number.parseInt(style.zIndex, 10) || 0;
-    if (dialog || (OVERLAY_TEXT.test(text) && share < 0.8) || (zIndex >= 1000 && share > 0.3)) {
+    const share = onScreen(rect);
+    const fill = toColor(style.backgroundColor);
+    const scrim =
+      fixed && share >= 0.5 && fill !== null && fill.alpha < 0.99 && text.trim().length < 40;
+    const covering = fixed && share > 0.3 && !holdsPage(el) && onTop(el, rect);
+    if (dialog || scrim || covering || (OVERLAY_TEXT.test(text) && share < 0.8)) {
       el.setAttribute('data-br-overlay', '1');
       hidden += 1;
     }
+  }
+  touchable.remove();
+  if (hidden > 0) {
+    const hide = document.createElement('style');
+    hide.textContent =
+      '[data-br-overlay] { display: none !important; } html, body { overflow: auto !important; }';
+    document.head.appendChild(hide);
   }
 
   // Calls to action: links and buttons drawn as buttons.
@@ -732,21 +768,40 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
   let styles: RawStyles | null = null;
   let fonts: RawFonts | null = null;
   if (options.withStyles) {
+    // The page background is what html and body paint. The samples below find a wrapper painted
+    // over the body instead. Each sample is the first fully opaque fill in the stack of elements
+    // under the point, so a semi-transparent layer (a scrim, a tinted glass header) never counts,
+    // and a fixed background layer behind the content does.
+    const opaqueFill = (el: Element) => {
+      const fill = toColor(styleOf(el).backgroundColor);
+      return fill && fill.alpha >= 0.99 ? fill.hex : null;
+    };
+    const rootFill = opaqueFill(body) ?? opaqueFill(document.documentElement);
     const backgrounds = new Map<string, number>();
     const height = document.documentElement.scrollHeight;
+    document.head.appendChild(touchable);
     for (const y of [0, vh, vh * 2]) {
       if (y > 0 && y >= height - vh / 2) break;
       window.scrollTo(0, y);
       await sleep(200);
       for (let row = 0; row < 9; row++) {
         for (let col = 0; col < 16; col++) {
-          const el = document.elementFromPoint(((col + 0.5) * vw) / 16, ((row + 0.5) * vh) / 9);
-          if (!el || el.closest('[data-br-overlay]') || insideIllustrative(el)) continue;
-          const color = painted(el);
-          backgrounds.set(color.hex, (backgrounds.get(color.hex) ?? 0) + 1);
+          const stack = document.elementsFromPoint(((col + 0.5) * vw) / 16, ((row + 0.5) * vh) / 9);
+          const top = stack[0];
+          if (!top || insideIllustrative(top)) continue;
+          let hex: string | null = null;
+          for (const el of stack) {
+            if (el === body || el === document.documentElement) break;
+            if (el.closest('[data-br-overlay]')) continue;
+            hex = opaqueFill(el);
+            if (hex) break;
+          }
+          hex ??= rootFill ?? '#FFFFFF';
+          backgrounds.set(hex, (backgrounds.get(hex) ?? 0) + 1);
         }
       }
     }
+    touchable.remove();
     window.scrollTo(0, 0);
 
     const texts = new Map<
@@ -848,7 +903,9 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     }
 
     styles = {
-      root: painted(body).hex,
+      root: rootFill ?? '#FFFFFF',
+      rootSet: rootFill !== null,
+      overlays: hidden,
       backgrounds: [...backgrounds].map(([hex, weight]) => ({ hex, alpha: 1, weight })),
       texts: [...texts.values()],
       links: [...linkColors.values()],

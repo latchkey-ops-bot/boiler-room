@@ -130,6 +130,44 @@ const DIALOG_SITE = `<!doctype html><html><head><title>Shop</title></head><body>
 <div role="dialog" aria-modal="true"><p>Where are we shipping to?</p></div>
 </body></html>`;
 
+// allbirds.com showed a region dialog on load, on a 50% black scrim, and the capture took the
+// scrim's #222222 for the page background. Here: a light body, a hero picture, that dialog on its
+// scrim, a dark cookie banner with an orange button, and a glassy header.
+const MODAL_SITE = `<!doctype html><html><head><title>Wool</title><style>
+  body { margin: 0; background: #ECE9E2; color: #212121; font-family: sans-serif; }
+  header { position: sticky; top: 0; height: 64px; background: rgba(255, 255, 255, 0.6); }
+  .hero img { display: block; width: 100%; height: 700px; }
+  .buy { display: inline-block; padding: 12px 20px; border-radius: 999px; background: #212121; color: #FFFFFF; }
+  .wrap { position: fixed; inset: 0; z-index: 100; overflow-y: auto; }
+  .scrim { position: fixed; inset: 0; background: rgb(34 34 34 / 0.5); }
+  .box { position: relative; width: 600px; margin: 200px auto; padding: 40px; background: #FFFFFF; color: #0A3D2A; }
+  .box button { padding: 12px 20px; background: #0A3D2A; color: #FFFFFF; border: 0; }
+  .cookie { position: fixed; left: 0; right: 0; bottom: 0; padding: 24px; background: #222222; color: #FFFFFF; }
+  .cookie a { display: inline-block; padding: 10px 18px; background: #FF5500; color: #FFFFFF; }
+</style></head><body>
+<header><nav><a href="/">Home</a> <a href="/shop">Shop</a></nav></header>
+<section class="hero"><img alt="" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='700'><rect width='1600' height='700' fill='%23C9B79C'/></svg>"></section>
+<h1>Wildly comfortable shoes</h1>
+<p>Made from merino wool and eucalyptus fibre, for every day of the week.</p>
+<a class="buy" href="/shop">Shop now</a>
+${'<p>Soft, breathable and light, our runners are made to be worn all day long.</p>'.repeat(30)}
+<div class="wrap"><div class="scrim"></div><div class="box" role="group"><p>Where are we shipping to?</p><button>Confirm</button></div></div>
+<div class="cookie">We use cookies to improve your visit. <a href="/accept">Accept all</a></div>
+</body></html>`;
+
+// A page painted by a fixed layer behind its content, with html and body transparent, and a page
+// whose whole content scrolls in a fixed full-screen container. Neither layer is an overlay.
+const FIXED_PAGE_SITE = `<!doctype html><html><head><title>Night</title><style>
+  body { margin: 0; color: #F2F2F2; font-family: sans-serif; }
+  .backdrop { position: fixed; inset: 0; z-index: -1; background: #0B0B0F; }
+  .scroller { position: fixed; inset: 0; overflow-y: auto; }
+  .cta { display: inline-block; padding: 12px 20px; background: #7C5CFF; color: #FFFFFF; }
+</style></head><body><div class="backdrop"></div>
+<div class="scroller"><main><h1>Analytics at night</h1>
+<p>Read the numbers that matter while the rest of the team sleeps.</p>
+<a class="cta" href="/start">Start now</a></main></div>
+</body></html>`;
+
 let browser: Browser | undefined;
 
 beforeAll(async () => {
@@ -402,6 +440,40 @@ describe('collectPage in Chromium', () => {
     expect(raw.text.rendered).toContain('Made from merino wool since 2016.');
     expect(raw.text.clean).toContain('Made from merino wool since 2016.');
     expect(raw.text.hidden).toBe('');
+    await page.close();
+  });
+
+  it('hides a dialog, its scrim and a cookie banner before reading the colours', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(MODAL_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    expect(
+      await page.locator('[data-br-overlay]').evaluateAll((els) => els.map((el) => el.className)),
+    ).toEqual(['wrap', 'cookie']);
+    expect(raw.styles.root).toBe('#ECE9E2');
+    expect(raw.styles.rootSet).toBe(true);
+    expect(raw.styles.backgrounds.map((item) => item.hex)).not.toContain('#222222');
+    // The glassy header is 60% white, so the body shows through it.
+    expect(raw.styles.backgrounds.map((item) => item.hex)).not.toContain('#FFFFFF');
+    const colors = deriveColors(raw.styles);
+    expect(colors).toMatchObject({ background: '#ECE9E2', foreground: '#212121', mode: 'light' });
+    expect(colors.candidates.map((item) => item.hex)).not.toContain('#FF5500');
+    expect(colors.candidates.map((item) => item.hex)).not.toContain('#0A3D2A');
+    expect(colors.notes.join(' ')).toMatch(/2 cookie banner\(s\), dialog\(s\)/);
+    // Its text was read before the overlays were hidden.
+    expect(raw.text.rendered).toContain('Where are we shipping to?');
+    expect(raw.ctas.map((cta) => cta.text)).toEqual(['Shop now']);
+    await page.close();
+  });
+
+  it('takes the background from a fixed layer behind the content, and hides neither layer', async (context) => {
+    if (!browser) return context.skip();
+    const { raw, page } = await collect(FIXED_PAGE_SITE);
+    if (!raw.styles) throw new Error('styles missing');
+    expect(await page.locator('[data-br-overlay]').count()).toBe(0);
+    expect(raw.styles.rootSet).toBe(false);
+    const colors = deriveColors(raw.styles);
+    expect(colors).toMatchObject({ background: '#0B0B0F', mode: 'dark', primary: '#7C5CFF' });
     await page.close();
   });
 });

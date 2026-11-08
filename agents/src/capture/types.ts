@@ -25,8 +25,15 @@ export interface RawCta {
 }
 
 export interface RawStyles {
-  /** The colour painted behind the body: its own, the root element's, or the canvas white. */
+  /** The page background html and body paint: the body's opaque colour, else html's, else white. */
   root: string;
+  /**
+   * Whether html or body paints an opaque colour. False when both are transparent, so `root` is
+   * only the browser's white canvas. Absent in captures from before it was measured.
+   */
+  rootSet?: boolean;
+  /** Cookie banners, dialogs, scrims and fixed overlays hidden before the colours were measured. */
+  overlays?: number;
   /** The painted background at sample points across the first screens, weighted by count. */
   backgrounds: WeightedColor[];
   /**
