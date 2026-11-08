@@ -497,13 +497,37 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   opaque fill under its point, so a semi-transparent layer, such as a dialog's scrim or a glassy
   header, never counts. A sample on a picture, a video or a background image (a wallpaper, even one
   behind the content) is not counted: it covers the body colour but has no one colour of its own.
-- The logo is an SVG file if the header has one, then inline SVG, then a raster logo, then a
-  favicon. Each download is checked by its bytes, so an HTML page served as `logo.svg` is refused.
-  With no logo at all, the product name is set as a wordmark in the site's own font stack and
-  heading weight (the browser default, if the site sets none) and marked `generated`, and the
-  customer is asked for the real one. An inline SVG keeps `currentColor` and carries the colour it
-  has on the page; the capture's own markers are stripped. When the home page has no title or name,
-  the other pages' titles and text say how the site writes its name ("About danluu.com").
+  With html and body both transparent, the canvas colour is read as the computed CSS system colour
+  `Canvas` for the page's colour scheme, not assumed to be white.
+- Every colour is measured at a recorded point. `brand.colors.measured` in `capture.json`, the
+  bundle's `measured_colors` and the result's `brand_details.measured` list each one with the
+  computed style read (`background-color`, `color`, `border-color`, or `canvas`), what painted it
+  (`surface`, `text`, `link`, `button`), the element as `tag#id.class`, the page, the point in
+  document coordinates, its share of the background samples for a surface, and the brand tokens set
+  to it. Every page surface on at least 2% of the samples is listed, and the body's own colour
+  whatever its share, so a film that cannot use the background has measured grounds to choose
+  from. A black or white foreground picked because no text clears 4.5:1 is the one colour that is
+  not measured, and is not listed.
+- The logo comes from the header's home link: the first link to the home page near the top that
+  holds a picture and is not labelled as navigation ("Home"). Every picture in it counts, including
+  variants it hides at the capture's width (posthog.com shows only its mark at desktop width and
+  keeps the full lockup of mark and name for phones), but never a variant for a dark scheme. A
+  lockup comes before the mark alone, an SVG before a raster, a shown variant before a hidden one.
+  A visible SVG on the first screen with the same `viewBox` and an identical path is the same logo
+  drawn again, and is taken when it has more colours. Then a picture in the header named as a
+  logo, another picture in the header, an SVG icon or an apple-touch-icon or an icon of 128 px or
+  more, smaller icons, and last the Open Graph image. Each download is checked by its bytes, so an
+  HTML page served as `logo.svg` is refused, and every candidate is tried before the name is set
+  in type. With no picture at all, the product name is set as a wordmark in the site's own font
+  stack and heading weight (the browser default, if the site sets none) and marked `generated`,
+  and the customer is asked for the real one. An inline SVG keeps `currentColor` and carries the
+  colour it has on the page, and brings the definitions it refers to by id (a clip path, a
+  gradient, a symbol) from elsewhere on the page; the capture's own markers are stripped. Every SVG
+  is saved with a `width` and `height` of its own in its `viewBox`'s shape, long edge 512, since a
+  logo cut from a page carries the page's sizing (`width="auto"` in a 24 px box), which a renderer
+  reads as a favicon. `found_in` records where the logo was found, `aspect` its width over height
+  and `why` the reason it was chosen. When the home page has no title or name, the other pages'
+  titles and text say how the site writes its name ("About danluu.com").
 - A Chromium is run on a 1 GiB machine with a 2 GiB swapfile, one page at a time, always closed.
 
 ### The gate
@@ -541,6 +565,11 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   another can pair the plan with another product's price. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
+- Colours: `brand_details.measured` must be the capture's list, as the bundle carries it
+  (`MEASURED_CHANGED`). Every brand colour and accent must be a measured colour, and the background
+  one measured as a page surface (`COLOR_UNMEASURED`); a foreground may be black or white. A bundle
+  with no measured colours cannot vouch for any (`COLORS_UNMEASURED`). `unmeasuredColors` is
+  exported for the agents downstream, which may only use measured colours.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
   that still fail, drops uncaptured pages and resets page titles, and accepts the rest only if
   nothing else fails. A brief fact left citing no claim goes with its claims: a list item is
@@ -550,7 +579,9 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   pricing left out is listed from the price claims, each named by its page's title, the pricing
   summary becomes its plans' names and prices (citing their claims) with a yearly
   billing switch's label added, the one-liner becomes its first cited quote and what-it-is its
-  cited quotes. An accepted result keeps every page title exactly as stored.
+  cited quotes. Colours that were not measured are set back to the capture's own, accents that
+  were not measured are dropped, and the measured list is restored. An accepted result keeps every
+  page title exactly as stored.
 - Provenance: the gate downloads `pages.json` itself and requires its SHA-256 to match a digest the
   capture tool printed in this session's tool output, so a bundle edited after the capture is
   refused. Assets must be files this session published, or customer material with provenance

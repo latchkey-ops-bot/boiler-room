@@ -44,7 +44,8 @@ export const researcher: AgentDefinition = {
         'How the Researcher captures a product website and writes a verified research result.',
     },
   ],
-  budget: { cap_micro_usd: 10_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
+  // $15 a day, as the founder raised it on Naive: a sync must not set it back.
+  budget: { cap_micro_usd: 15_000_000, max_task_micro_usd: 3_000_000, period: 'day' },
   output_schema: researchOutputJsonSchema,
   structured_output_required: true,
   handoffs: false,
