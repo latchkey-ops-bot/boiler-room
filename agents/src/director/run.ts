@@ -33,7 +33,20 @@ export interface DirectOptions {
   /** Where campaign.json goes. Defaults to the research file's folder. */
   outDir?: string;
   definition?: AgentDefinition;
+  /** Sends the first submission back on purpose, to prove the repair loop on a live session. */
+  drillRepair?: boolean;
 }
+
+/** The issue a repair drill adds to the first submission. */
+export const DRILL_ISSUE: DirectorIssue = {
+  code: 'REPAIR_DRILL',
+  severity: 'error',
+  path: 'campaign',
+  message:
+    'This is a drill of the repair loop: the pipeline sends the first submission back on purpose.',
+  fix: 'Change nothing. Call submit_output again with the same whole {campaign, handoff}.',
+  owner: 'director',
+};
 
 const time = () => new Date().toISOString().slice(11, 19);
 const say = (message: string) => console.log(scrub(`${time()} ${message}`));
@@ -151,6 +164,7 @@ export async function direct(options: DirectOptions): Promise<number> {
       },
       check: async (output) => {
         const verdict = await checkSubmission(output, research, options.brief);
+        if (options.drillRepair && verdicts.length === 0) verdict.blocking.push(DRILL_ISSUE);
         verdicts.push(verdict);
         const round = verdicts.length;
         writeFileSync(

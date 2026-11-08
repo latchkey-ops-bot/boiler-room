@@ -17,7 +17,8 @@ const usage = `Usage: pnpm direct <research.json> [--brief <brief.json>] [--orde
   --model          Override the agent's model for this run (a trial; it mints a new agent version).
   --budget-usd     Spend cap for the session. Default from the agent definition.
   --max-repairs    Rounds of issues sent back to the session. Default 3.
-  --out            Folder for the outputs instead of the research file's folder.`;
+  --out            Folder for the outputs instead of the research file's folder.
+  --drill-repair   Send the first submission back on purpose, to prove the repair loop live.`;
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -29,6 +30,7 @@ const { values, positionals } = parseArgs({
     'budget-usd': { type: 'string' },
     'max-repairs': { type: 'string', default: '3' },
     out: { type: 'string' },
+    'drill-repair': { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
 });
@@ -62,5 +64,6 @@ const code = await direct({
   budgetUsd: budget,
   maxRepairs: Math.max(0, Number(values['max-repairs'])),
   outDir: values.out ? path(values.out) : undefined,
+  drillRepair: values['drill-repair'] ?? false,
 });
 process.exit(code);

@@ -62,16 +62,30 @@ export type LoopResult =
 const RESUMABLE = new Set(['end_turn', 'max_iterations', 'awaiting_input']);
 const MAX_CONTINUES = 3;
 
-/** Counts accepted `submit_output` calls, so a new submission can be told from the session's last. */
-export class SubmissionCounter {
+/**
+ * Follows `submit_output` in the event stream: how many calls Naive accepted, and the latest
+ * accepted output. `sessions.get` can still return the previous `structured_output` just after a
+ * turn ends (seen live on a repair round), so the output is read from the events: the
+ * `session.idle` event that ends the turn carries it, and the accepted call's arguments are the
+ * fallback.
+ */
+export class SubmissionTracker {
   count = 0;
+  latest: unknown = undefined;
+  private readonly pending = new Map<string, unknown>();
+
   handle(event: { type: string; data: Record<string, unknown> }): void {
-    if (
-      event.type === 'tool.completed' &&
-      event.data?.name === 'submit_output' &&
-      !event.data.is_error
-    )
+    const data = event.data ?? {};
+    if (event.type === 'tool.started' && data.name === 'submit_output') {
+      this.pending.set(String(data.tool_call_id), data.args);
+    }
+    if (event.type === 'tool.completed' && data.name === 'submit_output' && !data.is_error) {
       this.count += 1;
+      this.latest = this.pending.get(String(data.tool_call_id)) ?? this.latest;
+    }
+    if (event.type === 'session.idle' && this.count > 0 && data.structured_output != null) {
+      this.latest = data.structured_output;
+    }
   }
 }
 
@@ -84,7 +98,7 @@ export class SubmissionCounter {
 export async function runDirectorSession(options: LoopOptions): Promise<LoopResult> {
   const { client } = options;
   const sleep = options.sleep ?? ((ms: number) => new Promise((done) => setTimeout(done, ms)));
-  const counter = new SubmissionCounter();
+  const counter = new SubmissionTracker();
   const rounds: RoundRecord[] = [];
 
   const session = await client.sessions.create({
@@ -127,7 +141,8 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
   for (;;) {
     const state = await settle();
     const consumedMicroUsd = state.consumed_micro_usd;
-    const fresh = counter.count > checked && state.structured_output != null;
+    const output = counter.latest ?? state.structured_output;
+    const fresh = counter.count > checked && output != null;
     if (!fresh) {
       const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
       if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
@@ -149,7 +164,6 @@ export async function runDirectorSession(options: LoopOptions): Promise<LoopResu
       };
     }
     checked = counter.count;
-    const output = state.structured_output;
     const { blocking, other } = await options.check(output);
     rounds.push({ round: rounds.length + 1, output, blocking, other });
     if (blocking.length === 0) {

@@ -10,19 +10,21 @@ const NO_SUBMISSION = Symbol('no submission');
 
 /**
  * A fake Naive client. Each stream is one turn of the agent: it submits the next scripted output,
- * or submits nothing, and goes idle. Like Naive, the session keeps its last structured_output.
+ * or submits nothing, and goes idle. Like Naive, the session keeps its last structured_output, and
+ * the idle event that ends a turn carries it. With `staleGet`, `sessions.get` answers the output
+ * before the latest, as Naive did live on a repair round.
  */
-function fakeClient(turns: unknown[]) {
+function fakeClient(turns: unknown[], { staleGet = false } = {}) {
   let turn = 0;
   let seq = 0;
-  let output: unknown = null;
+  const outputs: unknown[] = [];
   const client = {
     sessions: {
       create: vi.fn(async (_body: Record<string, unknown>) => ({ id: 'ses_director' })),
       get: vi.fn(async (_id: string) => ({
         status: 'idle',
         stop_reason: 'end_turn',
-        structured_output: output,
+        structured_output: outputs.at(staleGet && outputs.length > 1 ? -2 : -1) ?? null,
         consumed_micro_usd: 100_000 * turn,
       })),
       send: vi.fn(async (_id: string, _body: { message: string; queue?: boolean }) => ({
@@ -35,14 +37,19 @@ function fakeClient(turns: unknown[]) {
         const next = turns[turn];
         turn += 1;
         if (next !== NO_SUBMISSION && next !== undefined) {
-          output = next;
+          outputs.push(next);
+          const call = { tool_call_id: `call_${turn}`, name: 'submit_output' };
           seq += 1;
-          yield { seq, type: 'tool.started', data: { name: 'submit_output', args: {} } };
+          yield { seq, type: 'tool.started', data: { ...call, args: next } };
           seq += 1;
-          yield { seq, type: 'tool.completed', data: { name: 'submit_output', is_error: false } };
+          yield { seq, type: 'tool.completed', data: { ...call, is_error: false } };
         }
         seq += 1;
-        yield { seq, type: 'session.idle', data: { stop_reason: 'end_turn' } };
+        yield {
+          seq,
+          type: 'session.idle',
+          data: { stop_reason: 'end_turn', structured_output: outputs.at(-1) ?? null },
+        };
       })(),
     ),
   };
@@ -133,6 +140,45 @@ describe('runDirectorSession', () => {
       expect.stringContaining('repair round 1 of 3'),
       CONTINUE_MESSAGE,
     ]);
+  });
+
+  it('checks the submission the events carry when sessions.get still answers the last one', async () => {
+    const client = fakeClient(
+      [
+        { good: false, n: 1 },
+        { good: true, n: 2 },
+      ],
+      { staleGet: true },
+    );
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: true, output: { good: true, n: 2 } });
+    expect(result.rounds.map((round) => round.output)).toEqual([
+      { good: false, n: 1 },
+      { good: true, n: 2 },
+    ]);
+  });
+
+  it('ignores a submit_output call that Naive refused against the schema', async () => {
+    const client = fakeClient([{ good: true }]);
+    const stream = client.stream.getMockImplementation();
+    client.stream.mockImplementationOnce((id, query) =>
+      (async function* () {
+        yield {
+          seq: 1,
+          type: 'tool.started',
+          data: { tool_call_id: 'bad', name: 'submit_output', args: { good: 'wrong' } },
+        };
+        yield {
+          seq: 2,
+          type: 'tool.completed',
+          data: { tool_call_id: 'bad', name: 'submit_output', is_error: true },
+        };
+        for await (const event of stream?.(id, query) ?? []) yield event;
+      })(),
+    );
+    const result = await run(client);
+    expect(result).toMatchObject({ ok: true, output: { good: true } });
+    expect(result.rounds).toHaveLength(1);
   });
 
   it('fails when the agent stops submitting', async () => {
