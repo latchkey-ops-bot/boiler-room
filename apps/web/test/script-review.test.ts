@@ -64,6 +64,7 @@ function detail(
     events: extra.events ?? [event('director', 'decision', 0), event('validator', 'passed', 1)],
     approvals: extra.approvals ?? [],
     deliverables: [],
+    revisions: [],
   };
 }
 
