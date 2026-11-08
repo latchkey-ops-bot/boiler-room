@@ -1,3 +1,4 @@
+import { displayHost } from './film.ts';
 import { MAX_URL_LENGTH, parseFilmUrl } from './film-url.ts';
 
 /**
@@ -29,4 +30,24 @@ export function startTarget(input: string | null | undefined): StartTarget {
 export function prefillProblem(input: string | null | undefined): string | null {
   const target = startTarget(input);
   return target.ok ? null : target.reason;
+}
+
+/**
+ * The site a visitor typed on the landing page, carried through sign-up in Clerk's `redirect_url`
+ * (`/films/new?url=nova.com`), so the sign-up page can show it. Null when there is none, or when
+ * it is not a site a film can be made from.
+ */
+export function carriedSite(redirectUrl: string | null | undefined): string | null {
+  if (!redirectUrl) return null;
+  let target: URL;
+  try {
+    target = new URL(redirectUrl, 'https://boilerroom.invalid');
+  } catch {
+    return null;
+  }
+  if (target.pathname !== NEW_FILM_PATH) return null;
+  const typed = target.searchParams.get('url');
+  if (!typed) return null;
+  const parsed = parseFilmUrl(typed);
+  return parsed.ok ? displayHost(parsed.url) : null;
 }

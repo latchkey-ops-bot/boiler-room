@@ -3,6 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { type FormEvent, useState } from 'react';
 import { sendJson } from '../lib/api-client.ts';
+import { MARKETING_CTA } from '../lib/cta.ts';
 import type { FilmDetail } from '../server/api/films.ts';
 import { Icon } from './icon.tsx';
 
@@ -44,7 +45,7 @@ export function NewFilmForm({ initialUrl }: { initialUrl: string }) {
           required
         />
         <button className="btn btn-primary" type="submit" disabled={busy || url.trim() === ''}>
-          {busy ? 'Starting…' : 'Fire it up'} <Icon name="arrow-right" />
+          {busy ? 'Starting…' : MARKETING_CTA} <Icon name="arrow-right" />
         </button>
       </div>
       {error ? (

@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { ApiContext } from '../src/server/api/context.ts';
 import { ApiError } from '../src/server/api/errors.ts';
-import { createFilm, getFilmDetail, reviewScript } from '../src/server/api/films.ts';
+import {
+  createFilm,
+  type FilmDetail,
+  getFilmDetail,
+  MAX_REVISIONS_PER_FILM,
+  reviewScript,
+} from '../src/server/api/films.ts';
 import { PipelineConflictError } from '../src/server/pipeline/index.ts';
 import { buildReviewModel } from '../src/server/script-review.ts';
 import { contextFor, startWorkerEnv, testClock } from './helpers.ts';
@@ -40,6 +46,15 @@ async function filmAwaitingApproval() {
   return { ctx, clock, film, approveScript, sendBackScript };
 }
 
+/** The review model as the script page builds it. */
+function review(detail: FilmDetail) {
+  if (!detail.campaign) throw new Error('expected a campaign');
+  return buildReviewModel(
+    { ...detail, campaign: detail.campaign },
+    { maxRevisions: MAX_REVISIONS_PER_FILM },
+  );
+}
+
 function runIdOf(ctx: ApiContext, filmId: string) {
   return ctx.db.query.films
     .findFirst({ where: (films, { eq }) => eq(films.id, filmId) })
@@ -52,10 +67,11 @@ describe('script review decisions', () => {
     let detail = await getFilmDetail(ctx, film.id);
     expect(detail.campaign).not.toBeNull();
     if (!detail.campaign) return;
-    expect(buildReviewModel({ ...detail, campaign: detail.campaign }).state).toBe('waiting');
+    expect(review(detail).state).toBe('waiting');
 
     detail = await reviewScript(ctx, film.id, {
       decision: 'approve',
+      confirmedClaimIds: ['pricing'],
       version: 1,
       hookId: 'open-question',
       ctaId: 'book-demo',
@@ -68,6 +84,7 @@ describe('script review decisions', () => {
       hookId: 'open-question',
       ctaId: 'book-demo',
       formats: ['9:16'],
+      confirmedClaimIds: ['pricing'],
     });
     expect(sendBackScript).not.toHaveBeenCalled();
 
@@ -78,12 +95,17 @@ describe('script review decisions', () => {
       message: 'Approved version 1.',
     });
     if (!detail.campaign) return;
-    const model = buildReviewModel({ ...detail, campaign: detail.campaign });
+    const model = review(detail);
     expect(model.state).toBe('approved');
     expect(model.approved).toEqual({
       hookId: 'open-question',
       ctaId: 'book-demo',
       formats: ['9:16'],
+      confirmedClaimIds: ['pricing'],
+    });
+    expect(model.claims.find((claim) => claim.id === 'pricing')).toMatchObject({
+      checked: false,
+      confirmedByYou: true,
     });
 
     // And it delivers exactly what was chosen.
@@ -103,16 +125,15 @@ describe('script review decisions', () => {
     expect(sendBackScript).toHaveBeenCalledWith(await runIdOf(ctx, film.id), { version: 1, note });
     expect(approveScript).not.toHaveBeenCalled();
     if (!detail.campaign) throw new Error('expected a campaign');
-    let model = buildReviewModel({ ...detail, campaign: detail.campaign });
+    let model = review(detail);
     expect(model.state).toBe('rewriting');
     expect(model.rewriteNote).toBe(note);
-    expect(model.validatorPassed).toBe(false);
 
     clock.advance(9);
     detail = await getFilmDetail(ctx, film.id);
     if (!detail.campaign) throw new Error('expected a campaign');
-    model = buildReviewModel({ ...detail, campaign: detail.campaign });
-    expect(model).toMatchObject({ state: 'waiting', validatorPassed: true, rewriteNote: null });
+    model = review(detail);
+    expect(model).toMatchObject({ state: 'waiting', rewriteNote: null });
     expect(model.film.scriptVersion).toBe(2);
   });
 
@@ -123,6 +144,7 @@ describe('script review decisions', () => {
     await expect(
       reviewScript(ctx, film.id, {
         decision: 'approve',
+        confirmedClaimIds: ['pricing'],
         version: 1,
         hookId: null,
         ctaId: 'start-free',
@@ -139,6 +161,7 @@ describe('script review decisions', () => {
     const { ctx, film, approveScript } = await filmAwaitingApproval();
     const error = await reviewScript(ctx, film.id, {
       decision: 'approve',
+      confirmedClaimIds: ['pricing'],
       version: 1,
       hookId: 'open-question',
       ctaId: null,
@@ -147,5 +170,38 @@ describe('script review decisions', () => {
     expect(error).toBeInstanceOf(ApiError);
     expect(error).toMatchObject({ status: 400, code: 'invalid_choice' });
     expect(approveScript).not.toHaveBeenCalled();
+  });
+
+  it('refuses to approve while a number in the film is unconfirmed, before telling the pipeline', async () => {
+    const { ctx, film, approveScript } = await filmAwaitingApproval();
+    const error = await reviewScript(ctx, film.id, {
+      decision: 'approve',
+      version: 1,
+      hookId: null,
+      ctaId: 'start-free',
+      formats: ['16:9'],
+      confirmedClaimIds: [],
+    }).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({
+      status: 409,
+      code: 'unconfirmed_claims',
+      issues: [{ path: 'confirmedClaimIds', message: 'Plans start at $29 per seat' }],
+    });
+    expect(approveScript).not.toHaveBeenCalled();
+    expect((await getFilmDetail(ctx, film.id)).approvals).toEqual([]);
+  });
+
+  it('refuses to confirm a claim that is not in the script', async () => {
+    const { ctx, film } = await filmAwaitingApproval();
+    const error = await reviewScript(ctx, film.id, {
+      decision: 'approve',
+      version: 1,
+      hookId: null,
+      ctaId: 'start-free',
+      formats: ['16:9'],
+      confirmedClaimIds: ['pricing', 'made-up'],
+    }).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ status: 400, code: 'invalid_choice' });
   });
 });

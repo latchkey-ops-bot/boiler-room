@@ -1,7 +1,7 @@
 import { ClerkProvider } from '@clerk/nextjs';
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import { clerkAppearance } from '../lib/clerk-appearance.ts';
+import { clerkAppearance, clerkLocalization } from '../lib/clerk-appearance.ts';
 import { fontVariables } from './fonts.ts';
 import '../styles/tokens.css';
 import '../styles/components.css';
@@ -19,7 +19,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className={fontVariables}>
       <body>
-        <ClerkProvider appearance={clerkAppearance}>{children}</ClerkProvider>
+        <ClerkProvider appearance={clerkAppearance} localization={clerkLocalization}>
+          {children}
+        </ClerkProvider>
       </body>
     </html>
   );

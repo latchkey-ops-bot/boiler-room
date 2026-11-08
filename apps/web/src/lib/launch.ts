@@ -1,9 +1,8 @@
 /**
- * The launch plan: the day a founder launches and where they will post the film. The founder
- * enters both on the film page; nothing here is guessed. Kept free of zod and of server code,
- * because the film page uses it in the browser.
+ * The launch plan: the day a founder launches and where they will post the film, set through
+ * `PUT /api/films/:id/launch`; nothing here is guessed. The film page shows the day once it is set.
+ * Kept free of zod and of server code, because the film page uses it in the browser.
  */
-import type { Campaign } from '@boiler-room/schema';
 
 /** The channels in DESIGN.md, in the order the landing page lists them. */
 export const CHANNELS = ['x', 'linkedin', 'product_hunt', 'youtube', 'reels', 'tiktok'] as const;
@@ -73,25 +72,6 @@ export function formatLaunchDate(date: string, short = false): string {
     day: 'numeric',
     month: short ? 'short' : 'long',
   });
-}
-
-/** The countdown's words for `days` to launch. */
-export function countdownWords(days: number): { score: string; words: string } {
-  if (days > 1) return { score: String(days), words: 'days to launch' };
-  if (days === 1) return { score: '1', words: 'day to launch' };
-  if (days === 0) return { score: '0', words: 'Launch day is today' };
-  const ago = -days;
-  return { score: String(ago), words: ago === 1 ? 'day since launch' : 'days since launch' };
-}
-
-/**
- * The most films one approval can make: every shape, with the main opening or any alternate one,
- * and any call to action. The customer picks which of them to render.
- */
-export function videosAtMost(campaign: Campaign): number {
-  const openings = 1 + campaign.variants.hooks.length;
-  const ctas = Math.max(1, campaign.variants.ctas.length);
-  return campaign.variants.formats.length * openings * ctas;
 }
 
 function utcDay(date: string): number {

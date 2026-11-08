@@ -96,35 +96,3 @@ export function fileSize(bytes: number | null): string | null {
 export function revisionsLeft(revisions: RevisionView[], max: number): number {
   return Math.max(0, max - revisions.length);
 }
-
-/** A scene of the preview: what it says, and when. */
-export interface PreviewScene {
-  id: string;
-  name: string;
-  start: number;
-  end: number;
-  headline: string | null;
-  lines: string[];
-}
-
-/** The film the founder approved, as preview scenes: the chosen opening first, then the rest. */
-export function previewScenes(campaign: Campaign, hookId: string | null): PreviewScene[] {
-  const hook = hookId ? campaign.variants.hooks.find((item) => item.id === hookId) : undefined;
-  const scenes = hook ? [hook, ...campaign.scenes.slice(1)] : campaign.scenes;
-  return scenes.map((scene) => ({
-    id: scene.id,
-    name: sceneName(scene.id),
-    start: scene.start,
-    end: scene.end,
-    headline: scene.text.find((item) => item.role === 'headline')?.value ?? null,
-    lines: scene.text
-      .filter((item) => item.role !== 'headline' && item.role !== 'cta')
-      .map((item) => item.value),
-  }));
-}
-
-/** `open-question` → "Open question". */
-function sceneName(id: string): string {
-  const words = id.replace(/[-_]+/g, ' ').trim();
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}

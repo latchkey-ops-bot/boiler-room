@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { stationState, stationWord, trackerSummary } from '../src/components/pipeline-tracker.tsx';
+import { eventBadge, LOG_PREVIEW, visibleEntries } from '../src/components/decisions-feed.tsx';
+import { progressLine, stopState, waitLine } from '../src/components/film-progress.tsx';
 import { splitClaims } from '../src/lib/claims.ts';
-import { STAGES } from '../src/lib/film.ts';
+import { STAGE_LABELS, STAGES, STOP_OF, STOPS } from '../src/lib/film.ts';
 import {
   filmPollDelay,
   filmsPollDelay,
@@ -10,6 +11,7 @@ import {
   startPolling,
 } from '../src/lib/poll.ts';
 import { relativeTime } from '../src/lib/relative-time.ts';
+import type { FilmEventView } from '../src/server/api/films.ts';
 import { SAMPLE_CAMPAIGN } from '../src/server/pipeline/simulated.ts';
 
 /** Timers the test runs by hand, and a page that can be hidden. */
@@ -200,34 +202,89 @@ describe('live updates', () => {
   });
 });
 
-describe('pipeline tracker', () => {
-  it('reads the stations as the dashboard sample does at step 4', () => {
-    const words = STAGES.map((station) =>
-      stationWord(station, stationState(station, 'approval', 'needs_you')),
-    );
-    expect(words).toEqual([
-      'Done',
-      'Done',
-      'Passed',
-      'Waiting',
-      'Queued',
-      'Queued',
-      'Queued',
-      'Queued',
-      'Queued',
-      'Queued',
+describe('progress on four stops', () => {
+  it('maps the ten stages onto the landing page’s four stops', () => {
+    expect(STAGES.map((stage) => STOP_OF[stage])).toEqual([
+      'research',
+      'script',
+      'script',
+      'approve',
+      'make',
+      'make',
+      'make',
+      'make',
+      'make',
+      'make',
     ]);
-    expect(trackerSummary('approval', 'needs_you')).toBe('Step 4 of 10 · paused for you');
+    // "Review" is the founder's word for the script. The crew's last check is Quality check.
+    expect(STAGE_LABELS.review).toBe('Quality check');
   });
 
-  it('says what the crew is doing, and marks every station done once delivered', () => {
-    expect(trackerSummary('render', 'working')).toBe('Step 8 of 10 · rendering');
-    expect(stationWord('approval', stationState('approval', 'render', 'working'))).toBe('Approved');
-    expect(STAGES.every((station) => stationState(station, 'delivery', 'done') === 'done')).toBe(
-      true,
+  it('says where the film is in one line', () => {
+    expect(progressLine('approval', 'needs_you')).toBe(
+      'Step 3 of 4 · You approve: waiting for you',
     );
-    expect(trackerSummary('delivery', 'done')).toBe('Delivered');
-    expect(stationWord('script', stationState('script', 'script', 'failed'))).toBe('Stopped');
+    expect(progressLine('checks', 'working')).toBe('Step 2 of 4 · Script');
+    expect(progressLine('render', 'working')).toBe('Step 4 of 4 · Animate and deliver');
+    expect(progressLine('research', 'queued')).toBe('Step 1 of 4 · Research: next in line');
+    expect(progressLine('delivery', 'done')).toBe('All 4 steps done · Delivered');
+    expect(progressLine('script', 'failed')).toBe('Step 2 of 4 · Script: stopped');
+  });
+
+  it('marks each stop done, now, waiting for you or still to come', () => {
+    expect(STOPS.map((stop) => stopState(stop, 'approval', 'needs_you'))).toEqual([
+      'done',
+      'done',
+      'needs',
+      'next',
+    ]);
+    expect(STOPS.map((stop) => stopState(stop, 'motion', 'working'))).toEqual([
+      'done',
+      'done',
+      'done',
+      'now',
+    ]);
+    expect(STOPS.every((stop) => stopState(stop, 'delivery', 'done') === 'done')).toBe(true);
+  });
+
+  it('gives a wait only where it is known: the simulator’s fixed clock', () => {
+    expect(waitLine({ simulated: true, stage: 'research' })).toBe(
+      'A simulated film reaches its script about 30 seconds after it starts.',
+    );
+    expect(waitLine({ simulated: true, stage: 'render' })).toBe(
+      'A simulated film is delivered about 40 seconds after you approve.',
+    );
+    expect(waitLine({ simulated: false, stage: 'research' })).toBeNull();
+  });
+});
+
+describe('what the crew did', () => {
+  const entry = (seq: number, agent: FilmEventView['agent'], kind: FilmEventView['kind']) =>
+    ({
+      id: `e${seq}`,
+      seq,
+      at: '2026-11-07T12:00:00.000Z',
+      agent,
+      kind,
+      stage: 'script',
+      status: 'working',
+      message: `event ${seq}`,
+    }) satisfies FilmEventView;
+
+  it('shows the newest first, and only the latest three until asked', () => {
+    const events = [0, 1, 2, 3, 4].map((seq) => entry(seq, 'director', 'decision'));
+    expect(visibleEntries(events, false).map((event) => event.seq)).toEqual([4, 3, 2]);
+    expect(LOG_PREVIEW).toBe(3);
+    expect(visibleEntries(events, true).map((event) => event.seq)).toEqual([4, 3, 2, 1, 0]);
+  });
+
+  it('words a number the Validator caught as the system working, not as a failure', () => {
+    expect(eventBadge(entry(1, 'validator', 'sent_back'))).toEqual(['badge badge-plain', 'Caught']);
+    expect(eventBadge(entry(2, 'customer', 'sent_back'))).toEqual([
+      'badge badge-plain',
+      'Changes asked',
+    ]);
+    expect(eventBadge(entry(3, 'account_manager', 'needs_you'))).toBeNull();
   });
 });
 

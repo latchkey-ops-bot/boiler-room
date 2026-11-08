@@ -1,8 +1,10 @@
 'use client';
 
-import { type CSSProperties, useState } from 'react';
-import { clock, type PreviewScene, SHAPES } from '../lib/delivery.ts';
+import { useEffect, useRef, useState } from 'react';
+import type { BrandLook, BrandSceneData } from '../lib/brand-scene.ts';
+import { clock, SHAPES } from '../lib/delivery.ts';
 import type { Format } from '../lib/film.ts';
+import { BrandStage } from './brand-scene.tsx';
 import { Icon } from './icon.tsx';
 
 /** One shape the player can show: its file, if there is one. */
@@ -13,48 +15,46 @@ export interface PlayerShape {
   downloadUrl: string | null;
 }
 
-/** The customer's brand and script, for a film that has no file to play. */
+/** The customer's brand and the approved script, for a film that has no file to play. */
 export interface PlayerPreview {
-  brand: {
-    name: string;
-    background: string;
-    foreground: string;
-    primary: string;
-    muted: string;
-    radius: number;
-    displayFont: string;
-    bodyFont: string;
-  };
-  scenes: PreviewScene[];
-  /** The call to action the founder chose, shown on the last scene. */
-  cta: string | null;
+  look: BrandLook;
+  scenes: BrandSceneData[];
+}
+
+/** A file the founder can take away. */
+export interface PlayerFile {
+  fileName: string;
+  downloadUrl: string;
 }
 
 const ASPECT: Record<Format, string> = { '16:9': '16 / 9', '9:16': '9 / 16', '1:1': '1 / 1' };
 
 /**
- * The finished film, large. A real film plays from its file. A simulated film has no file, so the
- * player shows the approved script scene by scene in the customer's brand, and says so on screen.
- * The download under it is the screen's one primary action, unless something else needs the
- * founder first.
+ * The finished film, large, and the screen's one primary action: download all of it. A real film
+ * plays from its file with the browser's own controls. A simulated film has no file, so the player
+ * plays the approved script scene by scene in the customer's brand, through the same renderer the
+ * script review used, with play and pause and the time.
  */
 export function FilmPlayer({
   shapes,
   preview,
   durationSeconds,
-  simulated,
+  files,
   primary = true,
 }: {
   shapes: PlayerShape[];
   preview: PlayerPreview | null;
   durationSeconds: number | null;
-  simulated: boolean;
+  /** Every file of the current cut, for "Download all". */
+  files: PlayerFile[];
   primary?: boolean;
 }) {
   const [format, setFormat] = useState<Format | undefined>(shapes[0]?.format);
-  const [sceneIndex, setSceneIndex] = useState(0);
   const shape = shapes.find((item) => item.format === format) ?? shapes[0];
+  const length = durationSeconds ?? preview?.scenes.at(-1)?.end ?? 0;
+  const playback = usePlayback(length);
   if (!shape) return null;
+  const sceneIndex = preview ? sceneAt(preview.scenes, playback.time) : 0;
   const scene = preview?.scenes[sceneIndex];
 
   return (
@@ -72,21 +72,57 @@ export function FilmPlayer({
             preload="metadata"
           />
         ) : preview && scene ? (
-          <Stage
-            preview={preview}
+          <BrandStage
+            look={preview.look}
             scene={scene}
-            index={sceneIndex}
             format={shape.format}
-            simulated={simulated}
+            tag={`Preview of your approved script · ${preview.look.name}'s brand`}
           />
         ) : (
-          <div className="shape stage stage-none" style={{ aspectRatio: ASPECT[shape.format] }}>
+          <div className="shape stage-none" style={{ aspectRatio: ASPECT[shape.format] }}>
             <p>No preview for this video.</p>
           </div>
         )}
       </div>
 
       <div className="controls">
+        {!shape.playUrl && preview && scene ? (
+          <>
+            <button
+              className="btn btn-sm play"
+              type="button"
+              aria-label={playback.playing ? 'Pause' : 'Play'}
+              aria-pressed={playback.playing}
+              onClick={playback.toggle}
+            >
+              {playback.playing ? <PauseMark /> : <Icon name="play" />}
+              {playback.playing ? 'Pause' : 'Play'}
+            </button>
+            <span className="time" aria-live="off">
+              {clock(playback.time)}
+              <span className="muted"> / {clock(length)}</span>
+            </span>
+            {preview.scenes.length > 1 ? (
+              <fieldset className="seg">
+                <legend className="sr-only">Scene</legend>
+                {preview.scenes.map((item, index) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    aria-pressed={index === sceneIndex}
+                    aria-label={`Scene ${index + 1}: ${item.name}`}
+                    onClick={() => playback.seek(item.start)}
+                  >
+                    {index + 1}
+                  </button>
+                ))}
+              </fieldset>
+            ) : null}
+          </>
+        ) : durationSeconds !== null ? (
+          <span className="time">{clock(durationSeconds)}</span>
+        ) : null}
+
         {shapes.length > 1 ? (
           <fieldset className="seg">
             <legend className="sr-only">Shape</legend>
@@ -106,107 +142,116 @@ export function FilmPlayer({
           <span className="badge badge-plain">{shape.format}</span>
         )}
 
-        {!shape.playUrl && preview && preview.scenes.length > 1 ? (
-          <fieldset className="seg">
-            <legend className="sr-only">Scene</legend>
-            {preview.scenes.map((item, index) => (
-              <button
-                key={item.id}
-                type="button"
-                aria-pressed={index === sceneIndex}
-                aria-label={`Scene ${index + 1}: ${item.name}`}
-                onClick={() => setSceneIndex(index)}
-              >
-                {index + 1}
-              </button>
-            ))}
-          </fieldset>
-        ) : null}
-
-        <span className="time">
-          {scene && !shape.playUrl ? (
-            <>
-              {clock(scene.start)}
-              <span className="muted"> / {clock(durationSeconds ?? scene.end)}</span>
-            </>
-          ) : durationSeconds !== null ? (
-            clock(durationSeconds)
-          ) : null}
-        </span>
-
-        {shape.downloadUrl ? (
-          <a
-            className={primary ? 'btn btn-primary download' : 'btn download'}
-            href={shape.downloadUrl}
-            download={shape.fileName}
-          >
-            <Icon name="download" />
-            Download {shape.format}
-          </a>
-        ) : (
-          <button className="btn download" type="button" disabled>
-            <Icon name="download" />
-            {simulated ? 'No file: simulated' : 'No file yet'}
-          </button>
-        )}
+        <DownloadAll files={files} primary={primary} />
       </div>
     </section>
   );
 }
 
-function Stage({
-  preview,
-  scene,
-  index,
-  format,
-  simulated,
-}: {
-  preview: PlayerPreview;
-  scene: PreviewScene;
-  index: number;
-  format: Format;
-  simulated: boolean;
-}) {
-  const { brand } = preview;
-  const last = index === preview.scenes.length - 1;
-  const style = {
-    aspectRatio: ASPECT[format],
-    background: brand.background,
-    color: brand.foreground,
-    '--brand-background': brand.background,
-    '--brand-primary': brand.primary,
-    '--brand-muted': brand.muted,
-    '--brand-radius': `${brand.radius}px`,
-    '--brand-display': `${fontName(brand.displayFont)}, var(--br-font-display)`,
-    '--brand-body': `${fontName(brand.bodyFont)}, var(--br-font-body)`,
-  } as CSSProperties;
-
+/** Every file of the cut, one after another. One file is just "Download". */
+function DownloadAll({ files, primary }: { files: PlayerFile[]; primary: boolean }) {
+  const className = primary ? 'btn btn-primary download' : 'btn download';
+  if (files.length === 0) {
+    return (
+      <button className="btn download" type="button" disabled>
+        <Icon name="download" />
+        No file
+      </button>
+    );
+  }
+  const only = files.length === 1 ? files[0] : undefined;
+  if (only) {
+    return (
+      <a className={className} href={only.downloadUrl} download={only.fileName}>
+        <Icon name="download" />
+        Download
+      </a>
+    );
+  }
   return (
-    <div className={`shape stage stage-${format.replace(':', 'x')}`} style={style}>
-      {/* The stage is the size container; everything on it is sized from it. */}
-      <div className="stage-in">
-        <span className="tag">
-          {simulated ? 'Simulated preview' : 'Preview'} · {brand.name}'s brand
-        </span>
-        <div className="copy">
-          {scene.headline ? <p className="big">{scene.headline}</p> : null}
-          {scene.lines.map((line) => (
-            <p key={line} className="small">
-              {line}
-            </p>
-          ))}
-          {last && preview.cta ? <span className="cta">{preview.cta}</span> : null}
-        </div>
-        <span className="sign">{brand.name}</span>
-        <span className="where">
-          Scene {index + 1} of {preview.scenes.length} · {scene.name}
-        </span>
-      </div>
-    </div>
+    <button
+      className={className}
+      type="button"
+      onClick={() => {
+        // One link per file. The browser may ask once whether this site can download several.
+        for (const file of files) {
+          const link = document.createElement('a');
+          link.href = file.downloadUrl;
+          link.download = file.fileName;
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+        }
+      }}
+    >
+      <Icon name="download" />
+      Download all {files.length}
+    </button>
   );
 }
 
-/** A font family name from the campaign, quoted for CSS. */
-function fontName(family: string): string {
-  return `"${family.replace(/["\\;{}]/g, '')}"`;
+/** Two pixel bars, the pause sign, drawn like the design's icons. */
+function PauseMark() {
+  return (
+    <i className="icon">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 12 12"
+        shapeRendering="crispEdges"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <path fill="currentColor" d="M3 2h2v8H3zM7 2h2v8H7z" />
+      </svg>
+    </i>
+  );
+}
+
+/** The scene showing at `time`: the last one that has started. */
+export function sceneAt(scenes: BrandSceneData[], time: number): number {
+  let index = 0;
+  scenes.forEach((scene, at) => {
+    if (scene.start <= time) index = at;
+  });
+  return index;
+}
+
+/**
+ * Plays a preview through its length. The time comes from the animation frame's own clock, so a
+ * paused tab or a slow frame never drifts the scenes; at the end it stops and rewinds.
+ */
+function usePlayback(length: number) {
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const origin = useRef(0);
+  const timeRef = useRef(0);
+  timeRef.current = time;
+
+  useEffect(() => {
+    if (!playing) return;
+    let frame = 0;
+    origin.current = performance.now() - timeRef.current * 1000;
+    const step = (now: number) => {
+      const next = (now - origin.current) / 1000;
+      if (next >= length) {
+        setTime(0);
+        setPlaying(false);
+        return;
+      }
+      setTime(next);
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [playing, length]);
+
+  return {
+    playing,
+    time,
+    toggle: () => setPlaying((current) => !current),
+    seek: (seconds: number) => {
+      setPlaying(false);
+      setTime(Math.max(0, Math.min(seconds, length)));
+    },
+  };
 }

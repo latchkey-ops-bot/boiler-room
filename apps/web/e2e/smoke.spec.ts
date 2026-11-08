@@ -6,20 +6,25 @@ test('the landing page sells one thing, with one field', async ({ page }) => {
     'Give us a URL. Get your launch video.',
   );
   await expect(page.getByLabel("Your product's URL").first()).toBeVisible();
-  // Every section of the sample, in order, ending on the call to action.
+  // The sections, in order, ending on the call to action. The crew sits inside How it works, and
+  // the showcase appears only once a real film is on it.
   for (const name of [
     'Four stops through the boiler room',
     "Cut for every place you'll post it",
-    'Your launch team, minus the hiring',
     'No made-up stats. Ever.',
-    'Fresh out of the boiler room',
     'Launching soon? Fire up the boiler.',
   ]) {
     await expect(page.getByRole('heading', { name, level: 2 })).toBeVisible();
   }
+  await expect(page.getByRole('heading', { name: 'Your launch team, minus the hiring' })).toHaveCount(0);
+  // The hero's frames say they are the sample customer's, not ours.
+  await expect(page.locator('.hero-figure figcaption')).toContainText("nova.example.com's launch video");
   // The steam trail rises only from the crew at work in the hero, never from an idle Boyle.
   await expect(page.locator('.art .puff')).toHaveCount(2);
   await expect(page.locator('.cta-band .puff, .wall-empty .puff')).toHaveCount(0);
+  // One verb for the one action, and a way back in for a returning founder.
+  await expect(page.getByRole('button', { name: 'Get my video' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Log in' }).first()).toBeVisible();
   // The marketing site draws its pixel at 3px.
   const pixel = await page
     .locator('.surface-marketing')
@@ -35,18 +40,20 @@ test('the landing page sells one thing, with one field', async ({ page }) => {
 test('the URL field sends a new founder to sign up, then on to the new video', async ({ page }) => {
   await page.goto('/');
   await page.getByLabel("Your product's URL").first().fill('nova.com');
-  await page.getByRole('button', { name: 'Fire it up' }).first().click();
+  await page.getByRole('button', { name: 'Get my video' }).first().click();
   await page.waitForURL(/\/sign-up/);
   const redirect = new URL(page.url()).searchParams.get('redirect_url') ?? '';
   expect(redirect).toContain('/films/new?url=nova.com');
   await expect(page.getByRole('heading', { name: 'Start your launch video' })).toBeVisible();
+  // The site the founder typed is carried, not dropped.
+  await expect(page.locator('.auth-page .carried')).toHaveText('nova.com');
 });
 
 test('a URL that is not a public website stays on the page, with the reason', async ({ page }) => {
   await page.goto('/');
   const field = page.getByLabel("Your product's URL").first();
   await field.fill('localhost:3000');
-  await page.getByRole('button', { name: 'Fire it up' }).first().click();
+  await page.getByRole('button', { name: 'Get my video' }).first().click();
   await expect(page.getByText('Use the address without a port number.')).toBeVisible();
   await expect(field).toHaveAttribute('aria-invalid', 'true');
   expect(new URL(page.url()).pathname).toBe('/');

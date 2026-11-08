@@ -1,15 +1,33 @@
 import type { Metadata } from 'next';
 import { Icon, type IconName } from '../../../../components/icon.tsx';
 import { NewFilmForm } from '../../../../components/new-film-form.tsx';
+import { STOP_LABELS, type Stop } from '../../../../lib/film.ts';
 import { requireSignedIn } from '../../../../server/next.ts';
 
 export const metadata: Metadata = { title: 'New video' };
 
-const NEXT: { icon: IconName; text: string; you?: boolean }[] = [
-  { icon: 'search', text: 'The Researcher reads your site and copies every claim word for word.' },
-  { icon: 'clapper', text: 'The Director writes a short script from those claims.' },
-  { icon: 'user', text: 'You read it and approve it. Nothing renders until you do.', you: true },
-  { icon: 'mail', text: 'The crew animates it, cuts a file for each channel and sends it over.' },
+/** The same four stops as How it works on the landing page and the film's progress card. */
+const NEXT: { stop: Stop; icon: IconName; text: string }[] = [
+  {
+    stop: 'research',
+    icon: 'search',
+    text: 'The Researcher reads your site and copies every claim.',
+  },
+  {
+    stop: 'script',
+    icon: 'clapper',
+    text: 'The Director writes it; the Validator checks every number.',
+  },
+  {
+    stop: 'approve',
+    icon: 'user',
+    text: 'You read it and approve it. Nothing renders until you do.',
+  },
+  {
+    stop: 'make',
+    icon: 'film',
+    text: 'The crew animates it, cuts a file for each shape, and sends it.',
+  },
 ];
 
 /** One job: paste the website. The landing page's URL field lands here with `?url=`. */
@@ -39,12 +57,17 @@ export default async function NewFilmPage({
           What happens next
         </h2>
         <ol>
-          {NEXT.map((step) => (
-            <li key={step.icon}>
-              <span className={step.you ? 'crew crew-you' : 'crew crew-waiting'}>
+          {NEXT.map((step, index) => (
+            <li key={step.stop}>
+              <span className={step.stop === 'approve' ? 'crew crew-you' : 'crew crew-waiting'}>
                 <Icon name={step.icon} />
               </span>
-              <p>{step.text}</p>
+              <p>
+                <strong>
+                  {index + 1}. {STOP_LABELS[step.stop]}
+                </strong>{' '}
+                {step.text}
+              </p>
             </li>
           ))}
         </ol>

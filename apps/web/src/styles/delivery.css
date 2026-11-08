@@ -85,74 +85,12 @@
   margin-left: auto;
 }
 
-/* The preview of a film with no file, in the customer's brand, never ours. Sizes follow the
-   stage, so a tall film reads as well as a wide one. */
-.delivery-player .stage {
-  position: relative;
-  container-type: size;
-  overflow: hidden;
-  font-family: var(--brand-body);
+/* A film with no file plays its approved script through the shared brand renderer
+   (brand-scene.css), in the customer's brand, never ours. */
+.delivery-player .player .play {
+  min-width: 96px;
 }
-.stage-in {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  align-content: center;
-  padding: 0 9cqw;
-}
-.delivery-player .stage .copy {
-  display: grid;
-  gap: 3cqmin;
-  max-width: 84%;
-}
-.delivery-player .stage .big {
-  font: 800 max(20px, 12.5cqmin) / 1 var(--brand-display);
-  letter-spacing: -0.02em;
-  text-wrap: balance;
-}
-.delivery-player .stage .small {
-  font: 600 max(12px, 4.8cqmin) / 1.35 var(--brand-body);
-  color: var(--brand-muted);
-}
-.delivery-player .stage .cta {
-  justify-self: start;
-  margin-top: 2cqmin;
-  padding: 2.4cqmin 4.4cqmin;
-  border-radius: var(--brand-radius);
-  background: var(--brand-primary);
-  color: var(--brand-background);
-  font: 700 max(12px, 4.4cqmin) / 1 var(--brand-body);
-}
-.delivery-player .stage .sign {
-  position: absolute;
-  left: 9cqw;
-  bottom: 8cqmin;
-  color: var(--brand-primary);
-  font: 800 max(12px, 4.4cqmin) / 1 var(--brand-display);
-}
-/* The simulated label sits on a solid chip, so it reads on any customer's colours. */
-.delivery-player .stage .tag {
-  position: absolute;
-  left: 10px;
-  top: 10px;
-  max-width: calc(100% - 20px);
-  padding: 3px 7px 2px;
-  background: var(--br-ink);
-  color: var(--br-sky-soft);
-  font: 600 10px / 1.4 var(--br-font-label);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.delivery-player .stage .where {
-  position: absolute;
-  right: 10px;
-  bottom: 8px;
-  color: var(--brand-muted);
-  font: 600 10px / 1.4 var(--br-font-label);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-.stage-none {
+.delivery-player .stage-none {
   display: grid;
   place-items: center;
   aspect-ratio: 16 / 9;
@@ -235,6 +173,15 @@
 }
 .showcase-card .toggle {
   align-items: flex-start;
+}
+
+/* Not quite right: the quiet way to ask for changes, under the player */
+.revision {
+  display: grid;
+  gap: var(--br-space-3);
+}
+.revision .card-title {
+  font-size: var(--br-text-h4);
 }
 
 /* ---------- Empty and error states ---------- */

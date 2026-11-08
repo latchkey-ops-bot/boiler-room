@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { LiveFilm } from '../../../../components/film-screen.tsx';
+import { simulatedEnvironment } from '../../../../server/next.ts';
 import { loadFilm } from '../../../../server/pages.ts';
 
 export const metadata: Metadata = { title: 'Video' };
@@ -10,5 +11,5 @@ export default async function FilmPage({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const detail = await loadFilm(id);
   if (!detail) notFound();
-  return <LiveFilm key={detail.film.id} initial={detail} />;
+  return <LiveFilm key={detail.film.id} initial={detail} banner={simulatedEnvironment()} />;
 }

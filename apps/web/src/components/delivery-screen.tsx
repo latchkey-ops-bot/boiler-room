@@ -1,13 +1,12 @@
 import type { Campaign } from '@boiler-room/schema';
 import Link from 'next/link';
+import { brandLook, brandScenes } from '../lib/brand-scene.ts';
 import {
   type Cut,
   clock,
-  ctaName,
   cutsOf,
   deliveryState,
   fileSize,
-  previewScenes,
   revisionsLeft,
   SHAPES,
   variantName,
@@ -15,12 +14,16 @@ import {
 import type { DeliverableView, FilmDetail } from '../server/api/films.ts';
 import { Boyle } from './boyle.tsx';
 import { EmptyState } from './empty-state.tsx';
-import { FilmPlayer, type PlayerPreview, type PlayerShape } from './film-player.tsx';
+import {
+  FilmPlayer,
+  type PlayerFile,
+  type PlayerPreview,
+  type PlayerShape,
+} from './film-player.tsx';
 import { Icon } from './icon.tsx';
 import { LocalTime } from './local-time.tsx';
 import { RevisionForm } from './revision-form.tsx';
 import { ShowcaseToggle } from './showcase-toggle.tsx';
-import { SimulatedNote } from './simulated-note.tsx';
 import { SimulatedBadge, StatusBadge } from './status-badge.tsx';
 
 /**
@@ -31,9 +34,12 @@ import { SimulatedBadge, StatusBadge } from './status-badge.tsx';
 export function DeliveryScreen({
   detail,
   maxRevisions,
+  banner = false,
 }: {
   detail: FilmDetail;
   maxRevisions: number;
+  /** The app's simulated banner is showing: then it is the screen's one simulated label. */
+  banner?: boolean;
 }) {
   const { film, campaign } = detail;
   const cuts = cutsOf(detail.deliverables);
@@ -55,7 +61,7 @@ export function DeliveryScreen({
         <div className="row">
           <h1>{state === 'delivered' ? 'Your video is ready' : 'Your video'}</h1>
           <StatusBadge status={film.status} />
-          {film.simulated ? <SimulatedBadge /> : null}
+          {film.simulated && !banner ? <SimulatedBadge /> : null}
         </div>
         <div className="meta">
           <span>
@@ -82,8 +88,6 @@ export function DeliveryScreen({
         </div>
       </div>
 
-      {film.simulated ? <SimulatedNote /> : null}
-
       {state === 'failed' ? <Failed url={film.url} /> : null}
       {state === 'waiting' ? (
         <Waiting filmId={film.id} needsYou={film.status === 'needs_you'} />
@@ -106,7 +110,7 @@ export function DeliveryScreen({
               durationSeconds={
                 current.files[0]?.durationSeconds ?? campaign?.durationSeconds ?? null
               }
-              simulated={film.simulated}
+              files={downloads(current)}
               primary={!(state === 'revising' && film.status === 'needs_you')}
             />
           </div>
@@ -128,7 +132,12 @@ export function DeliveryScreen({
           {state === 'delivered' ? (
             <div className="delivery-change">
               {left > 0 ? (
-                <RevisionForm filmId={film.id} version={film.scriptVersion} left={left} />
+                <RevisionForm
+                  filmId={film.id}
+                  version={film.scriptVersion}
+                  left={left}
+                  max={maxRevisions}
+                />
               ) : (
                 <p className="hint">
                   This video has had {maxRevisions} revisions, the most one video can have. For a
@@ -235,11 +244,7 @@ function FileRow({
           <Icon name="download" />
           Download
         </a>
-      ) : (
-        <span className="badge badge-plain" title="A simulated video has no file">
-          No file
-        </span>
-      )}
+      ) : null}
     </li>
   );
 }
@@ -365,19 +370,15 @@ function playerShapes(cut: Cut): PlayerShape[] {
 
 function playerPreview(campaign: Campaign, cut: Cut): PlayerPreview {
   const first = cut.files[0];
-  const { brand } = campaign;
   return {
-    brand: {
-      name: brand.name,
-      background: brand.colors.background,
-      foreground: brand.colors.foreground,
-      primary: brand.colors.primary,
-      muted: brand.colors.muted ?? brand.colors.foreground,
-      radius: brand.radius ?? 0,
-      displayFont: brand.fonts.display.family,
-      bodyFont: brand.fonts.body.family,
-    },
-    scenes: previewScenes(campaign, first?.hookId ?? null),
-    cta: ctaName(first?.ctaId ?? null, campaign),
+    look: brandLook(campaign),
+    scenes: brandScenes(campaign, { hookId: first?.hookId ?? null, ctaId: first?.ctaId ?? null }),
   };
+}
+
+/** The cut's files that exist, for "Download all". A simulated cut has none. */
+function downloads(cut: Cut): PlayerFile[] {
+  return cut.files.flatMap((file) =>
+    file.downloadUrl ? [{ fileName: file.fileName, downloadUrl: file.downloadUrl }] : [],
+  );
 }

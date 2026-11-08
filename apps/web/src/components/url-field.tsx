@@ -1,6 +1,7 @@
 'use client';
 
 import { type FormEvent, useId, useState } from 'react';
+import { MARKETING_CTA } from '../lib/cta.ts';
 import { parseFilmUrl } from '../lib/film-url.ts';
 import { Icon } from './icon.tsx';
 
@@ -12,7 +13,7 @@ import { Icon } from './icon.tsx';
  */
 export function UrlField({
   steam = false,
-  label = 'Fire it up',
+  label = MARKETING_CTA,
   initialUrl = '',
   initialProblem = null,
 }: {

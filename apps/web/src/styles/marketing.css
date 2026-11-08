@@ -4,7 +4,6 @@
 
 /* Grids that are lists: no bullets and no indent */
 .surface-marketing .steps,
-.surface-marketing .crew-grid,
 .surface-marketing .wall {
   margin: 0;
   padding: 0;
@@ -44,16 +43,13 @@
   gap: var(--br-space-3);
   align-content: end;
 }
+/* Each frame holds the same sample scene, laid out for its shape by the shared brand renderer. */
 .format .frame {
   display: grid;
-  place-items: center;
-  background: var(--br-sky-soft);
-  color: var(--br-deep);
+  overflow: hidden;
+  background: var(--br-ink);
+  --frame: var(--br-ink);
   --drop: var(--br-sky);
-}
-.format .frame .icon {
-  width: 36px;
-  height: 36px;
 }
 .format-wide {
   width: min(376px, 100%);
@@ -63,7 +59,7 @@
   aspect-ratio: 16 / 9;
 }
 .format-tall .frame {
-  width: 120px;
+  width: 140px;
   aspect-ratio: 9 / 16;
 }
 .format-square .frame {
@@ -87,9 +83,8 @@
   color: var(--br-muted);
 }
 .formats-note {
-  max-width: 40em;
-  margin-top: var(--br-space-8);
-  font-size: 18px;
+  margin-top: var(--br-space-6);
+  color: var(--br-muted);
 }
 
 /* ---------- Headings one level under their section's h2, at the sample's sizes ---------- */

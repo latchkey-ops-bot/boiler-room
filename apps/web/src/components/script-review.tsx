@@ -2,15 +2,7 @@
 
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  type CSSProperties,
-  type FormEvent,
-  type KeyboardEvent,
-  type ReactNode,
-  type Ref,
-  useRef,
-  useState,
-} from 'react';
+import { type FormEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { sendJson } from '../lib/api-client.ts';
 import type { Format } from '../lib/film.ts';
 import type {
@@ -18,27 +10,26 @@ import type {
   ReviewModel,
   ReviewScene,
   ReviewState,
-  ReviewText,
+  UnconfirmedUse,
 } from '../server/script-review.ts';
+import { BrandStage } from './brand-scene.tsx';
+import { ASK_FOR_CHANGES, ChangesDialog } from './changes-dialog.tsx';
 import { ClaimText } from './claim-text.tsx';
 import { Icon } from './icon.tsx';
-import { SimulatedNote } from './simulated-note.tsx';
 import { SimulatedBadge } from './status-badge.tsx';
 
 const SHAPE_NAMES: Record<Format, string> = { '16:9': 'Wide', '9:16': 'Tall', '1:1': 'Square' };
-const SHAPE_CLASS: Record<Format, string> = { '16:9': 'wide', '9:16': 'tall', '1:1': 'square' };
-const NUMBER = /(\$?\d[\d,.]*(?:%|x\b)?)/g;
-
-type Tab = 'scene' | 'claims' | 'json';
-const TABS: Tab[] = ['scene', 'claims', 'json'];
 
 /**
- * The one step a customer acts on: read the script scene by scene, check the source of every
- * number, then approve it or send it back with a note. Built from the script review sample in
- * boiler-room-design. Approve is the one primary action; its choices (opening, call to action and
- * shapes) are confirmed in a dialog, so the screen itself stays about reading.
+ * The one step a customer acts on. The whole script reads top to bottom, scene by scene, with the
+ * source of every number under it; the preview beside it shows any scene in the customer's brand.
+ * Then one decision: approve, or ask for changes. Approve's choices (opening, call to action and
+ * shapes) are the ones shown in the script, confirmed in a dialog.
+ *
+ * `banner` is true when the app's simulated banner is showing, which is then the screen's one
+ * simulated label.
  */
-export function ScriptReview({ model }: { model: ReviewModel }) {
+export function ScriptReview({ model, banner = false }: { model: ReviewModel; banner?: boolean }) {
   const router = useRouter();
   const { film, scenes, hooks } = model;
   const waiting = model.state === 'waiting';
@@ -48,29 +39,32 @@ export function ScriptReview({ model }: { model: ReviewModel }) {
   const [shape, setShape] = useState<Format>(
     model.approved?.formats[0] ?? model.formats[0] ?? '16:9',
   );
-  const [tab, setTab] = useState<Tab>('scene');
-  const dialog = useRef<HTMLDialogElement>(null);
+  const [confirmed, setConfirmed] = useState<Set<string>>(() => new Set());
   const [approveOpen, setApproveOpen] = useState(false);
+  const [changes, setChanges] = useState<{ open: boolean; note: string }>({
+    open: false,
+    note: '',
+  });
 
   const hook = hooks.find((item) => item.id === opening) ?? null;
   const shown = sceneIndex === 0 && hook ? hook.scene : (scenes[sceneIndex] ?? scenes[0]);
   if (!shown) return null;
-
   const claims = new Map(model.claims.map((claim) => [claim.id, claim]));
 
-  function selectScene(index: number) {
-    setSceneIndex(index);
-    setTab('scene');
+  function confirm(id: string, yes: boolean) {
+    setConfirmed((current) => {
+      const next = new Set(current);
+      if (yes) next.add(id);
+      else next.delete(id);
+      return next;
+    });
   }
 
-  function chooseOpening(id: string | null) {
-    setOpening(id);
-    selectScene(0);
-  }
-
-  function openApprove() {
-    setApproveOpen(true);
-    dialog.current?.showModal();
+  function removeClaim(use: UnconfirmedUse) {
+    setChanges({
+      open: true,
+      note: `Please take out "${use.says}" in scene ${use.sceneNumber}. Nobody has confirmed that number.`,
+    });
   }
 
   function decided() {
@@ -80,139 +74,237 @@ export function ScriptReview({ model }: { model: ReviewModel }) {
 
   return (
     <div className="script-review">
-      <nav className="review-crumb" aria-label="Back">
-        <Link className="back-link" href={`/films/${film.id}`}>
-          <Icon name="arrow-right" />
-          {film.title}
-        </Link>
-      </nav>
-      <header className="review-bar">
-        <h1>Script review</h1>
-        <div className="badges">
-          <span className="badge badge-plain">
-            {film.scriptVersion > 0 ? `Version ${film.scriptVersion}` : 'Draft'}
-          </span>
-          {model.validatorPassed ? (
-            <span className="badge badge-done">Validator passed</span>
-          ) : null}
+      <Link className="back-link" href={`/films/${film.id}`}>
+        <Icon name="arrow-right" />
+        {film.title}
+      </Link>
+      <header className="review-head">
+        <div className="title-row">
+          <h1>Script review</h1>
           <StateBadge state={model.state} />
-          {film.simulated ? <SimulatedBadge /> : null}
+          {film.simulated && !banner ? <SimulatedBadge /> : null}
         </div>
-        <div className="actions">
+        <p className="meta">
+          {film.scriptVersion > 0 ? `Version ${film.scriptVersion}` : 'Draft'} ·{' '}
+          {model.durationSeconds} seconds · {scenes.length} scenes
+        </p>
+        {waiting ? (
+          <p className="lede">
+            Read the {scenes.length} scenes and the source behind each number, then approve. Nothing
+            renders until you do.
+          </p>
+        ) : null}
+      </header>
+
+      <StateNote model={model} claims={claims} />
+
+      <div className="review-layout">
+        <div className="review-preview">
+          <section className="card player" aria-label="Preview">
+            <div className="stage-box">
+              <BrandStage
+                look={model.look}
+                scene={shown.frame}
+                format={shape}
+                tag={`Preview · ${model.look.name}'s brand · not rendered yet`}
+              />
+            </div>
+            <div className="controls">
+              <div className="stepper">
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  aria-label="Previous scene"
+                  disabled={sceneIndex === 0}
+                  onClick={() => setSceneIndex(sceneIndex - 1)}
+                >
+                  <Icon name="arrow-right" className="flip" />
+                </button>
+                <p className="where" aria-live="polite">
+                  <span className="label">
+                    Scene {shown.number} of {scenes.length}
+                  </span>
+                  <span className="name">{sceneIndex === 0 && hook ? hook.label : shown.name}</span>
+                  <span className="time">
+                    {clock(shown.start)} to {clock(shown.end)}
+                  </span>
+                </p>
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  aria-label="Next scene"
+                  disabled={sceneIndex === scenes.length - 1}
+                  onClick={() => setSceneIndex(sceneIndex + 1)}
+                >
+                  <Icon name="arrow-right" />
+                </button>
+              </div>
+              {model.formats.length > 1 || hooks.length > 0 ? (
+                <div className="preview-as">
+                  <span className="label muted">Preview as</span>
+                  {model.formats.length > 1 ? (
+                    <Seg
+                      label="Shape"
+                      options={model.formats.map((format) => ({ id: format, text: format }))}
+                      value={shape}
+                      onChange={(id) => setShape(id as Format)}
+                    />
+                  ) : null}
+                  {hooks.length > 0 ? (
+                    <Seg
+                      label="Opening"
+                      options={[
+                        { id: '', text: 'Main' },
+                        ...hooks.map((item) => ({ id: item.id, text: item.label })),
+                      ]}
+                      value={opening ?? ''}
+                      onChange={(id) => {
+                        setOpening(id || null);
+                        setSceneIndex(0);
+                      }}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
+              <p className="hint">
+                These only change the preview. You choose the opening, the call to action and the
+                shapes when you approve.
+              </p>
+            </div>
+          </section>
+        </div>
+
+        <div className="review-script">
+          {waiting && model.unconfirmed.length > 0 ? (
+            <ConfirmClaims
+              uses={model.unconfirmed}
+              claims={claims}
+              hooks={hooks}
+              confirmed={confirmed}
+              onConfirm={confirm}
+              onRemove={removeClaim}
+            />
+          ) : null}
+
+          <ol className="scenes" aria-label="The script">
+            {scenes.map((scene, index) => (
+              <SceneCard
+                key={scene.id}
+                scene={scene}
+                total={scenes.length}
+                claims={claims}
+                confirmed={confirmed}
+                selected={index === sceneIndex && !(index === 0 && hook)}
+                onShow={() => {
+                  setSceneIndex(index);
+                  if (index === 0) setOpening(null);
+                }}
+                extra={
+                  index === 0 && hooks.length > 0 ? (
+                    <div className="choice-note">
+                      <span className="label">
+                        {hooks.length === 1 ? 'Another opening' : 'Other openings'} you can pick
+                      </span>
+                      {hooks.map((item) => (
+                        <p key={item.id}>
+                          <strong>{item.label}:</strong> "{item.headline}"{' '}
+                          <button
+                            className="link-button"
+                            type="button"
+                            onClick={() => {
+                              setOpening(item.id);
+                              setSceneIndex(0);
+                            }}
+                          >
+                            Preview it
+                          </button>
+                        </p>
+                      ))}
+                    </div>
+                  ) : index === scenes.length - 1 && model.ctas.length > 0 ? (
+                    <div className="choice-note">
+                      <span className="label">
+                        {model.ctas.length === 1
+                          ? 'The call to action'
+                          : 'Calls to action you can pick'}
+                      </span>
+                      <ul>
+                        {model.ctas.map((cta) => (
+                          <li key={cta.id}>
+                            <strong>{cta.label}</strong>{' '}
+                            <span className="muted mono">
+                              {cta.href.replace(/^https?:\/\//, '')}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null
+                }
+              />
+            ))}
+          </ol>
+
           {waiting ? (
-            <>
-              <button className="btn btn-cream" type="submit" form="changes">
-                Request changes
-              </button>
-              <button className="btn btn-primary" type="button" onClick={openApprove}>
-                <Icon name="check" />
-                Approve script
-              </button>
-            </>
+            <Decide
+              open={openClaims(model, confirmed, opening).length}
+              scenes={scenes.length}
+              onApprove={() => setApproveOpen(true)}
+              onChanges={() => setChanges({ open: true, note: '' })}
+            />
           ) : (
             <Link className="btn" href={`/films/${film.id}`}>
               Back to the video
             </Link>
           )}
         </div>
-      </header>
-
-      {film.simulated ? <SimulatedNote /> : null}
-      <StateNote model={model} />
-
-      <div className="review-layout">
-        <div className="review-main">
-          <section className="card player" aria-label="Preview">
-            <Preview model={model} scene={shown} shape={shape} />
-            <div className="controls">
-              <p className="where">
-                <span className="label">
-                  Scene {shown.number} of {scenes.length}
-                </span>
-                <span className="time">
-                  {clock(shown.start)} to {clock(shown.end)}
-                </span>
-              </p>
-              {model.formats.length > 1 ? (
-                <Seg
-                  label="Shape"
-                  description="Shape to preview"
-                  options={model.formats.map((format) => ({ id: format, text: format }))}
-                  value={shape}
-                  onChange={(id) => setShape(id as Format)}
-                />
-              ) : null}
-              {hooks.length > 0 ? (
-                <Seg
-                  label="Opening"
-                  options={[
-                    { id: '', text: 'Main' },
-                    ...hooks.map((item) => ({ id: item.id, text: item.label })),
-                  ]}
-                  value={opening ?? ''}
-                  onChange={(id) => chooseOpening(id || null)}
-                  disabled={model.state === 'approved'}
-                />
-              ) : null}
-            </div>
-          </section>
-
-          <Timeline
-            model={model}
-            selected={sceneIndex}
-            onSelect={selectScene}
-            openingLabel={hook?.label ?? null}
-          />
-        </div>
-
-        <aside className="inspector" aria-label="Script details">
-          <Tabs
-            tab={tab}
-            onChange={setTab}
-            labels={{
-              scene: `Scene ${shown.number}`,
-              claims: `Claims · ${model.claims.length}`,
-              json: 'campaign.json',
-            }}
-            panels={{
-              scene: (
-                <SceneDetail
-                  scene={shown}
-                  hookLabel={sceneIndex === 0 ? (hook?.label ?? null) : null}
-                  claims={claims}
-                />
-              ),
-              claims: <ClaimList claims={model.claims} />,
-              json: <CampaignJson json={model.campaignJson} />,
-            }}
-          />
-
-          {model.unconfirmed.length > 0 ? (
-            <Unconfirmed model={model} claims={claims} waiting={waiting} />
-          ) : null}
-
-          {waiting ? (
-            <ChangesForm filmId={film.id} version={film.scriptVersion} onDone={decided} />
-          ) : null}
-        </aside>
       </div>
 
       {waiting ? (
-        <ApproveDialog
-          ref={dialog}
-          model={model}
-          open={approveOpen}
-          opening={opening}
-          onCancel={() => dialog.current?.close()}
-          onClose={() => setApproveOpen(false)}
-          onDone={decided}
-        />
+        <>
+          <ApproveDialog
+            model={model}
+            open={approveOpen}
+            opening={opening}
+            confirmed={confirmed}
+            onConfirm={confirm}
+            onClose={() => setApproveOpen(false)}
+            onDone={decided}
+          />
+          <ChangesDialog
+            open={changes.open}
+            initialNote={changes.note}
+            intro="The Director rewrites the script, the Validator checks it again, and you get a new version to approve. Nothing renders meanwhile."
+            placeholder="Make the opening punchier, and say 'teams' instead of 'customers'."
+            send={async (note) => {
+              const result = await sendJson(`/api/films/${film.id}/script`, 'POST', {
+                decision: 'send_back',
+                version: film.scriptVersion,
+                note,
+              });
+              return result.ok ? null : (result.error.issues?.[0]?.message ?? result.error.message);
+            }}
+            onClose={() => setChanges((current) => ({ ...current, open: false }))}
+            onSent={decided}
+          />
+        </>
       ) : null}
     </div>
   );
 }
 
-// ---------- Top bar ----------
+/** Claims that block approval of the cut with `opening`: unconfirmed, and not confirmed here. */
+function openClaims(
+  model: ReviewModel,
+  confirmed: Set<string>,
+  opening: string | null,
+): UnconfirmedUse[] {
+  return model.unconfirmed.filter(
+    (use) => (use.hookId === null || use.hookId === opening) && !confirmed.has(use.claimId),
+  );
+}
+
+// ---------- The header ----------
 
 function StateBadge({ state }: { state: ReviewState }) {
   switch (state) {
@@ -230,13 +322,16 @@ function StateBadge({ state }: { state: ReviewState }) {
 }
 
 /** One line on where the script is, when it is not waiting for the founder. */
-function StateNote({ model }: { model: ReviewModel }) {
+function StateNote({ model, claims }: { model: ReviewModel; claims: Map<string, ReviewClaim> }) {
   const { state, film } = model;
   if (state === 'waiting') return null;
   if (state === 'approved') {
     const choice = model.approved;
     const hook = model.hooks.find((item) => item.id === choice?.hookId);
     const cta = model.ctas.find((item) => item.id === choice?.ctaId);
+    const vouched = (choice?.confirmedClaimIds ?? [])
+      .map((id) => claims.get(id)?.text)
+      .filter(Boolean);
     return (
       <div className="alert alert-done" role="status">
         <Icon name="check" />
@@ -244,7 +339,9 @@ function StateNote({ model }: { model: ReviewModel }) {
           <strong>You approved version {film.scriptVersion}.</strong> Opening:{' '}
           {hook ? hook.label : 'Main'}
           {cta ? `. Call to action: ${cta.label}` : ''}
-          {choice ? `. Shapes: ${choice.formats.join(', ')}.` : '.'} The script can't change now.
+          {choice ? `. Shapes: ${choice.formats.join(', ')}.` : '.'}
+          {vouched.length > 0 ? ` You confirmed: ${vouched.join('; ')}.` : ''} The script can't
+          change now.
         </p>
       </div>
     );
@@ -283,332 +380,83 @@ function StateNote({ model }: { model: ReviewModel }) {
   );
 }
 
-// ---------- Preview: the scene in the customer's brand ----------
+// ---------- The script, top to bottom ----------
 
-function Preview({
-  model,
+function SceneCard({
   scene,
-  shape,
-}: {
-  model: ReviewModel;
-  scene: ReviewScene;
-  shape: Format;
-}) {
-  const { brand } = model;
-  const style = {
-    '--b-bg': brand.background,
-    '--b-fg': brand.foreground,
-    '--b-primary': brand.primary,
-    '--b-muted': brand.muted,
-    '--b-radius': `${brand.radius}px`,
-    '--b-display': `${fontName(brand.displayFont)}, var(--br-font-body)`,
-    '--b-body': `${fontName(brand.bodyFont)}, var(--br-font-body)`,
-  } as CSSProperties;
-  const center = scene.props.some((prop) => prop.key === 'Align' && prop.value === 'center');
-  const classes = ['frame', `frame-${SHAPE_CLASS[shape]}`, scene.showsProduct ? 'with-shot' : '']
-    .filter(Boolean)
-    .join(' ');
-  return (
-    <div className="stage" style={style}>
-      <span className="tag">Preview · {brand.name}'s brand · no render yet</span>
-      <div className={classes}>
-        <div className={center && !scene.showsProduct ? 'copy copy-center' : 'copy'}>
-          {scene.text.map((item) => (
-            <PreviewLine key={item.id} item={item} />
-          ))}
-        </div>
-        {scene.showsProduct ? (
-          <div className="shot" aria-hidden="true">
-            <div className="dots">
-              <i />
-              <i />
-              <i />
-            </div>
-            <div className="bars">
-              {[40, 62, 48, 80, 66, 96].map((height) => (
-                <i key={height} style={{ height: `${height}%` }} />
-              ))}
-            </div>
-          </div>
-        ) : null}
-        <div className="safe" aria-hidden="true" />
-      </div>
-    </div>
-  );
-}
-
-function PreviewLine({ item }: { item: ReviewText }) {
-  if (item.role === 'cta') return <span className="cta">{item.value}</span>;
-  const className = item.role === 'headline' ? 'big' : item.role === 'label' ? 'small' : 'mid';
-  const parts = item.value.split(NUMBER);
-  return (
-    <span className={className}>
-      {parts.map((part, index) =>
-        // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string never reorder
-        index % 2 === 1 ? <em key={index}>{part}</em> : <span key={index}>{part}</span>,
-      )}
-    </span>
-  );
-}
-
-/** A family name, quoted and stripped to safe characters, for a CSS font-family list. */
-function fontName(family: string): string {
-  return `'${family.replace(/[^\w -]/g, '')}'`;
-}
-
-// ---------- Timeline ----------
-
-function Timeline({
-  model,
-  selected,
-  onSelect,
-  openingLabel,
-}: {
-  model: ReviewModel;
-  selected: number;
-  onSelect: (index: number) => void;
-  openingLabel: string | null;
-}) {
-  const total = model.durationSeconds;
-  const at = (seconds: number) => `${(seconds / total) * 100}%`;
-  const span = (scene: ReviewScene) => ({
-    left: at(scene.start),
-    width: `calc(${((scene.end - scene.start) / total) * 100}% - 4px)`,
-  });
-  return (
-    <section className="timeline" aria-label="Timeline">
-      <div className="lane">
-        <span className="spacer" aria-hidden="true" />
-        <div className="ruler label" aria-hidden="true">
-          {model.ticks.map((tick) => (
-            <span key={tick} style={{ left: at(tick) }}>
-              {seconds(tick)}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="lane">
-        <span className="label">Scenes</span>
-        <div className="lane-track scenes">
-          {model.scenes.map((scene, index) => {
-            const name = index === 0 && openingLabel ? openingLabel : scene.name;
-            return (
-              <button
-                key={scene.id}
-                type="button"
-                className="scene"
-                style={span(scene)}
-                aria-pressed={index === selected}
-                aria-label={`Scene ${scene.number}, ${name}, ${seconds(scene.start)} to ${seconds(scene.end)}`}
-                onClick={() => onSelect(index)}
-              >
-                <strong>{name}</strong>
-                <span className="label">
-                  {scene.type} · {seconds(scene.end - scene.start)}
-                </span>
-              </button>
-            );
-          })}
-          {model.scenes.slice(0, -1).map((scene) =>
-            scene.transitionOut ? (
-              <span
-                key={scene.id}
-                className="transition"
-                style={{ left: at(scene.end) }}
-                title={`${scene.transitionOut} into scene ${scene.number + 1}`}
-              >
-                <span className="sr-only">
-                  {scene.transitionOut} into scene {scene.number + 1}
-                </span>
-              </span>
-            ) : null,
-          )}
-        </div>
-      </div>
-      <div className="lane">
-        <span className="label">Voice</span>
-        <div className="lane-track voice" aria-hidden="true">
-          {model.scenes.map((scene) =>
-            scene.voiceover ? (
-              <span key={scene.id} style={span(scene)} title={scene.voiceover.text} />
-            ) : null,
-          )}
-        </div>
-      </div>
-      {model.music ? (
-        <div className="lane">
-          <span className="label">Music</span>
-          <div className="lane-track music" title={model.music} />
-        </div>
-      ) : null}
-      {model.sfx.length > 0 ? (
-        <div className="lane">
-          <span className="label">Sound</span>
-          <div className="lane-track sfx">
-            {model.sfx.map((effect) => (
-              <span
-                key={`${effect.assetId}-${effect.at}`}
-                style={{ left: at(effect.at) }}
-                title={`${effect.assetId} at ${seconds(effect.at)}`}
-              >
-                <Icon name="sparkle" />
-                <span className="sr-only">
-                  {effect.assetId} at {seconds(effect.at)}
-                </span>
-              </span>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </section>
-  );
-}
-
-// ---------- Inspector ----------
-
-function Tabs({
-  tab,
-  onChange,
-  labels,
-  panels,
-}: {
-  tab: Tab;
-  onChange: (tab: Tab) => void;
-  labels: Record<Tab, string>;
-  panels: Record<Tab, ReactNode>;
-}) {
-  const refs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = TABS[(TABS.indexOf(tab) + step + TABS.length) % TABS.length] ?? 'scene';
-    onChange(next);
-    refs.current[next]?.focus();
-  }
-  return (
-    <>
-      <div className="tabs" role="tablist" aria-label="Script details" onKeyDown={onKeyDown}>
-        {TABS.map((id) => (
-          <button
-            key={id}
-            ref={(element) => {
-              refs.current[id] = element;
-            }}
-            id={`tab-${id}`}
-            className="tab"
-            type="button"
-            role="tab"
-            aria-selected={tab === id}
-            aria-controls={`panel-${id}`}
-            tabIndex={tab === id ? 0 : -1}
-            onClick={() => onChange(id)}
-          >
-            {labels[id]}
-          </button>
-        ))}
-      </div>
-      {/* Every panel is in the page, so every claim and its source is there without a click. */}
-      {TABS.map((id) => (
-        <div
-          key={id}
-          className="card panel"
-          role="tabpanel"
-          id={`panel-${id}`}
-          aria-labelledby={`tab-${id}`}
-          hidden={tab !== id}
-        >
-          {panels[id]}
-        </div>
-      ))}
-    </>
-  );
-}
-
-function SceneDetail({
-  scene,
-  hookLabel,
+  total,
   claims,
+  confirmed,
+  selected,
+  onShow,
+  extra,
 }: {
   scene: ReviewScene;
-  hookLabel: string | null;
+  total: number;
   claims: Map<string, ReviewClaim>;
+  confirmed: Set<string>;
+  selected: boolean;
+  onShow: () => void;
+  extra: ReactNode;
 }) {
-  // Each claim's source shows once, under the first line that cites it.
-  const shown = new Set<string>();
-  const firstUse = (ids: string[]) =>
-    ids.flatMap((id) => {
-      const claim = claims.get(id);
-      if (!claim || shown.has(id)) return [];
-      shown.add(id);
-      return [claim];
-    });
+  const headline = scene.lines.find((line) => line.role === 'headline');
+  const rest = scene.lines.filter((line) => line !== headline);
+  const sources = scene.claimIds
+    .map((id) => claims.get(id))
+    .filter((claim): claim is ReviewClaim => claim !== undefined);
   return (
-    <>
-      <div className="scene-head">
-        <h2>{hookLabel ?? scene.name}</h2>
-        <span className="label muted">
-          {seconds(scene.start)} to {seconds(scene.end)}
+    <li className={selected ? 'card scene-card is-shown' : 'card scene-card'}>
+      <div className="scene-top">
+        <span className="label">
+          Scene {scene.number} of {total} · {seconds(scene.start)} to {seconds(scene.end)}
         </span>
+        <button className="link-button" type="button" onClick={onShow} aria-pressed={selected}>
+          {selected ? 'In the preview' : 'Show in preview'}
+        </button>
       </div>
-      {hookLabel ? (
-        <p className="hint">An alternate opening. It replaces the main scene 1.</p>
+      {headline ? (
+        <h3>
+          <ClaimText text={headline.value} />
+        </h3>
       ) : null}
-      <div className="props">
-        <span className="badge badge-plain">Template · {scene.type}</span>
-        {scene.props.map((prop) => (
-          <span key={prop.key} className="badge badge-plain">
-            {prop.key} · {prop.value}
-          </span>
-        ))}
-        {scene.transitionOut ? (
-          <span className="badge badge-plain">Out · {scene.transitionOut}</span>
-        ) : null}
-      </div>
-      {scene.text.map((item) => (
-        <div key={item.id} className="copy-item">
-          <div className="top">
-            <span className="label">{item.label}</span>
-            <span className={item.length > item.limit ? 'label count over' : 'label count'}>
-              {item.length} / {item.limit}
-            </span>
-          </div>
-          <p className="value">
-            <ClaimText text={item.value} />
-          </p>
-          {firstUse(item.claimIds).map((claim) => (
-            <ClaimCard key={claim.id} claim={claim} />
+      {rest.length > 0 ? (
+        <ul className="on-screen" aria-label="Also on screen">
+          {rest.map((line) => (
+            <li key={line.id} className={line.role === 'cta' ? 'is-cta' : undefined}>
+              {line.role === 'cta' ? <span className="label muted">Button </span> : null}
+              <ClaimText text={line.value} />
+            </li>
           ))}
-        </div>
-      ))}
+        </ul>
+      ) : null}
       {scene.voiceover ? (
-        <div className="copy-item">
-          <div className="top">
-            <span className="label">Voiceover</span>
-          </div>
-          <p className="value body">
-            <ClaimText text={scene.voiceover.text} />
-          </p>
-          {firstUse(scene.voiceover.claimIds).map((claim) => (
-            <ClaimCard key={claim.id} claim={claim} />
+        <p className="vo">
+          <span className="label">Voiceover</span>"<ClaimText text={scene.voiceover.text} />"
+        </p>
+      ) : null}
+      {sources.length > 0 ? (
+        <div className="sources">
+          {sources.map((claim) => (
+            <ClaimSource key={claim.id} claim={claim} confirmed={confirmed.has(claim.id)} />
           ))}
         </div>
-      ) : (
-        <p className="hint">No voiceover in this scene.</p>
-      )}
-    </>
+      ) : null}
+      {extra}
+    </li>
   );
 }
 
-function ClaimCard({ claim, usage }: { claim: ReviewClaim; usage?: boolean }) {
+function ClaimSource({ claim, confirmed }: { claim: ReviewClaim; confirmed: boolean }) {
   return (
     <div className="claim-card">
       <div className="top">
-        <span className="label">Source · {claim.id}</span>
-        {claim.approved ? (
-          <span className="badge badge-done">Approved</span>
+        <span className="label">Source</span>
+        {claim.checked ? (
+          <span className="badge badge-done">Checked on the site</span>
+        ) : claim.confirmedByYou || confirmed ? (
+          <span className="badge badge-done">You confirmed</span>
         ) : (
-          <span className="badge badge-queued">Not confirmed</span>
+          <span className="badge badge-needs">Needs you</span>
         )}
       </div>
       <blockquote>
@@ -617,65 +465,55 @@ function ClaimCard({ claim, usage }: { claim: ReviewClaim; usage?: boolean }) {
       <a className="source" href={claim.sourceUrl} target="_blank" rel="noopener noreferrer">
         {claim.sourceLabel}
       </a>
-      {usage ? <span className="label muted">{usedIn(claim.usedIn)}</span> : null}
     </div>
   );
 }
 
-function ClaimList({ claims }: { claims: ReviewClaim[] }) {
-  return (
-    <>
-      <p className="intro">
-        Every number in the video is copied word for word from one of these quotes, from the page it
-        links to.
-      </p>
-      {claims.length === 0 ? <p className="hint">This script makes no claims.</p> : null}
-      {claims.map((claim) => (
-        <ClaimCard key={claim.id} claim={claim} usage />
-      ))}
-    </>
-  );
-}
-
-function CampaignJson({ json }: { json: string }) {
-  return (
-    <>
-      <p className="intro">The script as data, exactly what the crew renders from.</p>
-      {/* biome-ignore lint/a11y/noNoninteractiveTabindex: a scrolling region needs focus for keyboard users */}
-      <section className="json" tabIndex={0} aria-label="campaign.json">
-        <pre>{json}</pre>
-      </section>
-    </>
-  );
-}
-
-function Unconfirmed({
-  model,
+/** The numbers nobody has confirmed: say yes, or ask for them to come out. Pink: it needs you. */
+function ConfirmClaims({
+  uses,
   claims,
-  waiting,
+  hooks,
+  confirmed,
+  onConfirm,
+  onRemove,
 }: {
-  model: ReviewModel;
+  uses: UnconfirmedUse[];
   claims: Map<string, ReviewClaim>;
-  waiting: boolean;
+  hooks: ReviewModel['hooks'];
+  confirmed: Set<string>;
+  onConfirm: (id: string, yes: boolean) => void;
+  onRemove: (use: UnconfirmedUse) => void;
 }) {
-  const count = model.unconfirmed.length;
+  const left = uses.filter((use) => !confirmed.has(use.claimId)).length;
   return (
-    <section className="card card-cream confirm" aria-labelledby="confirm-title">
+    <section
+      className={left > 0 ? 'card confirm confirm-needs' : 'card confirm confirm-done'}
+      aria-labelledby="confirm-title"
+    >
       <div className="row">
-        <h3 id="confirm-title">
-          {count === 1 ? 'One claim' : `${count} claims`}{' '}
-          {waiting ? 'to confirm' : 'nobody confirmed'}
-        </h3>
-        <span className="badge badge-queued">Not confirmed</span>
+        <h2 id="confirm-title">
+          {uses.length === 1 ? 'One number to confirm' : `${uses.length} numbers to confirm`}
+        </h2>
+        {left > 0 ? (
+          <span className="badge badge-needs">Needs you</span>
+        ) : (
+          <span className="badge badge-done">Confirmed</span>
+        )}
       </div>
-      {model.unconfirmed.map((use) => {
+      {uses.map((use) => {
         const claim = claims.get(use.claimId);
         if (!claim) return null;
+        const yes = confirmed.has(use.claimId);
+        const where = use.hookId
+          ? `${hooks.find((item) => item.id === use.hookId)?.label ?? 'The other opening'} says`
+          : `Scene ${use.sceneNumber} says`;
         return (
-          <div key={use.claimId} className="stack-sm">
+          <div key={use.claimId} className="confirm-item">
             <p>
-              Scene {use.sceneNumber} says "<ClaimText text={use.says} />
-              ". The crew found it on {claim.sourceLabel}, but nobody has confirmed it yet.
+              {where} "<ClaimText text={use.says} />
+              ". The crew copied it from {claim.sourceLabel}, but nobody has confirmed it is still
+              right.
             </p>
             <div className="claim-card">
               <blockquote>
@@ -690,131 +528,153 @@ function Unconfirmed({
                 {claim.sourceLabel}
               </a>
             </div>
+            {yes ? (
+              <p className="confirmed-line">
+                <Icon name="check" />
+                You confirmed {use.figure ?? 'it'}. It goes in with your approval.{' '}
+                <button
+                  className="link-button"
+                  type="button"
+                  onClick={() => onConfirm(use.claimId, false)}
+                >
+                  Undo
+                </button>
+              </p>
+            ) : (
+              <div className="confirm-actions">
+                <button
+                  className="btn btn-sm"
+                  type="button"
+                  onClick={() => onConfirm(use.claimId, true)}
+                >
+                  <Icon name="check" />
+                  {use.figure ? `Yes, ${use.figure} is right` : "Yes, it's right"}
+                </button>
+                <button
+                  className="btn btn-ghost btn-sm"
+                  type="button"
+                  onClick={() => onRemove(use)}
+                >
+                  Remove it
+                </button>
+              </div>
+            )}
           </div>
         );
       })}
-      {waiting ? (
-        <p className="hint">If it's wrong, ask the Director to change or remove it, below.</p>
-      ) : null}
     </section>
   );
 }
 
-// ---------- Decisions ----------
-
-function ChangesForm({
-  filmId,
-  version,
-  onDone,
+/**
+ * The decision, after the script. On a phone it becomes a bar stuck to the bottom of the screen,
+ * but only once the founder has scrolled down to it: never before they have read the script.
+ */
+function Decide({
+  open,
+  scenes,
+  onApprove,
+  onChanges,
 }: {
-  filmId: string;
-  version: number;
-  onDone: () => void;
+  open: number;
+  scenes: number;
+  onApprove: () => void;
+  onChanges: () => void;
 }) {
-  const field = useRef<HTMLTextAreaElement>(null);
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy) return;
-    if (note.trim() === '') {
-      setError('Write what you would like changed, then send it.');
-      field.current?.focus();
-      field.current?.scrollIntoView({ block: 'center' });
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    const result = await sendJson(`/api/films/${filmId}/script`, 'POST', {
-      decision: 'send_back',
-      version,
-      note,
+  const ref = useRef<HTMLElement>(null);
+  const [seen, setSeen] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element || seen || typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting)) {
+        setSeen(true);
+        observer.disconnect();
+      }
     });
-    if (!result.ok) {
-      setError(result.error.issues?.[0]?.message ?? result.error.message);
-      setBusy(false);
-      return;
-    }
-    onDone();
-  }
-
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [seen]);
   return (
-    <form id="changes" className="field changes" onSubmit={submit} noValidate>
-      <label className="label" htmlFor="note">
-        Ask the Director for a change
-      </label>
-      <textarea
-        ref={field}
-        className="input"
-        id="note"
-        maxLength={2000}
-        placeholder="Make the opening punchier, and say 'teams' instead of 'customers'."
-        value={note}
-        aria-invalid={error ? true : undefined}
-        aria-describedby={error ? 'note-error note-hint' : 'note-hint'}
-        onChange={(event) => {
-          setNote(event.target.value);
-          if (error) setError(null);
-        }}
-      />
-      {error ? (
-        <p id="note-error" className="field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <span id="note-hint" className="hint">
-        The Director rewrites, the Validator checks it again, and you get a new version.
-      </span>
-      <div>
-        <button className="btn btn-cream" type="submit" disabled={busy}>
-          {busy ? 'Sending…' : 'Send to the Director'}
+    <section
+      ref={ref}
+      className={seen ? 'decide is-sticky' : 'decide'}
+      aria-label="Your decision"
+      data-seen={seen ? 'true' : undefined}
+    >
+      <p>
+        {open > 0
+          ? open === 1
+            ? 'Confirm the number above or ask for it to come out, then approve.'
+            : `Confirm the ${open} numbers above or ask for them to come out, then approve.`
+          : `That's all ${scenes} scenes. Approve, and the crew starts animating.`}
+      </p>
+      <div className="decide-actions">
+        <button className="btn btn-primary" type="button" onClick={onApprove}>
+          <Icon name="check" />
+          Approve script
+        </button>
+        <button className="btn" type="button" onClick={onChanges}>
+          {ASK_FOR_CHANGES}
         </button>
       </div>
-    </form>
+    </section>
   );
 }
 
+// ---------- Approve ----------
+
 function ApproveDialog({
-  ref,
   model,
   open,
   opening,
-  onCancel,
+  confirmed,
+  onConfirm,
   onClose,
   onDone,
 }: {
-  ref: Ref<HTMLDialogElement>;
   model: ReviewModel;
   open: boolean;
   opening: string | null;
-  onCancel: () => void;
+  confirmed: Set<string>;
+  onConfirm: (id: string, yes: boolean) => void;
   onClose: () => void;
   onDone: () => void;
 }) {
   const { hooks, ctas, formats, film } = model;
+  const dialog = useRef<HTMLDialogElement>(null);
   const [hookId, setHookId] = useState<string | null>(opening);
   const [ctaId, setCtaId] = useState<string | null>(ctas[0]?.id ?? null);
   const [picked, setPicked] = useState<Format[]>([...formats]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [lastOpen, setLastOpen] = useState(false);
 
   // Each time the dialog opens, start from the opening being previewed.
-  if (open !== lastOpen) {
-    setLastOpen(open);
-    if (open) {
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    if (open && !element.open) {
       setHookId(opening);
       setError(null);
+      element.showModal();
+    } else if (!open && element.open) {
+      element.close();
     }
-  }
+  }, [open, opening]);
+
+  const blocking = openClaims(model, confirmed, hookId);
+  const inCut = model.unconfirmed.filter((use) => use.hookId === null || use.hookId === hookId);
+  const claimText = new Map(model.claims.map((claim) => [claim.id, claim]));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
     if (picked.length === 0) {
       setError('Pick at least one shape.');
+      return;
+    }
+    if (blocking.length > 0) {
+      setError('Confirm every number first, or ask for changes.');
       return;
     }
     setBusy(true);
@@ -825,6 +685,7 @@ function ApproveDialog({
       hookId,
       ctaId,
       formats: formats.filter((format) => picked.includes(format)),
+      confirmedClaimIds: [...confirmed],
     });
     if (!result.ok) {
       setError(result.error.issues?.[0]?.message ?? result.error.message);
@@ -841,7 +702,7 @@ function ApproveDialog({
 
   return (
     <dialog
-      ref={ref}
+      ref={dialog}
       className="card approve-dialog"
       aria-labelledby="approve-title"
       onClose={onClose}
@@ -853,8 +714,8 @@ function ApproveDialog({
         </p>
         {hooks.length > 0 ? (
           <fieldset>
-            <legend className="label">Opening</legend>
-            <label className="check">
+            <legend className="label">Opening, pick one</legend>
+            <label className="radio">
               <input
                 type="radio"
                 name="hook"
@@ -863,11 +724,11 @@ function ApproveDialog({
               />
               <span className="choice">
                 <strong>Main</strong>
-                <span className="muted">{model.scenes[0]?.text[0]?.value}</span>
+                <span className="muted">"{model.scenes[0]?.lines[0]?.value}"</span>
               </span>
             </label>
             {hooks.map((hook) => (
-              <label key={hook.id} className="check">
+              <label key={hook.id} className="radio">
                 <input
                   type="radio"
                   name="hook"
@@ -876,7 +737,7 @@ function ApproveDialog({
                 />
                 <span className="choice">
                   <strong>{hook.label}</strong>
-                  <span className="muted">{hook.headline}</span>
+                  <span className="muted">"{hook.headline}"</span>
                 </span>
               </label>
             ))}
@@ -884,9 +745,9 @@ function ApproveDialog({
         ) : null}
         {ctas.length > 0 ? (
           <fieldset>
-            <legend className="label">Call to action</legend>
+            <legend className="label">Call to action, pick one</legend>
             {ctas.map((cta) => (
-              <label key={cta.id} className="check">
+              <label key={cta.id} className="radio">
                 <input
                   type="radio"
                   name="cta"
@@ -902,7 +763,7 @@ function ApproveDialog({
           </fieldset>
         ) : null}
         <fieldset>
-          <legend className="label">Shapes</legend>
+          <legend className="label">Shapes, pick any</legend>
           <div className="shapes">
             {formats.map((format) => (
               <label key={format} className="check">
@@ -917,17 +778,65 @@ function ApproveDialog({
               </label>
             ))}
           </div>
+          <p className="hint">
+            You get one video in each shape you pick:{' '}
+            {picked.length === 1 ? '1 video' : `${picked.length} videos`}.
+          </p>
         </fieldset>
+        {inCut.length > 0 ? (
+          <div
+            className={blocking.length > 0 ? 'alert alert-needs' : 'alert alert-done'}
+            role={blocking.length > 0 ? 'alert' : 'status'}
+          >
+            <Icon name={blocking.length > 0 ? 'warning' : 'check'} />
+            <div className="stack-sm">
+              <p>
+                <strong>
+                  {blocking.length === 0
+                    ? inCut.length === 1
+                      ? 'You confirmed the one unchecked number.'
+                      : `You confirmed the ${inCut.length} unchecked numbers.`
+                    : blocking.length === 1
+                      ? 'One number still needs you.'
+                      : `${blocking.length} numbers still need you.`}
+                </strong>{' '}
+                {blocking.length > 0
+                  ? "Nobody has confirmed it yet, so it can't go in the video until you do."
+                  : 'They go in the video as you confirmed them.'}
+              </p>
+              {inCut.map((use) => (
+                <label key={use.claimId} className="check">
+                  <input
+                    type="checkbox"
+                    checked={confirmed.has(use.claimId)}
+                    onChange={(event) => onConfirm(use.claimId, event.target.checked)}
+                  />
+                  <span>Yes, "{claimText.get(use.claimId)?.text ?? use.says}" is right</span>
+                </label>
+              ))}
+              {blocking.length > 0 ? (
+                <p className="hint">If it's wrong, close this and ask for changes instead.</p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+        <p className="hint">
+          Once it's delivered, you can still ask for changes up to {model.maxRevisions} times.
+        </p>
         {error ? (
           <p className="field-error" role="alert">
             {error}
           </p>
         ) : null}
         <div className="dialog-actions">
-          <button className="btn" type="button" onClick={onCancel}>
+          <button className="btn" type="button" onClick={onClose}>
             Not yet
           </button>
-          <button className="btn btn-primary" type="submit" disabled={busy || picked.length === 0}>
+          <button
+            className="btn btn-primary"
+            type="submit"
+            disabled={busy || picked.length === 0 || blocking.length > 0}
+          >
             <Icon name="check" />
             {busy ? 'Approving…' : 'Approve and start'}
           </button>
@@ -941,31 +850,25 @@ function ApproveDialog({
 
 function Seg({
   label,
-  description,
   options,
   value,
   onChange,
-  disabled,
 }: {
   label: string;
-  /** The group's accessible name, when the visible label is shorter. */
-  description?: string;
   options: { id: string; text: string }[];
   value: string;
   onChange: (id: string) => void;
-  disabled?: boolean;
 }) {
   return (
     <div className="seg-field">
       <span className="label muted">{label}</span>
       {/* biome-ignore lint/a11y/useSemanticElements: the design system's segmented control is a group of pressed buttons */}
-      <div className="seg" role="group" aria-label={description ?? label}>
+      <div className="seg" role="group" aria-label={`Preview as: ${label.toLowerCase()}`}>
         {options.map((option) => (
           <button
             key={option.id}
             type="button"
             aria-pressed={option.id === value}
-            disabled={disabled && option.id !== value}
             onClick={() => onChange(option.id)}
           >
             {option.text}

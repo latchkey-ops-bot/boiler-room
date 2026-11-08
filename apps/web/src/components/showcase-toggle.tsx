@@ -4,7 +4,10 @@ import Link from 'next/link';
 import { useState } from 'react';
 import { sendJson } from '../lib/api-client.ts';
 
-/** Opt in to the public showcase. Only offered once a video is delivered. */
+/**
+ * Opt in to the public showcase. Only offered once a video is delivered. A switch that says On or
+ * Off in words, and says so again once the choice is saved.
+ */
 export function ShowcaseToggle({
   filmId,
   initial,
@@ -17,10 +20,12 @@ export function ShowcaseToggle({
   const [on, setOn] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saved, setSaved] = useState(false);
 
   async function change(next: boolean) {
     setBusy(true);
     setError(null);
+    setSaved(false);
     const result = await sendJson(`/api/films/${filmId}/showcase`, 'PUT', { optIn: next });
     setBusy(false);
     if (!result.ok) {
@@ -28,6 +33,7 @@ export function ShowcaseToggle({
       return;
     }
     setOn(next);
+    setSaved(true);
   }
 
   return (
@@ -41,8 +47,14 @@ export function ShowcaseToggle({
           disabled={busy}
           onChange={(event) => void change(event.target.checked)}
         />
+        <span className={on ? 'switch-state is-on' : 'switch-state'} aria-hidden="true">
+          {on ? 'On' : 'Off'}
+        </span>
         <span>Show my video on the Boiler Room showcase</span>
       </label>
+      <p className={saved ? 'saved' : 'sr-only'} role="status">
+        {saved ? savedWords(on, simulated) : ''}
+      </p>
       <p className="hint">
         {simulated
           ? 'Simulated videos never appear on the showcase, even with this on.'
@@ -50,7 +62,7 @@ export function ShowcaseToggle({
       </p>
       {on && !simulated ? (
         <p className="hint">
-          <Link href="/showcase">See the showcase</Link>
+          <Link href="/showcase">See it on the showcase</Link>
         </p>
       ) : null}
       {error ? (
@@ -60,4 +72,11 @@ export function ShowcaseToggle({
       ) : null}
     </div>
   );
+}
+
+function savedWords(on: boolean, simulated: boolean): string {
+  if (!on) return 'Saved. Your video is off the showcase.';
+  return simulated
+    ? 'Saved. This simulated video still stays off the showcase.'
+    : 'Saved. Your video is on the showcase now.';
 }

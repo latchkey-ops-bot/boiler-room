@@ -1,72 +1,58 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { type FormEvent, useState } from 'react';
+import { useState } from 'react';
 import { sendJson } from '../lib/api-client.ts';
+import { ASK_FOR_CHANGES, ChangesDialog } from './changes-dialog.tsx';
 
 /**
- * The way out when the film is not quite right: a note for the Account Manager. It is the quiet
- * action on the delivery screen, below the files.
+ * The way out when the film is not quite right: the same "Ask for changes" as on the script, here
+ * a note for the Account Manager. It is the quiet action on the delivery screen, below the files.
  */
 export function RevisionForm({
   filmId,
   version,
   left,
+  max,
 }: {
   filmId: string;
   version: number;
   /** Revisions this film has left. */
   left: number;
+  /** Revisions any film can have. */
+  max: number;
 }) {
   const router = useRouter();
-  const [note, setNote] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    const result = await sendJson(`/api/films/${filmId}/revision`, 'POST', { version, note });
-    if (!result.ok) {
-      setError(result.error.issues?.[0]?.message ?? result.error.message);
-      setBusy(false);
-      return;
-    }
-    router.push(`/films/${filmId}`);
-    router.refresh();
-  }
-
+  const [open, setOpen] = useState(false);
   return (
-    <form className="field revision" onSubmit={submit}>
-      <label className="label" htmlFor="revision-note">
-        Want something changed?
-      </label>
-      <textarea
-        className="input"
-        id="revision-note"
-        maxLength={2000}
-        placeholder="Make the logo bigger in the last scene, and say 'teams' instead of 'customers'."
-        value={note}
-        aria-invalid={error ? true : undefined}
-        aria-describedby="revision-hint"
-        onChange={(event) => setNote(event.target.value)}
-      />
-      <span className="hint" id="revision-hint">
-        The Account Manager takes it to the crew, and you approve the new script before anything
-        renders. Your files stay here meanwhile.{' '}
-        {left === 1 ? 'This video has 1 revision left.' : `This video has ${left} revisions left.`}
-      </span>
-      {error ? (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
-      ) : null}
+    <section className="revision" aria-labelledby="revision-title">
+      <h2 id="revision-title" className="card-title">
+        Not quite right?
+      </h2>
+      <p className="hint">
+        The Account Manager takes your note to the crew, and you approve the new script before
+        anything renders. Your files stay here meanwhile. Each video can be changed {max} times;
+        this one has {left === 1 ? '1 change' : `${left} changes`} left.
+      </p>
       <div>
-        <button className="btn btn-cream" type="submit" disabled={busy || note.trim() === ''}>
-          {busy ? 'Sending…' : 'Ask for changes'}
+        <button className="btn btn-cream" type="button" onClick={() => setOpen(true)}>
+          {ASK_FOR_CHANGES}
         </button>
       </div>
-    </form>
+      <ChangesDialog
+        open={open}
+        intro="The Account Manager takes your note to the crew. You approve the new script before anything renders, and your files stay here meanwhile."
+        placeholder="Make the logo bigger in the last scene, and say 'teams' instead of 'customers'."
+        send={async (note) => {
+          const result = await sendJson(`/api/films/${filmId}/revision`, 'POST', { version, note });
+          return result.ok ? null : (result.error.issues?.[0]?.message ?? result.error.message);
+        }}
+        onClose={() => setOpen(false)}
+        onSent={() => {
+          router.push(`/films/${filmId}`);
+          router.refresh();
+        }}
+      />
+    </section>
   );
 }

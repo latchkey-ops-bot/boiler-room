@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAX_URL_LENGTH } from '../src/lib/film-url.ts';
-import { NEW_FILM_PATH, prefillProblem, startTarget } from '../src/lib/start.ts';
+import { carriedSite, NEW_FILM_PATH, prefillProblem, startTarget } from '../src/lib/start.ts';
 
 describe('the URL field on the marketing site', () => {
   it('carries a website into a new video, as the founder typed it', () => {
@@ -47,5 +47,22 @@ describe('the URL field on the marketing site', () => {
     expect(prefillProblem('')).toBeNull();
     expect(prefillProblem('nova.com')).toBeNull();
     expect(prefillProblem('nova')).toBe('Use a public website, such as yourstartup.com.');
+  });
+});
+
+describe('the site carried through sign-up', () => {
+  it("reads the site from Clerk's redirect, relative or absolute", () => {
+    expect(carriedSite('/films/new?url=nova.com')).toBe('nova.com');
+    expect(
+      carriedSite('https://boiler-room.example/films/new?url=https%3A%2F%2Fwww.nova.com%2Fpricing'),
+    ).toBe('nova.com');
+  });
+
+  it('shows nothing for a redirect elsewhere, an empty field or an unusable site', () => {
+    expect(carriedSite(null)).toBeNull();
+    expect(carriedSite('/films/new')).toBeNull();
+    expect(carriedSite('/films?url=nova.com')).toBeNull();
+    expect(carriedSite('/films/new?url=localhost%3A3000')).toBeNull();
+    expect(carriedSite('http://[::1')).toBeNull();
   });
 });

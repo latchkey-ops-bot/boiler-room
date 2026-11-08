@@ -1,14 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   addDays,
-  countdownWords,
   daysBetween,
   formatLaunchDate,
   isLaunchDate,
   localToday,
   parseChannels,
   utcToday,
-  videosAtMost,
 } from '../src/lib/launch.ts';
 import type { Principal } from '../src/server/api/context.ts';
 import { ApiError } from '../src/server/api/errors.ts';
@@ -16,7 +14,6 @@ import { createFilm, getFilmDetail } from '../src/server/api/films.ts';
 import { json, readJson } from '../src/server/api/http.ts';
 import { launchPlanInput, setLaunchPlan } from '../src/server/api/launch.ts';
 import { makeRoute } from '../src/server/api/route.ts';
-import { SAMPLE_CAMPAIGN } from '../src/server/pipeline/simulated.ts';
 import { contextFor, startWorkerEnv, testClock } from './helpers.ts';
 
 describe('launch dates', () => {
@@ -43,13 +40,6 @@ describe('launch dates', () => {
     expect(localToday(new Date(2026, 10, 8, 0, 30))).toBe('2026-11-08');
   });
 
-  it('says the countdown in plain words', () => {
-    expect(countdownWords(11)).toEqual({ score: '11', words: 'days to launch' });
-    expect(countdownWords(1)).toEqual({ score: '1', words: 'day to launch' });
-    expect(countdownWords(0)).toEqual({ score: '0', words: 'Launch day is today' });
-    expect(countdownWords(-3)).toEqual({ score: '3', words: 'days since launch' });
-  });
-
   it('writes the date as the dashboard does', () => {
     expect(formatLaunchDate('2026-11-18')).toBe('Wednesday 18 November');
     expect(formatLaunchDate('2026-11-18', true)).toBe('Wed 18 Nov');
@@ -59,13 +49,6 @@ describe('launch dates', () => {
     expect(parseChannels('["reels","x","myspace"]')).toEqual(['x', 'reels']);
     expect(parseChannels('not json')).toEqual([]);
     expect(parseChannels(null)).toEqual([]);
-  });
-
-  it('counts the most videos one approval can make from the campaign', () => {
-    // 3 shapes, the main opening or 1 alternate, 2 calls to action.
-    expect(videosAtMost(SAMPLE_CAMPAIGN)).toBe(12);
-    const plain = { ...SAMPLE_CAMPAIGN, variants: { hooks: [], formats: ['16:9'], ctas: [] } };
-    expect(videosAtMost(plain as typeof SAMPLE_CAMPAIGN)).toBe(1);
   });
 });
 

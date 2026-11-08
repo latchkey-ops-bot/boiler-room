@@ -28,6 +28,8 @@ const page = vi.hoisted(() => ({
   context: null as null | (() => Promise<ApiContext>),
   bindings: {} as Record<string, unknown>,
   pathname: '/films',
+  /** The environment makes simulated films, so the app's banner shows. */
+  simulatedEnv: true,
 }));
 
 vi.mock('../src/server/next.ts', () => ({
@@ -38,12 +40,16 @@ vi.mock('../src/server/next.ts', () => ({
   requireSignedIn: async () => page.principal,
   currentPrincipal: async () => page.principal,
   workerBindings: () => page.bindings,
+  simulatedEnvironment: () => page.simulatedEnv,
 }));
 
 vi.mock('@clerk/nextjs', async () => {
   const { createElement } = await import('react');
   return {
     UserButton: () => createElement('span', { className: 'user-button-stand-in', title: 'You' }),
+    useUser: () => ({
+      user: { fullName: 'Ada Founder', primaryEmailAddress: { emailAddress: 'ada@example.com' } },
+    }),
   };
 });
 
@@ -109,7 +115,6 @@ function save(name: string, html: string) {
 <link rel="stylesheet" href="/styles/app.css">
 <style>
 :root{--font-bricolage:'Bricolage Grotesque';--font-nunito:'Nunito';--font-jetbrains:'JetBrains Mono';--font-pixelify:'Pixelify Sans'}
-.user-button-stand-in{display:inline-block;width:28px;height:28px;border-radius:50%;background:var(--br-steel)}
 </style>
 </head><body>${html}</body></html>`;
   writeFileSync(join(OUT, `${name}.html`), document);
@@ -128,49 +133,72 @@ function text(html: string): string {
 }
 
 describe('the film page', () => {
-  it('pauses for the founder with one pink call to action, and counts down to launch', async () => {
+  it('pauses for the founder with one pink call to action, straight under the title', async () => {
     const ctx = await signIn();
     at(-12 * MINUTE);
     const { film } = await createFilm(await ctx(), { url: 'nova.example.com' });
     at(0);
     await setLaunchPlan(await ctx(), film.id, {
-      // The server counts in UTC; the browser recounts in the viewer's own calendar.
       date: addDays(utcToday(clock()), 11),
-      channels: ['x', 'linkedin', 'product_hunt', 'reels'],
+      channels: ['x', 'linkedin'],
     });
     const html = await render(`/films/${film.id}`, filmPage(film.id));
     save('film-needs-you', html);
     const words = text(html);
 
+    // One job: the pink banner comes first after the title, with the one primary button.
     expect(words).toContain('Your script is ready');
-    expect(words).toContain("Approve it today and you're set for launch day.");
     expect(html.match(/btn btn-primary/g)).toHaveLength(1);
     expect(html).toContain(`href="/films/${film.id}/script"`);
-    expect(words).toContain('Step 4 of 10 · paused for you');
-    // The four stations before it are done, the approval waits, the rest are queued.
-    expect(html.match(/station station-done/g)).toHaveLength(3);
-    expect(html.match(/station station-active/g)).toHaveLength(1);
-    expect(html.match(/class="station"/g)).toHaveLength(6);
-    // Launch plan: the founder's day and channels, and the numbers from the Nova campaign.
-    expect(words).toMatch(/11 days to launch/);
-    expect(words).toContain('Product Hunt');
-    expect(words).toContain('Length 20s');
-    expect(words).toContain('Claims · 3 approved 4');
-    expect(words).toContain('Videos, at most 12');
-    expect(words).toContain('Brand found on nova.example.com');
-    expect(words).toContain('Sora for headlines, Inter for text.');
-    // The crew's decisions, with the sourced figure highlighted and the unsourced one not.
-    expect(words).toContain('Read 6 pages on nova.example.com.');
-    expect(html).toContain('class="claim claim-button"');
+    const main = html.slice(html.indexOf('<main'));
+    expect(main.indexOf('alert-needs')).toBeLessThan(main.indexOf('progress-card'));
+    expect(main.indexOf('progress-card')).toBeLessThan(main.indexOf('What the crew did'));
+    // The same four stops as the landing page, said in one line.
+    expect(words).toContain('Step 3 of 4 · You approve: waiting for you');
+    expect(html.match(/stop stop-done/g)).toHaveLength(2);
+    expect(html.match(/stop stop-needs/g)).toHaveLength(1);
+    expect(html.match(/stop stop-next/g)).toHaveLength(1);
+    expect(html).not.toContain('station');
+    // The film keeps the name the founder typed.
+    expect(main).toContain('<h1>nova.example.com</h1>');
+    // No launch plan, tiles or brand swatches here, and no second "New video" button.
+    expect(words).not.toContain('Launch plan');
+    expect(words).not.toContain('Videos, at most');
+    expect(html).not.toContain('swatch');
+    expect(main).not.toContain('href="/films/new"');
+    expect(words).toContain('Launching');
+    // What the crew did: newest first, three of them, the rest behind "Show all".
+    expect(words).toContain('What the crew did');
+    expect(html.match(/class="entry"/g)).toHaveLength(3);
+    expect(words).toContain('Show all 9');
+    expect(words.indexOf('Your script is ready. The crew paused')).toBeLessThan(
+      words.indexOf("Fixed scene 2 with the site's own figure"),
+    );
+    // A sourced figure is highlighted; the Validator's line agrees with the unconfirmed price.
     expect(html).toMatch(/<button[^>]*class="claim claim-button"[^>]*>40%<\/button>/);
-    expect(html).not.toMatch(/claim-button"[^>]*>73%/);
-    // Simulated, and said so. Boyle does not steam while the crew waits.
-    expect(words).toContain('Simulated');
-    expect(words).toContain('This is a simulated video.');
+    expect(words).toContain('needs you to confirm it');
+    // Simulated, said once, by the app's banner. Boyle does not steam while the crew waits.
+    expect(words.match(/Simulated films: no crew is working here/g)).toHaveLength(1);
+    expect(html).not.toContain('badge-simulated');
+    expect(words).not.toContain('This is a simulated video.');
     expect(html).not.toContain('class="puff');
   });
 
-  it('shows the crew at work, with Boyle steaming, and asks for the launch day', async () => {
+  it('labels a simulated film by the title where the app has no banner', async () => {
+    const ctx = await signIn();
+    at(-12 * MINUTE);
+    const { film } = await createFilm(await ctx(), { url: 'nova.example.com' });
+    at(0);
+    page.simulatedEnv = false;
+    try {
+      const html = await render(`/films/${film.id}`, filmPage(film.id));
+      expect(html.match(/badge-simulated/g)).toHaveLength(1);
+    } finally {
+      page.simulatedEnv = true;
+    }
+  });
+
+  it('shows the crew at work in one status card, with Boyle steaming and the wait', async () => {
     const ctx = await signIn();
     at(-10 * SECOND);
     const { film } = await createFilm(await ctx(), { url: 'orbit.example.com' });
@@ -181,16 +209,17 @@ describe('the film page', () => {
 
     expect(words).toContain('The crew is on it');
     expect(words).toContain('The Researcher is reading your site.');
-    expect(words).toContain('This page updates by itself.');
+    expect(words).toContain(
+      'A simulated film reaches its script about 30 seconds after it starts.',
+    );
+    expect(words).toContain('This page updates by itself');
     expect(html).toContain('class="puff puff-a"');
     expect(words).toContain('Researching');
-    expect(words).toContain('Step 1 of 10 · researching');
+    expect(words).toContain('Step 1 of 4 · Research');
     expect(html).not.toContain('alert-needs');
     expect(html).not.toContain('btn btn-primary');
-    expect(words).toContain('When do you launch?');
-    expect(words).toContain('Where will you post it?');
-    expect(words).not.toContain('days to launch');
-    expect(words).toContain('once the Director has written your script');
+    expect(words).not.toContain('When do you launch?');
+    expect(words).toContain('The crew works from the sample site, nova.example.com.');
   });
 
   it('moves on as the crew works: three moments of one film', async () => {
@@ -198,9 +227,9 @@ describe('the film page', () => {
     at(-35 * SECOND);
     const { film } = await createFilm(await ctx(), { url: 'lumen.example.com' });
     const moments: [string, number, string][] = [
-      ['film-live-0s', -35 * SECOND, 'Step 1 of 10'],
-      ['film-live-20s', -15 * SECOND, 'Step 3 of 10 · checking'],
-      ['film-live-35s', 0, 'Step 4 of 10 · paused for you'],
+      ['film-live-0s', -35 * SECOND, 'Step 1 of 4 · Research'],
+      ['film-live-20s', -15 * SECOND, 'Step 2 of 4 · Script'],
+      ['film-live-35s', 0, 'Step 3 of 4 · You approve: waiting for you'],
     ];
     for (const [name, when, summary] of moments) {
       at(when);
@@ -217,6 +246,7 @@ describe('the film page', () => {
     at(-3 * MINUTE + 31 * SECOND);
     await reviewScript(await ctx(), film.id, {
       decision: 'approve',
+      confirmedClaimIds: ['pricing'],
       version: 1,
       hookId: null,
       ctaId: 'start-free',
@@ -229,9 +259,9 @@ describe('the film page', () => {
     expect(words).toContain('Your video is ready');
     expect(words).toContain('2 files are waiting');
     expect(html).toContain(`href="/films/${film.id}/deliverables"`);
-    expect(words).toContain('Delivered');
-    expect(html.match(/station station-done/g)).toHaveLength(10);
-    expect(words).toMatch(/You Approved Approved version 1\./);
+    expect(words).toContain('All 4 steps done · Delivered');
+    expect(html.match(/stop stop-done/g)).toHaveLength(4);
+    expect(words).toContain('Delivered 2 files.');
     expect(html).not.toContain('class="puff');
   });
 });
@@ -249,6 +279,7 @@ describe('the app home', () => {
     at(yesterday + 31 * SECOND);
     await reviewScript(await ctx(), pebble.film.id, {
       decision: 'approve',
+      confirmedClaimIds: ['pricing'],
       version: 1,
       hookId: null,
       ctaId: 'start-free',
@@ -267,6 +298,7 @@ describe('the app home', () => {
     at(-24 * SECOND);
     await reviewScript(await ctx(), orbit.film.id, {
       decision: 'approve',
+      confirmedClaimIds: ['pricing'],
       version: 1,
       hookId: null,
       ctaId: 'book-demo',
@@ -281,7 +313,7 @@ describe('the app home', () => {
     save('films-home', html);
     const words = text(html);
     expect(words).toContain('Your videos');
-    expect(words).toContain('Nova launch needs you');
+    expect(words).toContain('nova.example.com needs you');
     expect(html.match(/btn btn-primary/g)).toHaveLength(1);
     expect(words).toContain('All videos');
     expect(words).toContain('Rendering');
@@ -291,7 +323,9 @@ describe('the app home', () => {
     expect(words).toContain('Yesterday');
     expect(words).toContain('Get files');
     expect(words).toContain('Review');
-    expect(html.match(/badge-simulated/g)).toHaveLength(4);
+    // The app's banner labels every film here, so the rows carry no label of their own.
+    expect(html).not.toContain('badge-simulated');
+    expect(words).toContain('Simulated films: no crew is working here');
   });
 
   it('offers one way in when there are no videos yet', async () => {
@@ -301,6 +335,7 @@ describe('the app home', () => {
     save('films-empty', html);
     expect(text(html)).toContain('No videos yet');
     expect(html.match(/btn btn-primary/g)).toHaveLength(1);
+    expect(text(html)).not.toContain('Make your first video');
   });
 
   it('starts a video from one field, prefilled from the landing page', async () => {
@@ -312,5 +347,13 @@ describe('the app home', () => {
     save('films-new', html);
     expect(html).toContain('value="nova.example.com"');
     expect(text(html)).toContain('What are you launching?');
+    expect(text(html)).toContain('Get my video');
+    // The same four stops as the landing page.
+    for (const stop of ['1. Research', '2. Script', '3. You approve', '4. Animate and deliver']) {
+      expect(text(html)).toContain(stop);
+    }
+    // Who is signed in: a square tile and a name, never Clerk's round avatar.
+    expect(html).toContain('crew crew-person crew-person-sm');
+    expect(text(html)).toContain('Ada Founder');
   });
 });

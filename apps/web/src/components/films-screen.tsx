@@ -14,13 +14,16 @@ type FilmList = { films: FilmView[] };
 const listDelay = (list: FilmList) => filmsPollDelay(list.films.map((film) => film.status));
 
 /** The app home, kept live while any film is being made. */
-export function LiveFilms({ initial }: { initial: FilmList }) {
+export function LiveFilms({ initial, banner }: { initial: FilmList; banner: boolean }) {
   const [list] = usePolled(initial, '/api/films', listDelay);
-  return <FilmsScreen films={list.films} />;
+  return <FilmsScreen films={list.films} banner={banner} />;
 }
 
-/** Every video, newest first, with the one waiting on the founder up top. */
-export function FilmsScreen({ films }: { films: FilmView[] }) {
+/**
+ * Every video, newest first, with the one waiting on the founder up top. `banner` is true when the
+ * app's simulated banner already labels the screen, so the rows need no label of their own.
+ */
+export function FilmsScreen({ films, banner = false }: { films: FilmView[]; banner?: boolean }) {
   // The film that has waited longest goes first: the list is newest first.
   const waiting = films.filter((film) => film.status === 'needs_you').reverse();
   const first = waiting[0];
@@ -68,7 +71,8 @@ export function FilmsScreen({ films }: { films: FilmView[] }) {
             renders.
           </p>
           <Link className="btn btn-primary" href="/films/new">
-            Make your first video <Icon name="arrow-right" />
+            <Icon name="plus" />
+            New video
           </Link>
         </section>
       ) : (
@@ -91,7 +95,7 @@ export function FilmsScreen({ films }: { films: FilmView[] }) {
               </thead>
               <tbody>
                 {films.map((film) => (
-                  <FilmRow key={film.id} film={film} />
+                  <FilmRow key={film.id} film={film} labelled={banner} />
                 ))}
               </tbody>
             </table>
@@ -102,7 +106,7 @@ export function FilmsScreen({ films }: { films: FilmView[] }) {
   );
 }
 
-function FilmRow({ film }: { film: FilmView }) {
+function FilmRow({ film, labelled }: { film: FilmView; labelled: boolean }) {
   const next =
     film.status === 'needs_you'
       ? { href: `/films/${film.id}/script`, label: 'Review' }
@@ -115,7 +119,7 @@ function FilmRow({ film }: { film: FilmView }) {
         <Link className="film-link" href={`/films/${film.id}`}>
           {film.title}
         </Link>
-        {film.simulated ? <SimulatedBadge /> : null}
+        {film.simulated && !labelled ? <SimulatedBadge /> : null}
       </td>
       <td className="src">{film.host}</td>
       <td>

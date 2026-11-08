@@ -1,14 +1,13 @@
 import type { Metadata } from 'next';
-import { Icon } from '../../../components/icon.tsx';
 import { ShowcaseWall } from '../../../components/showcase-wall.tsx';
-import { loadShowcase } from '../../../server/marketing.ts';
+import { loadMyShowcase, loadShowcase, type MyShowcase } from '../../../server/marketing.ts';
 
 export const metadata: Metadata = { title: 'Showcase' };
 export const dynamic = 'force-dynamic';
 
 /** The launch wall: real films whose founders chose to show them, Boiler Room's own first. */
 export default async function Showcase() {
-  const launches = await loadShowcase(24);
+  const [launches, mine] = await Promise.all([loadShowcase(24), loadMyShowcase()]);
   return (
     <>
       <div
@@ -28,16 +27,45 @@ export default async function Showcase() {
                 real launch.
               </p>
             </div>
-            {/* A plain link: /start is a route handler that redirects, not a page. */}
-            <a className="btn btn-primary" href="/start">
-              <Icon name="plus" />
-              Make yours
-            </a>
           </div>
+          {mine ? <YourFilms mine={mine} /> : null}
           <ShowcaseWall launches={launches} />
         </div>
       </section>
       <div className="dither dither-cream" />
     </>
+  );
+}
+
+/** For a founder who opted in: where their own film is. */
+function YourFilms({ mine }: { mine: MyShowcase }) {
+  return (
+    <div className="alert alert-done wall-mine" role="status">
+      <p>
+        {mine.shown > 0 ? (
+          <>
+            <strong>
+              {mine.shown === 1
+                ? 'Your video is on the wall.'
+                : `${mine.shown} of your videos are on the wall.`}
+            </strong>{' '}
+            It went up the moment you turned the showcase on. Turn it off on the video's delivery
+            page at any time.
+          </>
+        ) : null}
+        {mine.shown > 0 && mine.simulated > 0 ? ' ' : null}
+        {mine.simulated > 0 ? (
+          <>
+            <strong>
+              {mine.simulated === 1
+                ? 'Your simulated video stays off the wall.'
+                : 'Your simulated videos stay off the wall.'}
+            </strong>{' '}
+            Only real launches appear here. A real video goes up as soon as you turn the showcase
+            on.
+          </>
+        ) : null}
+      </p>
+    </div>
   );
 }

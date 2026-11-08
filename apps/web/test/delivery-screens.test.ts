@@ -67,6 +67,8 @@ function newUser(): Principal {
 
 const approve = (version: number) => ({
   decision: 'approve' as const,
+  // The sample's price is cited but nobody has confirmed it: approving vouches for it.
+  confirmedClaimIds: ['pricing'],
   version,
   hookId: null,
   ctaId: 'start-free',
@@ -170,9 +172,13 @@ function render(element: ReactElement): string {
   return renderToStaticMarkup(element);
 }
 
-/** The opening tags of every element with this class. */
+/**
+ * The opening tags of every element with this class, on the screen itself. A closed dialog, such
+ * as "Ask for changes", is not on the screen until it opens.
+ */
 function withClass(html: string, name: string): string[] {
-  return [...html.matchAll(/<[a-z]+\b[^>]*class="([^"]*)"[^>]*>/g)]
+  const onScreen = html.replace(/<dialog[\s\S]*?<\/dialog>/g, '');
+  return [...onScreen.matchAll(/<[a-z]+\b[^>]*class="([^"]*)"[^>]*>/g)]
     .filter((match) => match[1]?.split(' ').includes(name))
     .map((match) => match[0]);
 }
@@ -187,38 +193,55 @@ const text = (html: string) =>
     .replace(/\s+/g, ' ');
 
 describe('the delivery screen', () => {
-  it('shows a delivered simulated video, labelled as simulated on the player itself', async () => {
+  it('shows a delivered simulated video, labelled once, with a preview that plays', async () => {
     const html = delivery(await simulatedFilm('delivered'));
     shoot('delivery-simulated', '/films/x/deliverables', html, true);
     expect(text(html)).toContain('Your video is ready');
-    expect(text(html)).toContain("Simulated preview · Nova's brand");
-    expect(html).toContain('badge-simulated');
-    // One row per shape, none of them downloadable.
+    // One simulated label on the screen: the title's, as no app banner shows here.
+    expect(withClass(html, 'badge-simulated')).toHaveLength(1);
+    expect(text(html)).not.toContain('This is a simulated video.');
+    expect(text(html)).toContain("Preview of your approved script · Nova's brand");
+    // One row per shape, none downloadable, and no "No file" chips that look like buttons.
     expect(withClass(html, 'file')).toHaveLength(3);
     expect(text(html)).toContain('Landscape');
     expect(text(html)).toContain('Reels, TikTok, Shorts and stories');
     expect(withClass(html, 'btn-primary')).toHaveLength(0);
-    expect(text(html)).toContain('No file: simulated');
-    // The preview is the customer's brand and script.
+    expect(text(html).match(/No file/g)).toHaveLength(1);
+    expect(text(html)).not.toContain('No file: simulated');
+    // The preview plays: a real play control, and the time.
+    expect(html).toContain('aria-label="Play"');
+    expect(text(html)).toContain('0:00 / 0:20');
+    // The preview is the customer's brand and script, through the shared renderer.
     expect(text(html)).toContain(SAMPLE_CAMPAIGN.scenes[0]?.text[0]?.value ?? '');
-    expect(html).toContain('background:#0B1020');
-    // Showcase and the way to ask for changes.
+    expect(html).toContain('--bs-bg:#0B1020');
+    expect(html).toContain('--bs-display:&#x27;Sora&#x27;, system-ui');
+    // Showcase and the one way to ask for changes, with the limit said plainly.
     expect(text(html)).toContain('Show my video on the Boiler Room showcase');
+    expect(text(html)).toContain('Off');
     expect(text(html)).toContain('Simulated videos never appear on the showcase');
-    expect(text(html)).toContain(`This video has ${MAX_REVISIONS_PER_FILM} revisions left.`);
+    expect(text(html)).toContain(
+      `Each video can be changed ${MAX_REVISIONS_PER_FILM} times; this one has ${MAX_REVISIONS_PER_FILM} changes left.`,
+    );
     expect(text(html)).toContain('Ask for changes');
+    expect(text(html)).not.toContain('Want something changed?');
   });
 
-  it('plays and downloads a real file, with download as the one primary action', async () => {
+  it('says nothing simulated when the app banner already labels the screen', async () => {
+    const detail = await simulatedFilm('delivered');
+    const html = render(
+      createElement(DeliveryScreen, { detail, maxRevisions: MAX_REVISIONS_PER_FILM, banner: true }),
+    );
+    expect(withClass(html, 'badge-simulated')).toHaveLength(0);
+  });
+
+  it('plays and downloads a real film, with "Download all" as the one primary action', async () => {
     const detail = await realFilm();
     const html = delivery(detail);
     shoot('delivery-real', '/films/x/deliverables', html, false);
     expect(html).toContain(`<video`);
     expect(html).toContain(`src="${detail.deliverables[0]?.playUrl}"`);
-    expect(withClass(html, 'btn-primary')).toEqual([
-      expect.stringContaining(`href="${detail.deliverables[0]?.downloadUrl}"`),
-    ]);
-    expect(text(html)).toContain('Download 16:9');
+    expect(withClass(html, 'btn-primary')).toHaveLength(1);
+    expect(text(html)).toContain('Download all 2');
     expect(text(html)).toContain('2.4 MB');
     expect(text(html)).not.toContain('Simulated');
   });
@@ -251,7 +274,7 @@ describe('the delivery screen', () => {
     expect(text(html)).toContain('Earlier cut (1)');
     expect(text(html)).toContain('nova-com-16x9-main-v2.mp4');
     expect(text(html)).toContain('nova-com-16x9-main.mp4');
-    expect(text(html)).toContain(`This video has ${MAX_REVISIONS_PER_FILM - 1} revisions left.`);
+    expect(text(html)).toContain(`this one has ${MAX_REVISIONS_PER_FILM - 1} changes left.`);
   });
 
   it('says the video is on its way before anything is delivered', async () => {

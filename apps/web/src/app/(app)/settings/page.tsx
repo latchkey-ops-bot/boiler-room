@@ -1,6 +1,8 @@
 import { clerkClient, currentUser } from '@clerk/nextjs/server';
+import { and, eq } from 'drizzle-orm';
 import type { Metadata } from 'next';
 import { type SettingsOwner, SettingsScreen } from '../../../components/settings-screen.tsx';
+import { films } from '../../../db/schema.ts';
 import { pageContext } from '../../../server/next.ts';
 import '../../../styles/delivery.css';
 
@@ -9,9 +11,13 @@ export const metadata: Metadata = { title: 'Settings' };
 /** The account the videos belong to. Profile and password live in Clerk's own screen. */
 export default async function SettingsPage() {
   const ctx = await pageContext();
-  const [user, owner] = await Promise.all([
+  const [user, owner, shown] = await Promise.all([
     currentUser().catch(() => null),
     ownerOf(ctx.account.kind, ctx.account.clerkOrgId),
+    ctx.db
+      .select({ pipeline: films.pipeline })
+      .from(films)
+      .where(and(eq(films.accountId, ctx.account.id), eq(films.showcaseOptIn, true))),
   ]);
   return (
     <SettingsScreen
@@ -24,6 +30,10 @@ export default async function SettingsPage() {
           : null
       }
       owner={owner}
+      showcase={{
+        real: shown.filter((film) => film.pipeline !== 'simulated').length,
+        simulated: shown.filter((film) => film.pipeline === 'simulated').length,
+      }}
       accountId={ctx.account.id}
       memberSince={ctx.account.createdAt}
     />
