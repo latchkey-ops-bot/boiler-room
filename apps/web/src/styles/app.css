@@ -590,6 +590,10 @@
 .side .brand {
   padding: 0 6px;
 }
+/* The app's bar has room for the wordmark even on a phone. */
+.side .brand .brand-word {
+  display: block;
+}
 .side nav {
   display: grid;
   gap: 4px;
@@ -707,13 +711,19 @@
 .callout .text {
   display: grid;
   gap: 2px;
-  flex: 1;
+  /* Room for a sentence before the button drops below it on a phone */
+  flex: 1 1 14em;
 }
 .callout h3 {
   font-size: 21px;
 }
 .alert-needs.callout h3 {
   color: var(--br-attention-ink);
+}
+/* On blue, the button's arrow stays white. The needs-you arrow is pink, as in the sample. */
+.alert-done .btn .icon,
+.alert-failed .btn .icon {
+  color: inherit;
 }
 .callout .icon {
   width: 28px;
@@ -739,6 +749,40 @@
   gap: var(--br-space-5);
   max-width: 640px;
   padding: var(--br-space-7) 0;
+}
+/* What happens after the URL goes in: four quiet steps, the founder's one in pink */
+.next-steps {
+  display: grid;
+  gap: var(--br-space-3);
+  margin-top: var(--br-space-5);
+}
+.next-steps h2 {
+  color: var(--br-muted);
+}
+.next-steps ol {
+  display: grid;
+  gap: var(--br-space-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.next-steps li {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+}
+.next-steps .crew {
+  width: 36px;
+  height: 36px;
+}
+.next-steps .crew .icon {
+  width: 18px;
+  height: 18px;
+}
+.next-steps .crew-you {
+  background: var(--br-attention-soft);
+  color: var(--br-attention-ink);
+  --frame: var(--br-attention-ink);
 }
 
 /* Pipeline tracker: ten stations on one pipe */
@@ -877,24 +921,239 @@
   font-size: var(--br-text-sm);
 }
 
+.entry-body {
+  display: grid;
+  gap: 2px;
+}
+.entry .claim-card {
+  margin-top: var(--br-space-2);
+}
+/* A sourced figure in a crew message: the claim highlight, and the quote is one click away. */
+.claim-button {
+  border: 0;
+  margin: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 800;
+  line-height: inherit;
+  cursor: pointer;
+}
+.claim-button:hover,
+.claim-button[aria-expanded="true"] {
+  background: var(--br-cream-deep);
+}
+.claim-button:focus-visible {
+  outline: 2px solid var(--br-deep);
+  outline-offset: 2px;
+}
+.log-empty {
+  margin-top: var(--br-space-4);
+}
+
+/* ---------- Film page: the top bar, the title, the cards ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+}
+.topbar .btn {
+  margin-left: auto;
+}
+.title {
+  display: grid;
+  gap: var(--br-space-2);
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  flex-wrap: wrap;
+}
+.title-row .badge-simulated {
+  margin-left: calc(var(--br-space-2) * -1);
+}
+h2.card-title {
+  font-size: var(--br-text-h3);
+}
+.card-sub {
+  font-size: var(--br-text-sm);
+}
+.callout-working {
+  overflow: hidden;
+}
+.callout-working .mascot {
+  flex: none;
+}
+/* At 48px the trail rises a short way, so it stays inside the banner. */
+.callout-working .mascot .puff {
+  animation-name: br-rise-short;
+}
+@keyframes br-rise-short {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0);
+  }
+  12% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(6px, -16px);
+  }
+}
+
+/* Launch plan: days to launch, then what the crew is making */
+.launch-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--br-space-3);
+}
+.countdown {
+  --frame: var(--br-cream-deep);
+  display: flex;
+  align-items: center;
+  gap: var(--br-space-4);
+  margin-top: var(--br-space-4);
+  padding: var(--br-space-4);
+  background: var(--br-white);
+}
+.countdown .score {
+  flex: none;
+  font-size: 64px;
+  color: var(--br-attention-ink);
+}
+.countdown-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.countdown-text strong {
+  font: 700 19px / 1.2 var(--br-font-display);
+  color: var(--br-ink);
+}
+.countdown-text .muted {
+  font-size: var(--br-text-sm);
+}
+.post-to {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: var(--br-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.launch-form {
+  --frame: var(--br-cream-deep);
+  display: grid;
+  gap: var(--br-space-4);
+  margin-top: var(--br-space-4);
+  padding: var(--br-space-4);
+  background: var(--br-white);
+}
+.launch-form fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.launch-form legend {
+  margin-bottom: var(--br-space-2);
+  color: var(--br-muted);
+}
+.launch-form .input {
+  max-width: 220px;
+}
+.channel-choices {
+  display: flex;
+  gap: var(--br-space-3) var(--br-space-4);
+  flex-wrap: wrap;
+}
+.launch-actions {
+  display: flex;
+  gap: var(--br-space-3);
+  flex-wrap: wrap;
+}
+.plan-later {
+  margin-top: var(--br-space-4);
+  font-size: var(--br-text-sm);
+  color: var(--br-muted);
+}
+
 .facts {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: var(--br-space-3);
-  margin-top: var(--br-space-4);
+  margin: var(--br-space-4) 0 0;
 }
 .fact {
+  display: flex;
+  flex-direction: column;
   padding: var(--br-space-3);
   background: var(--br-paper);
+}
+.fact dt {
+  order: 2;
+}
+.fact dd {
+  margin: 0;
 }
 .fact .score {
   display: block;
   font-size: 30px;
   margin-bottom: 4px;
 }
+.kit {
+  display: grid;
+  gap: var(--br-space-2);
+  margin-top: var(--br-space-5);
+}
+.swatches {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: var(--br-space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.swatch {
+  width: 36px;
+  height: 36px;
+  margin: 2px;
+  box-shadow:
+    0 -2px 0 0 var(--br-ink),
+    0 2px 0 0 var(--br-ink),
+    -2px 0 0 0 var(--br-ink),
+    2px 0 0 0 var(--br-ink);
+}
+.kit-fonts {
+  font-size: var(--br-text-sm);
+}
 
+/* ---------- The app home: all videos ---------- */
+
+.videos h2 {
+  margin-bottom: var(--br-space-3);
+}
+.table-scroll {
+  overflow-x: auto;
+}
 .films-table .name {
   font-weight: 800;
+}
+.films-table .film-link {
+  color: var(--br-ink);
+  box-shadow: none;
+}
+.films-table .film-link:hover {
+  color: var(--br-deep);
+  box-shadow: 0 2px 0 var(--br-sky);
+}
+.films-table .name .badge-simulated {
+  margin-left: var(--br-space-2);
 }
 .films-table .src {
   font-family: var(--br-font-mono);
@@ -1026,6 +1285,7 @@ textarea.input {
   }
   .side nav {
     display: flex;
+    order: 2;
     overflow-x: auto;
     width: 100%;
   }
@@ -1033,11 +1293,15 @@ textarea.input {
     white-space: nowrap;
   }
   .side .me {
+    order: 1;
     margin: 0 0 0 auto;
     padding: 0;
   }
   .app-main {
     padding: var(--br-space-5) var(--br-space-4) var(--br-space-7);
+  }
+  .topbar .crumbs {
+    display: none;
   }
   .films-table th:nth-child(2),
   .films-table td:nth-child(2),
@@ -1047,5 +1311,34 @@ textarea.input {
   }
   .callout {
     flex-wrap: wrap;
+  }
+}
+@media (max-width: 560px) {
+  /* On a phone each video is two lines: its name, then its state and the next step. */
+  .films-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+  .films-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: var(--br-space-2) var(--br-space-3);
+    padding: var(--br-space-3) 0;
+    border-bottom: 2px dashed var(--br-cream-deep);
+  }
+  .films-table td {
+    display: block;
+    padding: 0;
+    border: 0;
+  }
+  .films-table td.name {
+    grid-column: 1 / -1;
+  }
+  .films-table .film-link {
+    overflow-wrap: anywhere;
   }
 }

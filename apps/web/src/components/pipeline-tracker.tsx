@@ -1,3 +1,6 @@
+'use client';
+
+import { useEffect, useRef } from 'react';
 import {
   type FilmStatus,
   STAGE_ICONS,
@@ -5,18 +8,11 @@ import {
   STAGES,
   type Stage,
   stageIndex,
+  WORKING_LABELS,
 } from '../lib/film.ts';
 import { Icon } from './icon.tsx';
 
-type StationState = 'done' | 'working' | 'needs' | 'failed' | 'queued';
-
-const STATE_LABEL: Record<StationState, string> = {
-  done: 'Done',
-  working: 'Working',
-  needs: 'Waiting for you',
-  failed: 'Sent back',
-  queued: 'Queued',
-};
+export type StationState = 'done' | 'working' | 'needs' | 'failed' | 'queued';
 
 const STATION_CLASS: Record<StationState, string> = {
   done: 'station station-done',
@@ -34,33 +30,61 @@ const CREW_CLASS: Record<StationState, string> = {
   queued: 'crew crew-waiting',
 };
 
-function stationState(station: Stage, stage: Stage, status: FilmStatus): StationState {
+/** Where one station is, given where the film is. */
+export function stationState(station: Stage, stage: Stage, status: FilmStatus): StationState {
   const at = stageIndex(stage);
   const here = stageIndex(station);
-  if (status === 'done') return 'done';
-  if (here < at) return 'done';
+  if (status === 'done' || here < at) return 'done';
   if (here > at) return 'queued';
   if (status === 'needs_you') return 'needs';
   if (status === 'failed') return 'failed';
   return status === 'queued' ? 'queued' : 'working';
 }
 
+/** The word under a station, as in the dashboard sample: Done, Passed, Waiting, Queued. */
+export function stationWord(station: Stage, state: StationState): string {
+  if (state === 'done') {
+    if (station === 'checks') return 'Passed';
+    if (station === 'approval') return 'Approved';
+    return 'Done';
+  }
+  if (state === 'needs') return 'Waiting';
+  if (state === 'failed') return 'Stopped';
+  if (state === 'working') return 'Working';
+  return 'Queued';
+}
+
+/** The line beside the tracker's title: "Step 4 of 10 · paused for you". */
+export function trackerSummary(stage: Stage, status: FilmStatus): string {
+  const step = `Step ${stageIndex(stage) + 1} of ${STAGES.length}`;
+  if (status === 'done') return 'Delivered';
+  if (status === 'queued') return `${step} · queued`;
+  if (status === 'needs_you') return `${step} · paused for you`;
+  if (status === 'failed') return `${step} · stopped`;
+  return `${step} · ${WORKING_LABELS[stage].toLowerCase()}`;
+}
+
 /** Ten stations on one pipe. Done pipes are filled; pipes still to come are dashed. */
 export function PipelineTracker({ stage, status }: { stage: Stage; status: FilmStatus }) {
-  const step = stageIndex(stage) + 1;
-  const summary =
-    status === 'done'
-      ? 'Delivered'
-      : status === 'needs_you'
-        ? `Step ${step} of ${STAGES.length} · paused for you`
-        : `Step ${step} of ${STAGES.length}`;
+  const scroller = useRef<HTMLDivElement>(null);
+  const current = status === 'done' ? null : stage;
+  // On a phone the pipe scrolls inside its frame. Keep the station the film is at in view, also as
+  // the film moves on while the page is open.
+  useEffect(() => {
+    const frame = scroller.current;
+    const station = current && frame?.querySelector<HTMLElement>(`[data-stage="${current}"]`);
+    if (!frame || !station || frame.scrollWidth <= frame.clientWidth) return;
+    frame.scrollLeft = station.offsetLeft - (frame.clientWidth - station.offsetWidth) / 2;
+  }, [current]);
   return (
-    <section className="card pipeline-card" aria-label="Pipeline">
+    <section className="card pipeline-card" aria-labelledby="pipeline-title">
       <div className="pipeline-head">
-        <h2 style={{ fontSize: 24 }}>Pipeline</h2>
-        <span className="label muted">{summary}</span>
+        <h2 id="pipeline-title" className="card-title">
+          Pipeline
+        </h2>
+        <span className="label muted">{trackerSummary(stage, status)}</span>
       </div>
-      <div className="track-scroll">
+      <div className="track-scroll" ref={scroller}>
         <ol className="track">
           {STAGES.map((station) => {
             const state = stationState(station, stage, status);
@@ -68,13 +92,14 @@ export function PipelineTracker({ stage, status }: { stage: Stage; status: FilmS
               <li
                 key={station}
                 className={STATION_CLASS[state]}
-                aria-current={station === stage ? 'step' : undefined}
+                data-stage={station}
+                aria-current={station === current ? 'step' : undefined}
               >
                 <span className={CREW_CLASS[state]}>
                   <Icon name={STAGE_ICONS[station]} />
                 </span>
                 <span className="name">{STAGE_LABELS[station]}</span>
-                <span className="label state">{STATE_LABEL[state]}</span>
+                <span className="label state">{stationWord(station, state)}</span>
               </li>
             );
           })}

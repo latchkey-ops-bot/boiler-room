@@ -71,6 +71,10 @@ export const films = sqliteTable(
     formatsJson: text('formats_json').notNull().default('[]'),
     /** The customer agreed to show this film on the public showcase once it is delivered. */
     showcaseOptIn: integer('showcase_opt_in', { mode: 'boolean' }).notNull().default(false),
+    /** The day the founder launches, as `YYYY-MM-DD` with no time zone. Null until they say. */
+    launchDate: text('launch_date'),
+    /** Where the founder will post the film, as a JSON array of channels such as ["x","reels"]. */
+    launchChannelsJson: text('launch_channels_json').notNull().default('[]'),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
   },
