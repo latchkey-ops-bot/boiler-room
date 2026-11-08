@@ -221,13 +221,18 @@ const Headline = ({
   f: number;
   accent: Accent | undefined;
 }) => {
-  const { stage } = useScene();
+  const { stage, durationInFrames, fps, timing } = useScene();
   const { colors, fonts } = useBrand();
+  // The headline drifts larger about the frame centre to the scene's last frame. It is set in the
+  // line box, and smaller where it would otherwise drift out of the safe area by the end, however
+  // long the card runs. A push out slides the whole card off, so the frames it drifts on past its
+  // end are not held anywhere.
+  const largest = typeDrift(specFrame(durationInFrames - 1 - timing.entryAt, fps));
   const fit = useSpecFit(
     value,
     { font: 'display', weight: typography.weight.display, cap: specType.capS },
     stage,
-    { width: lineBox(stage), maxLines: 1 },
+    { width: Math.min(lineBox(stage), stage.safe.width / largest), maxLines: 1 },
   );
   const lineTop = top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
   const { blur, y } = rack(f);
@@ -270,25 +275,29 @@ const Headline = ({
   );
 };
 
-const NodeLabel = ({
-  value,
-  node,
-  f,
-  start,
-}: {
-  value: string;
-  node: CardNode;
-  f: number;
-  start: number;
-}) => {
+/** A node label, set under its node's visual on up to two lines. */
+const useLabelFit = (value: string, node: CardNode): SpecFit => {
   const { stage } = useScene();
-  const { colors, fonts } = useBrand();
-  const fit = useSpecFit(
+  return useSpecFit(
     value,
     { font: 'body', weight: typography.weight.strong, cap: specType.capS * card.labelCap },
     stage,
     { width: node.label.width, maxLines: 2 },
   );
+};
+
+const NodeLabel = ({
+  fit,
+  node,
+  f,
+  start,
+}: {
+  fit: SpecFit;
+  node: CardNode;
+  f: number;
+  start: number;
+}) => {
+  const { colors, fonts } = useBrand();
   if (f < start) return null;
   return (
     <RisingWords
@@ -322,12 +331,19 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
 
   const causeRect = causeImage ? cropRect(layout.cause, causeImage) : chipRect(layout.cause);
   const effectRect = effectImage ? cropRect(layout.effect, effectImage) : chipRect(layout.effect);
+  const causeLabel = useLabelFit(labels[0]?.value ?? '', layout.cause);
+  const effectLabel = useLabelFit(labels[1]?.value ?? '', layout.effect);
 
-  // The connector runs from the facing edge of one visual to the facing edge of the other.
+  // The connector runs from the facing edge of one node to the facing edge of the other. Side by
+  // side those are the visuals' edges. Stacked, the cause's label sits under its visual, so the
+  // line starts under the label rather than through it.
   const along = layout.axis === 'x';
+  const causeBottom = labels[0]
+    ? layout.cause.label.y + causeLabel.height
+    : causeRect.y + causeRect.height;
   const from = along
     ? { x: causeRect.x + causeRect.width, y: causeRect.y + causeRect.height / 2 }
-    : { x: causeRect.x + causeRect.width / 2, y: causeRect.y + causeRect.height };
+    : { x: causeRect.x + causeRect.width / 2, y: causeBottom };
   const to = along
     ? { x: effectRect.x, y: effectRect.y + effectRect.height / 2 }
     : { x: effectRect.x + effectRect.width / 2, y: effectRect.y };
@@ -405,20 +421,10 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
                 </div>
               ) : null}
               {labels[0] ? (
-                <NodeLabel
-                  value={labels[0].value}
-                  node={layout.cause}
-                  f={f}
-                  start={beats.causeLabel}
-                />
+                <NodeLabel fit={causeLabel} node={layout.cause} f={f} start={beats.causeLabel} />
               ) : null}
               {labels[1] ? (
-                <NodeLabel
-                  value={labels[1].value}
-                  node={layout.effect}
-                  f={f}
-                  start={beats.effectLabel}
-                />
+                <NodeLabel fit={effectLabel} node={layout.effect} f={f} start={beats.effectLabel} />
               ) : null}
             </div>
           </div>
