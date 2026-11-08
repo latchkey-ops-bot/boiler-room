@@ -1,6 +1,7 @@
 import { type Campaign, contrastRatio, MIN_CONTRAST, readableOn } from '@boiler-room/schema';
 import { fallbackRadius } from '../tokens.ts';
 import { mix, withAlpha } from './color.ts';
+import { brandFontFamily } from './fonts.ts';
 import type { ResolvedLogo } from './logo.ts';
 
 /**
@@ -74,9 +75,10 @@ export function resolveTheme(brand: Campaign['brand'], logo: ResolvedLogo): Bran
       shadow: withAlpha(mix(background, BLACK, 0.8), isDark ? 0.7 : 0.2),
       glow: withAlpha(primary, isDark ? 0.2 : 0.12),
     },
+    // Each role's own family, as `loadBrandFonts` registers it, never the brand's shared name.
     fonts: {
-      display: cssFamily(brand.fonts.display.family),
-      body: cssFamily(brand.fonts.body.family),
+      display: cssFamily(brandFontFamily('display', brand.fonts.display)),
+      body: cssFamily(brandFontFamily('body', brand.fonts.body)),
     },
     radius: brand.radius ?? fallbackRadius,
     logo,

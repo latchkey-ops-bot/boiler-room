@@ -1,8 +1,9 @@
 import { contrastRatio, MIN_CONTRAST } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
 import { mix, withAlpha } from '../src/brand/color.ts';
+import { brandFontFamily } from '../src/brand/fonts.ts';
 import { rejectLogo, resolveLogo } from '../src/brand/logo.ts';
-import { resolveTheme } from '../src/brand/theme.ts';
+import { cssFamily, resolveTheme } from '../src/brand/theme.ts';
 import { novaCopy, quillhavenCopy } from './fixtures.ts';
 
 const wordmark = { kind: 'wordmark', reason: 'missing' } as const;
@@ -71,8 +72,32 @@ describe('resolveTheme', () => {
     const theme = resolveTheme(brand, wordmark);
     expect(theme.colors.background).toBe(brand.colors.background);
     expect(theme.colors.primary).toBe(brand.colors.primary);
-    expect(theme.fonts).toEqual({ display: '"Fraunces"', body: '"Source Serif 4"' });
+    expect(theme.fonts.display).toContain('Fraunces');
+    expect(theme.fonts.body).toContain('Source Serif 4');
     expect(theme.radius).toBe(4);
+  });
+
+  it('gives each font role a family of its own, so two files under one name never compete', () => {
+    // One family shipped as static weights: the same name, a bold file and a regular file.
+    const brand = novaCopy().brand;
+    brand.fonts.display = { family: 'Nova Sans', source: 'font-display' };
+    brand.fonts.body = { family: 'Nova Sans', source: 'font-body' };
+    const { fonts } = resolveTheme(brand, wordmark);
+    expect(fonts.display).not.toBe(fonts.body);
+    expect(fonts.display).toBe(
+      cssFamily(brandFontFamily('display', { family: 'Nova Sans', source: 'font-display' })),
+    );
+    expect(fonts.body).toBe(
+      cssFamily(brandFontFamily('body', { family: 'Nova Sans', source: 'font-body' })),
+    );
+  });
+
+  it('names a role the same way every time, so every tab and machine agrees', () => {
+    const font = { family: 'Sora', source: 'font-display' };
+    expect(brandFontFamily('display', font)).toBe(brandFontFamily('display', { ...font }));
+    expect(brandFontFamily('display', font)).not.toBe(
+      brandFontFamily('display', { ...font, source: 'other.woff2' }),
+    );
   });
 
   it('falls back to primary for an accent that would vanish', () => {

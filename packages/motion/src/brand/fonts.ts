@@ -17,16 +17,42 @@ export function fontUrl(source: string, { assets }: Pick<Campaign, 'assets'>): s
   return assetUrl(asset?.src ?? source);
 }
 
+export type FontRole = 'display' | 'body';
+type BrandFont = Campaign['brand']['fonts'][FontRole];
+
+/** FNV-1a, so that a name is the same in every tab and on every machine. */
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (const char of text) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+/**
+ * The family a role's file is registered under. It is the brand's name for the family plus the role
+ * and its file, so that two files the brand calls by one name, such as a bold and a regular from one
+ * kit, never compete: two faces of one family with the same descriptors leave the browser to use
+ * whichever loaded last, which changes from tab to tab.
+ */
+export const brandFontFamily = (role: FontRole, { family, source }: BrandFont): string =>
+  `${family} [${role} ${fnv1a(`${family}\0${source}`)}]`;
+
 const loaded = new Map<string, Promise<void>>();
 
 /**
- * Loads each brand font once per page. The whole weight range is declared so that a static file is
- * used as it is, rather than thickened by the browser. A font that fails stops the render: a film
- * set in whatever the machine had installed is worse than no film, and would not be repeatable.
+ * Loads each brand font once per page, each role under its own family. The whole weight range is
+ * declared so that a static file is used as it is, rather than thickened by the browser. A font that
+ * fails stops the render: a film set in whatever the machine had installed is worse than no film,
+ * and would not be repeatable.
  */
 export async function loadBrandFonts({ brand, assets }: Pick<Campaign, 'brand' | 'assets'>) {
-  const requests = [brand.fonts.display, brand.fonts.body].map(({ family, source }) => {
-    const url = fontUrl(source, { assets });
+  const roles: FontRole[] = ['display', 'body'];
+  const requests = roles.map((role) => {
+    const font = brand.fonts[role];
+    const family = brandFontFamily(role, font);
+    const url = fontUrl(font.source, { assets });
     const key = `${family}|${url}`;
     const existing = loaded.get(key);
     if (existing) return existing;
