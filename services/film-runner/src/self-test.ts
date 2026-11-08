@@ -3,10 +3,11 @@
  * what a fork must still hold. Prints one JSON line and exits 0 only when every check passes.
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deriveRunKey, sha256Hex, signCanonical, verifyCanonical } from './contract.ts';
 import { readConfig, STANDIN_PATH } from './film-command.ts';
+import { naiveKeyIn } from './scrub.ts';
 
 interface Check {
   name: string;
@@ -55,16 +56,13 @@ export async function selfTest({
       add('film command (pnpm film)', script);
       add('pnpm', has('pnpm'));
     }
-    if (existsSync(config.envFile)) {
-      const mode = statSync(config.envFile).mode & 0o777;
-      add('key file is private', (mode & 0o077) === 0, mode.toString(8));
-    } else {
-      add(
-        'key file',
-        config.adapter === 'standin',
-        config.adapter === 'standin' ? 'absent; the stand-in needs none' : 'missing',
-      );
-    }
+    // The base snapshot holds no Naive key: the website sends one with each launch.
+    const baked = naiveKeyIn(config.envFile);
+    add(
+      'no Naive key on disk',
+      !baked,
+      baked ? `${config.envFile} holds one` : 'the website sends one per launch',
+    );
     if (config.swapfile) {
       let on = false;
       try {

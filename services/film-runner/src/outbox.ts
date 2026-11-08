@@ -8,6 +8,8 @@
  * - `seq`: the next sequence number. Monotonic over the whole run, across launches.
  * - `outbox.jsonl`: every event given a number, in order, one per line.
  * - `outbox.acked`: the highest sequence number the website has confirmed.
+ * - `outbox.dropped.jsonl`: events set aside unsent, such as a past phase's `runner.exit` or a batch
+ *   the website answered `409 wrong_state`. Kept for the log; never sent.
  */
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -82,6 +84,27 @@ export class Outbox {
     this.queue = this.queue.filter((event) => event.seq > seq);
     if (this.queue.length === 0) writeFileSync(join(this.dir, 'outbox.jsonl'), '');
     for (const listener of this.listeners) listener();
+  }
+
+  /**
+   * Takes the unconfirmed events that match out of the queue, for good: they are written to
+   * `outbox.dropped.jsonl` and `outbox.jsonl` keeps only the rest, so no later launch resends them.
+   * Their sequence numbers are never used again.
+   */
+  drop(predicate: (event: RunnerEvent) => boolean): RunnerEvent[] {
+    const dropped = this.queue.filter(predicate);
+    if (dropped.length === 0) return [];
+    this.queue = this.queue.filter((event) => !predicate(event));
+    appendFileSync(
+      join(this.dir, 'outbox.dropped.jsonl'),
+      dropped.map((event) => `${JSON.stringify(event)}\n`).join(''),
+    );
+    writeFileSync(
+      join(this.dir, 'outbox.jsonl'),
+      this.queue.map((event) => `${JSON.stringify(event)}\n`).join(''),
+    );
+    for (const listener of this.listeners) listener();
+    return dropped;
   }
 
   /** Calls `listener` whenever an event is pushed or confirmed. Returns the unsubscribe. */

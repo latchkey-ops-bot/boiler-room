@@ -26,7 +26,10 @@ export interface RunnerConfig {
   filmDir: string;
   /** Turned on at every start, in case a fork booted with swap off. */
   swapfile: string | null;
-  /** The env file that holds the runner's Naive key. */
+  /**
+   * The env file the film command reads its Naive key from (`BOILER_ROOM_ENV`). The base snapshot
+   * holds none: the runner points this at the launch's own key file, `<runDir>/naive.env`.
+   */
   envFile: string;
   /** The stand-in's pause between steps. */
   standinPaceMs?: number;

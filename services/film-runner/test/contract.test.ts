@@ -1,9 +1,11 @@
 import { createHmac } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import * as web from '../../../apps/web/src/lib/film.ts';
 import {
+  BOOTSTRAP_PATH,
   CREW,
   canonicalString,
   deriveRunKey,
@@ -15,12 +17,16 @@ import {
   parseBootstrap,
   parseFilmEvent,
   parseInstructions,
+  RUN_DIR_NAME,
+  RUN_KEY_FILE_PATH,
+  SCRUB_COMMAND,
   STAGES,
   safeName,
   sha256Hex,
   signCanonical,
   signRequest,
   signWatchdog,
+  UPLOAD_KINDS,
   uploadPath,
   variantKey,
   verifyCanonical,
@@ -202,6 +208,27 @@ describe('signatures', () => {
   });
 });
 
+describe('where the secrets go on the computer', () => {
+  it('is one path for the website that writes the bootstrap and the runner that reads it', () => {
+    // The runner reads `<runDir>/bootstrap.json`, and main.ts puts the run dir at <home>/br-run.
+    expect(join('/home/naive', BOOTSTRAP_PATH)).toBe(
+      join('/home/naive', RUN_DIR_NAME, 'bootstrap.json'),
+    );
+    expect(join('/home/naive', RUN_KEY_FILE_PATH)).toBe(
+      join('/home/naive', RUN_DIR_NAME, 'naive.env'),
+    );
+  });
+
+  it('can all be deleted by the one command the website runs before a checkpoint', () => {
+    expect(SCRUB_COMMAND).toContain(`"$HOME/${BOOTSTRAP_PATH}"`);
+    expect(SCRUB_COMMAND).toContain(`"$HOME/${RUN_KEY_FILE_PATH}"`);
+  });
+
+  it('caps an MP4 well under what one Worker request can hold', () => {
+    expect(UPLOAD_KINDS.mp4.maxBytes).toBe(60 * 1024 * 1024);
+  });
+});
+
 describe('bootstrap.json and instructions', () => {
   const good = {
     v: 1,
@@ -229,6 +256,13 @@ describe('bootstrap.json and instructions', () => {
       parseBootstrap({ ...good, callbackBase: 'http://127.0.0.1:8787/api/runner/v1' }).filmId,
     ).toBe(FILM_ID);
     expect(() => parseBootstrap({ ...good, key: 'nothex' })).toThrow(/key/);
+    expect(parseBootstrap({ ...good, naiveKey: `sk_live_${'x'.repeat(30)}` }).naiveKey).toMatch(
+      /^sk_live_/,
+    );
+    expect(() => parseBootstrap({ ...good, naiveKey: 'short' })).toThrow(/naiveKey/);
+    expect(() => parseBootstrap({ ...good, naiveKey: 'sk_live_x y z with spaces' })).toThrow(
+      /naiveKey/,
+    );
     expect(() => parseBootstrap({ ...good, filmId: 'flm_x' })).toThrow(/filmId/);
     expect(() => parseInstructions({ ...instructionsFor('render'), approval: null })).toThrow(
       /approval/,

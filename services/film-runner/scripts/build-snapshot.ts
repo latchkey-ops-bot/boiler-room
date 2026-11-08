@@ -9,10 +9,14 @@
  * 2. The setup from `recipe.ts`, started detached and polled, so no exec outlasts Naive's 600 s:
  *    Chrome libraries and fonts, swap, pnpm, both checkouts, dependencies, the Remotion browser,
  *    and `~/.film-runner.json`.
- * 3. The runner's Naive key, when the env file has `NAIVE_RUNNER_KEY`, written with `fs/write` to
- *    `~/.boiler-room.env` as `NAIVE_API_KEY=...` and made private. It never goes through a command.
- * 4. The ready check, a clean-up, the snapshot, and the builder destroyed.
- * 5. A fork of the snapshot runs the ready check again, and is destroyed.
+ * 3. The ready check, a clean-up, then `sudo` narrowed to `swapon <swapfile>` alone, the snapshot,
+ *    and the builder destroyed.
+ * 4. A fork of the snapshot runs the ready check again, which also checks that `sudo` is narrowed,
+ *    and is destroyed.
+ *
+ * The snapshot holds no Naive key. Every computer and checkpoint forked from it would hold the
+ * same long-lived key, so the website sends the runner's key with each launch instead, in the
+ * bootstrap file, and the runner keeps it on disk only while the film command runs.
  *
  * Uses the admin `NAIVE_API_KEY` from `~/.boiler-room.env`; never prints it. Both commits must be on
  * origin: the computer clones the public repo over https.
@@ -30,19 +34,9 @@ import {
   naiveApi,
   waitDetached,
   waitRunning,
-  writeFile,
 } from '../src/launcher.ts';
-import {
-  assertPushed,
-  chargedUsd,
-  envValue,
-  git,
-  remoteHead,
-  repoUrl,
-  requireEnv,
-  stamp,
-} from './lib.ts';
-import { CLEAN_SCRIPT, readyCheck, setupScript } from './recipe.ts';
+import { assertPushed, chargedUsd, git, remoteHead, repoUrl, requireEnv, stamp } from './lib.ts';
+import { CLEAN_SCRIPT, LOCK_SUDO_SCRIPT, readyCheck, setupScript } from './recipe.ts';
 
 const { values } = parseArgs({
   options: {
@@ -64,7 +58,6 @@ assertPushed(runnerCommit);
 assertPushed(filmCommit);
 const url = repoUrl();
 const api = naiveApi({ key: requireEnv('NAIVE_API_KEY') });
-const runnerKey = envValue('NAIVE_RUNNER_KEY');
 
 const live = new Map<string, Computer & { createdMs: number }>();
 const spent: Array<{ name: string; usd: number }> = [];
@@ -114,8 +107,8 @@ async function create(name: string, snapshotId?: string) {
   return computer.id;
 }
 
-async function ready(computerId: string, allowRunDir = false) {
-  const result = await exec(api, computerId, readyCheck({ allowRunDir }), 300_000);
+async function ready(computerId: string, options: { allowRunDir?: boolean; sudoLocked?: boolean }) {
+  const result = await exec(api, computerId, readyCheck(options), 300_000);
   const output = `${result.stdout}\n${result.stderr}`.trim();
   if (result.exit_code !== 0 || !result.stdout.includes('READY')) {
     throw new Error(
@@ -130,11 +123,7 @@ async function main() {
   stamp(
     `runner ${runnerCommit.slice(0, 12)}, crew ${filmCommit.slice(0, 12)}, adapter ${adapter}, from ${url}`,
   );
-  stamp(
-    runnerKey
-      ? 'the runner key from NAIVE_RUNNER_KEY goes into the snapshot'
-      : 'no NAIVE_RUNNER_KEY in the env file: the snapshot holds no Naive key, which only the stand-in can run without',
-  );
+  stamp('the snapshot holds no Naive key: the website sends the runner one with each launch');
 
   const builder = await create(`br-film-base-${runnerCommit.slice(0, 12)}`);
   const home = await computerHome(api, builder);
@@ -167,24 +156,19 @@ async function main() {
   const setupSeconds = (Date.now() - setupStarted) / 1000;
   stamp(`setup took ${setupSeconds.toFixed(0)} s`);
 
-  if (runnerKey) {
-    await writeFile(api, builder, `${home}/.boiler-room.env`, `NAIVE_API_KEY=${runnerKey}\n`);
-    const chmod = await exec(
-      api,
-      builder,
-      'chmod 600 "$HOME/.boiler-room.env" && echo private',
-      30_000,
-    );
-    if (!chmod.stdout.includes('private')) throw new Error('Could not make the key file private.');
-    stamp('wrote the runner key to ~/.boiler-room.env (mode 600)');
-  }
-
-  const builderReady = await ready(builder);
+  const builderReady = await ready(builder, {});
   stamp(`ready on the builder:\n${builderReady}`);
   const adapterLine = /adapter (film|standin)/.exec(builderReady)?.[1] ?? 'unknown';
   const clean = await exec(api, builder, CLEAN_SCRIPT, 60_000);
   if (!clean.stdout.includes('cleaned'))
     throw new Error(`The clean-up failed: ${clean.stderr.slice(-500)}`);
+  // Last, since nothing after it may use sudo: the film command runs agents on content from a
+  // customer's URL, and must not be root.
+  const lock = await exec(api, builder, LOCK_SUDO_SCRIPT, 60_000);
+  if (!lock.stdout.includes('sudo: narrowed')) {
+    throw new Error(`Narrowing sudo failed:\n${`${lock.stdout}\n${lock.stderr}`.slice(-1500)}`);
+  }
+  stamp(lock.stdout.trim().split('\n').at(-1) ?? 'sudo: narrowed');
 
   const snapshotStarted = Date.now();
   const { snapshot_id: snapshotId } = await checkpointComputer(api, builder);
@@ -196,7 +180,7 @@ async function main() {
   if (!values['no-fork-test']) {
     const forkStarted = Date.now();
     const forkId = await create(`br-film-forktest-${runnerCommit.slice(0, 12)}`, snapshotId);
-    const output = await ready(forkId);
+    const output = await ready(forkId, { sudoLocked: true });
     fork = { readySeconds: (Date.now() - forkStarted) / 1000, output };
     stamp(`a fork was ready in ${fork.readySeconds.toFixed(1)} s`);
     await destroy(forkId);
@@ -207,7 +191,8 @@ async function main() {
     runnerCommit,
     filmCommit,
     adapter: adapterLine,
-    runnerKey: Boolean(runnerKey),
+    runnerKey: false,
+    sudo: 'swapon only',
     size: FILM_COMPUTER_SIZE,
     builtAt: new Date().toISOString(),
     setupSeconds,

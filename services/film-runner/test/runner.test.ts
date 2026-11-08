@@ -4,11 +4,16 @@
  */
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { type Instructions, RUNNER_EXIT, type RunnerEvent } from '../src/contract.ts';
+import {
+  CONTRACT_VERSION,
+  type Instructions,
+  RUNNER_EXIT,
+  type RunnerEvent,
+} from '../src/contract.ts';
 import { Runner } from '../src/runner.ts';
 import {
   FILM_ID,
@@ -283,8 +288,160 @@ describe('the self-test the snapshot build runs', () => {
         'config',
         'stand-in film command',
         'no run dir yet',
+        'no Naive key on disk',
         'signing',
       ]),
     );
+  });
+
+  it('fails on a computer whose disk holds a Naive key', () => {
+    const dir = tempDir();
+    const envFile = join(dir, 'boiler-room.env');
+    writeFileSync(envFile, `NAIVE_API_KEY=sk_live_${'z'.repeat(30)}\n`, { mode: 0o600 });
+    const configFile = join(dir, 'config.json');
+    writeFileSync(configFile, JSON.stringify(standinConfig(dir, { envFile })));
+    const main = fileURLToPath(new URL('../src/main.ts', import.meta.url));
+    const result = spawnSync(process.execPath, [main, '--self-test'], {
+      encoding: 'utf8',
+      env: { ...process.env, BR_RUN_DIR: join(dir, 'br-run'), FILM_RUNNER_CONFIG: configFile },
+    });
+    const report = JSON.parse(result.stdout) as {
+      selfTest: string;
+      checks: Array<{ name: string; ok: boolean; detail?: string }>;
+    };
+    expect(report.selfTest).toBe('fail');
+    expect(report.checks.find((check) => check.name === 'no Naive key on disk')?.ok).toBe(false);
+    expect(result.stdout).not.toContain('z'.repeat(30));
+  });
+});
+
+describe('what a launch leaves behind for the next one', () => {
+  /** Appends events a launch numbered but the website never confirmed. */
+  const unconfirmed = (runDir: string, events: Record<string, unknown>[]) => {
+    let seq = Number(readFileSync(join(runDir, 'seq'), 'utf8'));
+    for (const event of events) {
+      writeFileSync(join(runDir, 'outbox.jsonl'), `${JSON.stringify({ seq, ...event })}\n`, {
+        flag: 'a',
+      });
+      seq += 1;
+    }
+    writeFileSync(join(runDir, 'seq'), `${seq}\n`);
+  };
+
+  it("never resends a past phase's events, or a past launch's runner.exit, to the next phase", async () => {
+    const runDir = tempDir();
+    let instructions = instructionsFor('script');
+    const site = await receiver(() => instructions);
+    await writeBootstrapFile(runDir, site.callbackBase);
+    expect(await runner(runDir).instance.run()).toBe(RUNNER_EXIT.ok);
+    const scriptSeqs = site.state.events.map((event) => event.seq);
+    // The script launch's last batch, refused while the founder approved: never confirmed.
+    const at = new Date().toISOString();
+    unconfirmed(runDir, [
+      {
+        type: 'decision',
+        at,
+        phase: 'script',
+        agent: 'director',
+        stage: 'script',
+        kind: 'passed',
+        message: 'Late.',
+      },
+      { type: 'runner.exit', at, phase: 'script', exitCode: 0, signal: null, durationMs: 1 },
+    ]);
+    instructions = instructionsFor('render');
+    await writeBootstrapFile(runDir, site.callbackBase);
+    expect(await runner(runDir).instance.run()).toBe(RUNNER_EXIT.ok);
+    const sent = site.state.events.filter((event) => !scriptSeqs.includes(event.seq));
+    expect(sent.some((event) => event.phase === 'script')).toBe(false);
+    expect(sent.filter((event) => event.type === 'runner.exit')).toHaveLength(1);
+    expect(sent.at(-1)).toMatchObject({ type: 'runner.exit', phase: 'render', exitCode: 0 });
+    const dropped = readFileSync(join(runDir, 'outbox.dropped.jsonl'), 'utf8').trim().split('\n');
+    expect(dropped.map((line) => JSON.parse(line).type)).toEqual(['runner.exit', 'decision']);
+  });
+
+  it('sets aside a batch the website answers 409 wrong_state, so no later launch sends it', async () => {
+    const runDir = tempDir();
+    let refuse = false;
+    const site = await receiver(() => instructionsFor('script'), {
+      refuseEvents: (events) => {
+        if (events.some((event) => event.type === 'runner.exit')) refuse = true;
+        return refuse ? { status: 409, code: 'wrong_state' } : null;
+      },
+    });
+    await writeBootstrapFile(runDir, site.callbackBase);
+    // The phase itself finished; only its last batch was refused.
+    expect(await runner(runDir).instance.run()).toBe(RUNNER_EXIT.ok);
+    const refusedExit = site.state.rejected.filter((item) => item.code === 'wrong_state');
+    expect(refusedExit.length).toBeGreaterThan(0);
+    const outbox = readFileSync(join(runDir, 'outbox.jsonl'), 'utf8');
+    expect(outbox).not.toContain('runner.exit');
+    expect(readFileSync(join(runDir, 'outbox.dropped.jsonl'), 'utf8')).toContain('runner.exit');
+  });
+});
+
+describe('the Naive key the website sends with a launch', () => {
+  /** A crew checkout whose `pnpm film` records what it was given, then fails. */
+  function fakeCrew(dir: string) {
+    const filmDir = join(dir, 'crew');
+    mkdirSync(filmDir, { recursive: true });
+    writeFileSync(
+      join(filmDir, 'package.json'),
+      JSON.stringify({ name: 'fake-crew', private: true, scripts: { film: 'node film.mjs' } }),
+    );
+    writeFileSync(
+      join(filmDir, 'film.mjs'),
+      `import { readFileSync, statSync, writeFileSync } from 'node:fs';
+const file = process.env.BOILER_ROOM_ENV;
+writeFileSync(${JSON.stringify(join(dir, 'seen.json'))}, JSON.stringify({
+  file, text: readFileSync(file, 'utf8'), mode: statSync(file).mode & 0o777,
+}));
+process.exit(1);
+`,
+    );
+    return filmDir;
+  }
+
+  it('is in a private file only while the film command runs, and nowhere in what is sent', async () => {
+    const dir = tempDir();
+    const runDir = join(dir, 'br-run');
+    const site = await receiver(() => instructionsFor('script'));
+    const naiveKey = `sk_live_${'k'.repeat(40)}`;
+    await writeBootstrapFile(runDir, site.callbackBase, { naiveKey });
+    const { instance, lines } = runner(runDir, {
+      config: standinConfig(runDir, { adapter: 'film', filmDir: fakeCrew(dir) }),
+    });
+    expect(await instance.run()).toBe(1);
+    const seen = JSON.parse(readFileSync(join(dir, 'seen.json'), 'utf8'));
+    expect(seen).toEqual({
+      file: join(runDir, 'naive.env'),
+      text: `NAIVE_API_KEY=${naiveKey}\n`,
+      mode: 0o600,
+    });
+    expect(existsSync(join(runDir, 'naive.env'))).toBe(false);
+    expect(JSON.stringify(site.state) + lines.join('\n')).not.toContain(naiveKey);
+  });
+
+  it('is required by the real film command: without one the run stops before it starts', async () => {
+    const dir = tempDir();
+    const runDir = join(dir, 'br-run');
+    const site = await receiver(() => instructionsFor('script'));
+    await writeBootstrapFile(runDir, site.callbackBase);
+    const { instance } = runner(runDir, {
+      config: standinConfig(runDir, { adapter: 'film', filmDir: fakeCrew(dir) }),
+    });
+    expect(await instance.run()).toBe(RUNNER_EXIT.badBootstrap);
+    expect(site.state.events.find((event) => event.type === 'error')).toMatchObject({
+      code: 'no_naive_key',
+    });
+    expect(existsSync(join(dir, 'seen.json'))).toBe(false);
+  });
+
+  it('says hello with the contract version, so the website can refuse a runner on another', async () => {
+    const runDir = tempDir();
+    const site = await receiver(() => instructionsFor('script'));
+    await writeBootstrapFile(runDir, site.callbackBase);
+    expect(await runner(runDir).instance.run()).toBe(RUNNER_EXIT.ok);
+    expect(site.state.hellos[0]).toMatchObject({ contract: CONTRACT_VERSION, phase: null });
   });
 });

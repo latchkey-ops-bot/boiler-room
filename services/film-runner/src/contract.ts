@@ -85,6 +85,49 @@ export const RUN_ID_PATTERN = /^run_[0-9a-z]{20}$/;
 // bootstrap.json: written by the Worker with `fs/write` before each launch
 // ---------------------------------------------------------------------------------------------
 
+/** The runner's directory, under the home the computer's `fs/*` calls are rooted in. */
+export const RUN_DIR_NAME = 'br-run';
+
+/**
+ * Where the website writes the bootstrap file, relative to that home. The website makes the
+ * directory with `fs/mkdir` first: a fresh fork has no run dir. The runner reads the file from
+ * `<runDir>/bootstrap.json`, which is this path, and deletes it before anything else.
+ */
+export const BOOTSTRAP_PATH = `${RUN_DIR_NAME}/bootstrap.json`;
+
+/**
+ * Where the runner puts the Naive key it was given for the film command, relative to that home.
+ * Mode 600, deleted when the film command exits. The website deletes it again, with the bootstrap,
+ * before it takes a checkpoint, so no checkpoint holds a key.
+ */
+export const RUN_KEY_FILE_PATH = `${RUN_DIR_NAME}/naive.env`;
+
+/**
+ * The one command the website runs to start the runner. It names no phase, URL or secret: those
+ * come from the bootstrap file and the signed instructions call. `setsid -f` detaches the runner,
+ * so the exec returns in about a second; the redirects matter, because a detached child that kept
+ * the exec's output pipe open would hold the exec until its timeout. `flock -n` makes a second
+ * launch, from a race or a retried exec, exit at once.
+ */
+export const LAUNCH_COMMAND = [
+  `mkdir -p "$HOME/${RUN_DIR_NAME}"`,
+  'cd "$HOME/film-runner"',
+  `setsid -f bash -c 'exec flock -n "$HOME/${RUN_DIR_NAME}/lock" node src/main.ts' </dev/null >>"$HOME/${RUN_DIR_NAME}/runner.log" 2>&1`,
+  'echo launched',
+].join(' && ');
+
+/**
+ * Stops the runner and the film command (`bin/stop.sh`): SIGTERM to the runner, then SIGKILL to
+ * both process groups 75 s later from a detached killer. Returns at once.
+ */
+export const STOP_COMMAND = 'bash "$HOME/film-runner/bin/stop.sh" </dev/null 2>&1';
+
+/**
+ * Deletes every secret the website or the runner put on the computer's disk. The website runs it
+ * before it takes a checkpoint, in case a runner never started and so never deleted its bootstrap.
+ */
+export const SCRUB_COMMAND = `rm -f "$HOME/${BOOTSTRAP_PATH}" "$HOME/${RUN_KEY_FILE_PATH}" && echo scrubbed`;
+
 /**
  * Everything the runner needs to call home, and nothing else. What to do comes from the signed
  * instructions call. The runner deletes the file once read, so no checkpoint holds the key.
@@ -99,6 +142,12 @@ export interface Bootstrap {
   key: string;
   /** Unix seconds. */
   issuedAt: number;
+  /**
+   * The Naive key the film command runs its agents with, for this launch only. The base snapshot
+   * holds no key: the website sends it here, and the runner keeps it in `RUN_KEY_FILE_PATH` only
+   * while the film command runs. Absent for the stand-in, which calls no agent.
+   */
+  naiveKey?: string;
 }
 
 export function parseBootstrap(value: unknown): Bootstrap {
@@ -113,6 +162,11 @@ export function parseBootstrap(value: unknown): Bootstrap {
   if (typeof record.key !== 'string' || !/^[0-9a-f]{64}$/.test(record.key)) problems.push('key');
   if (typeof record.issuedAt !== 'number' || !Number.isFinite(record.issuedAt))
     problems.push('issuedAt');
+  if (
+    record.naiveKey !== undefined &&
+    (typeof record.naiveKey !== 'string' || !/^[A-Za-z0-9_-]{16,256}$/.test(record.naiveKey))
+  )
+    problems.push('naiveKey');
   const base = typeof record.callbackBase === 'string' ? record.callbackBase : '';
   let url: URL | undefined;
   try {
@@ -168,7 +222,12 @@ export interface Instructions {
   deadlineAt: string;
   /** True when the website wants the run stopped before it starts. */
   stop: boolean;
+  /** For phase `all`: the shapes a sample film is cut to, which the website picks. */
+  sampleFormats?: Format[] | null;
 }
+
+/** What a GTM sample film is cut to. It has no approval step, so the website picks for it. */
+export const SAMPLE_FORMATS = ['16:9'] as const satisfies readonly Format[];
 
 export function parseInstructions(value: unknown): Instructions {
   if (!isRecord(value)) throw new Error('instructions are not an object');
@@ -230,6 +289,8 @@ interface EventBase {
 export interface HelloEvent extends Omit<EventBase, 'phase'> {
   type: 'runner.hello';
   phase: null;
+  /** `CONTRACT_VERSION`. The website refuses a runner on another version. */
+  contract: number;
   commit: string;
   filmCommit: string;
   /** `film` runs the real film command. `standin` fakes every stage; the website must label it. */
@@ -403,8 +464,12 @@ export const MAX_DETAIL_BYTES = 4096;
 
 const MiB = 1024 * 1024;
 
+/**
+ * `mp4` is capped well under what one Worker request can hold, as a second line behind the website
+ * streaming uploads straight into R2: a 45-second 1080p film is 10 to 30 MiB.
+ */
 export const UPLOAD_KINDS = {
-  mp4: { contentTypes: ['video/mp4'], maxBytes: 95 * MiB },
+  mp4: { contentTypes: ['video/mp4'], maxBytes: 60 * MiB },
   still: { contentTypes: ['image/png', 'image/jpeg'], maxBytes: 10 * MiB },
   quality: { contentTypes: ['image/png', 'application/json'], maxBytes: 15 * MiB },
   campaign: { contentTypes: ['application/json'], maxBytes: 1 * MiB },

@@ -1,8 +1,11 @@
 /**
  * The runner: one launch on a film's computer, for one phase of one film.
  *
- * 1. Read and delete `bootstrap.json`. Turn swap on. Say hello, and read the instructions.
- * 2. Write the approval or the note, then start the film command in its own process group.
+ * 1. Read and delete `bootstrap.json`. Turn swap on. Say hello, and read the instructions. Events
+ *    a past launch left unconfirmed are resent only when they belong to this launch's phase; an
+ *    old `runner.exit` is never resent, since it would end this launch's phase on the website.
+ * 2. Write the approval or the note, and the launch's Naive key (if the website sent one) to a
+ *    private file, then start the film command in its own process group.
  * 3. Follow its events file. Upload each artifact, then queue its event with the runner's own
  *    sequence number. Send the queue in order, in batches, retrying with backoff.
  * 4. Heartbeat every 30 s. Stop the film when the website says so, at the deadline, or when the
@@ -10,7 +13,8 @@
  * 5. When the film command exits, send what is left (up to 2 minutes), post `runner.exit`, and exit
  *    with the film command's code, or the runner's own when the runner ended the run.
  *
- * The HMAC key is held in memory only. Nothing the runner logs or sends carries it.
+ * The HMAC key is held in memory only. Nothing the runner logs or sends carries it. The Naive key
+ * is on disk only while the film command runs, in `naive.env` (mode 600), and nowhere else.
  */
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -30,7 +34,9 @@ import { freemem, loadavg, totalmem } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { CallAborted, FatalCallError, RunnerClient } from './client.ts';
 import {
+  BOOTSTRAP_PATH,
   type Bootstrap,
+  CONTRACT_VERSION,
   clip,
   type EventsAnswer,
   FILM_EXIT,
@@ -43,6 +49,7 @@ import {
   parseBootstrap,
   parseFilmEvent,
   parseInstructions,
+  RUN_KEY_FILE_PATH,
   RUNNER_EXIT,
   type RunnerEvent,
   routes,
@@ -112,11 +119,14 @@ export class Runner {
   private uploads: Record<string, { fileId: string; bytes: number; sha256: string }> = {};
   private lastStage: Stage | null = null;
   private seen = { stoppedError: false, error: false, scriptReady: false, delivered: false };
+  /** `<runDir>/naive.env`: the launch's Naive key, while the film command runs. */
+  private readonly keyFile: string;
 
   constructor(options: RunnerOptions) {
     this.options = options;
     this.runDir = options.runDir;
     this.filmDir = join(options.runDir, 'film');
+    this.keyFile = join(options.runDir, basename(RUN_KEY_FILE_PATH));
     this.now = options.now ?? Date.now;
     const log = options.log ?? ((line: string) => console.log(line));
     this.log = (line) => log(this.scrubber.scrub(line));
@@ -144,6 +154,8 @@ export class Runner {
     const started = this.now();
     mkdirSync(this.filmDir, { recursive: true });
     writeFileSync(join(this.runDir, 'runner.pid'), `${process.pid}\n`);
+    // A key file a crashed launch left behind.
+    this.removeKeyFile();
     try {
       this.bootstrap = this.readBootstrap();
     } catch (error) {
@@ -151,7 +163,11 @@ export class Runner {
       return RUNNER_EXIT.badBootstrap;
     }
     const { filmId, runId } = this.bootstrap;
-    this.scrubber = new Scrubber([this.bootstrap.key, naiveKeyIn(this.options.config.envFile)]);
+    this.scrubber = new Scrubber([
+      this.bootstrap.key,
+      this.bootstrap.naiveKey,
+      naiveKeyIn(this.options.config.envFile),
+    ]);
     const launch = this.nextLaunch();
     this.log(
       `run ${runId} of film ${filmId}, launch ${launch}, adapter ${this.options.config.adapter}`,
@@ -168,8 +184,11 @@ export class Runner {
     });
     this.outbox = new Outbox(this.runDir);
     this.uploads = this.readUploads();
+    // A past launch's `runner.exit` is never resent: the website would read it as this launch's.
+    this.quarantine((event) => event.type === 'runner.exit', "a past launch's runner.exit");
 
     let instructions: Instructions;
+    let phaseKnown = false;
     try {
       const hello = await this.client.json<HelloAnswer>(
         'POST',
@@ -178,12 +197,20 @@ export class Runner {
         { learnClock: true, signal: this.startAbort.signal },
       );
       this.log(`hello: the website has this run in phase ${hello.phase}`);
-      this.sender = this.sendLoop();
+      if (PHASES_KNOWN.includes(hello.phase)) {
+        this.phase = hello.phase;
+        phaseKnown = true;
+      }
       const raw = await this.client.json<unknown>('GET', routes.instructions(filmId), undefined, {
         signal: this.startAbort.signal,
       });
       instructions = parseInstructions(raw);
     } catch (error) {
+      // Only after a hello does the website take events, and only then is the phase known.
+      if (phaseKnown && !(error instanceof FatalCallError)) {
+        this.dropOtherPhases();
+        this.sender = this.sendLoop();
+      }
       if (error instanceof FatalCallError) {
         this.log(`hello: ${error.message}`);
         this.fatal = error;
@@ -197,6 +224,9 @@ export class Runner {
       return this.finish(RUNNER_EXIT.badBootstrap, started);
     }
     this.phase = instructions.phase;
+    // Events a past launch of another phase left unconfirmed belong to a phase that is over.
+    this.dropOtherPhases();
+    this.sender = this.sendLoop();
     this.log(
       `instructions: phase ${instructions.phase}, ${instructions.mode}, script v${instructions.scriptVersion}, up to $${instructions.maxCrewUsd.toFixed(2)}`,
     );
@@ -207,6 +237,15 @@ export class Runner {
         false,
       );
       return this.finish(RUNNER_EXIT.stopped, started);
+    }
+
+    if (this.options.config.adapter === 'film' && !this.bootstrap.naiveKey) {
+      this.pushError(
+        'no_naive_key',
+        'The website sent no Naive key for the crew, so the film could not start.',
+        false,
+      );
+      return this.finish(RUNNER_EXIT.badBootstrap, started);
     }
 
     const deadlineMs = Date.parse(instructions.deadlineAt) - this.client.serverMs();
@@ -237,15 +276,23 @@ export class Runner {
       writeFileSync(reviseFile, `${JSON.stringify(instructions.revise, null, 2)}\n`);
     }
     const eventsFile = join(this.filmDir, `events-${instructions.phase}-${launch}.jsonl`);
-    const spec = filmCommandSpec(this.options.config, {
-      url: instructions.url,
-      phase: instructions.phase,
-      runDir: this.filmDir,
-      eventsFile,
-      ...(instructions.approval ? { approvalFile } : {}),
-      ...(instructions.revise ? { reviseFile } : {}),
-      maxUsd: instructions.maxCrewUsd,
-    });
+    // The film command reads its Naive key from BOILER_ROOM_ENV: this launch's file, never a key
+    // kept in the snapshot.
+    if (this.bootstrap.naiveKey) {
+      writeFileSync(this.keyFile, `NAIVE_API_KEY=${this.bootstrap.naiveKey}\n`, { mode: 0o600 });
+    }
+    const spec = filmCommandSpec(
+      { ...this.options.config, envFile: this.keyFile },
+      {
+        url: instructions.url,
+        phase: instructions.phase,
+        runDir: this.filmDir,
+        eventsFile,
+        ...(instructions.approval ? { approvalFile } : {}),
+        ...(instructions.revise ? { reviseFile } : {}),
+        maxUsd: instructions.maxCrewUsd,
+      },
+    );
     const tail = new EventTail(eventsFile, (line) => {
       this.processing = this.processing
         .then(() => this.handleLine(line))
@@ -285,6 +332,7 @@ export class Runner {
       if (this.stopping && child.pid) signalGroup(child.pid, 'SIGTERM');
     });
     closeSync(logFd);
+    this.removeKeyFile();
     if (this.killTimer) clearTimeout(this.killTimer);
     tail.stop();
     await this.processing;
@@ -337,6 +385,7 @@ export class Runner {
   /** Posts `runner.exit`, sends what is left for up to `drainMs`, and returns `code`. */
   private async finish(code: number, started: number, signal: NodeJS.Signals | null = null) {
     for (const timer of this.timers) clearTimeout(timer);
+    this.removeKeyFile();
     if (this.outbox && !this.fatal) {
       this.outbox.push({
         type: 'runner.exit',
@@ -398,6 +447,11 @@ export class Runner {
         if (error instanceof CallAborted) return;
         if (error instanceof FatalCallError) {
           this.log(`send: ${error.message}`);
+          if (error.status === 409 && error.code === 'wrong_state') {
+            // The run has moved on without these. Kept aside, never resent by a later launch.
+            const seqs = new Set(batch.map((event) => event.seq));
+            this.quarantine((event) => seqs.has(event.seq), 'the website no longer accepts them');
+          }
           this.fatal = error;
           this.requestStop(error.code);
           return;
@@ -603,6 +657,31 @@ export class Runner {
 
   // ---------------------------------------------------------------------------------------------
 
+  /** Moves unconfirmed events aside (`outbox.dropped.jsonl`), so no launch sends them. */
+  private quarantine(predicate: (event: RunnerEvent) => boolean, why: string) {
+    const dropped = this.outbox.drop(predicate);
+    if (dropped.length > 0) {
+      this.log(`outbox: set aside ${dropped.length} unconfirmed events (${why})`);
+    }
+  }
+
+  private dropOtherPhases() {
+    if (!this.outbox) return;
+    const phase = this.phase;
+    this.quarantine(
+      (event) => event.phase !== null && event.phase !== phase,
+      `they belong to a phase other than ${phase}`,
+    );
+  }
+
+  private removeKeyFile() {
+    try {
+      unlinkSync(this.keyFile);
+    } catch {
+      // Not there.
+    }
+  }
+
   private pushError(code: string, text: string, retryable: boolean) {
     if (!this.outbox) return;
     this.outbox.push({
@@ -625,7 +704,8 @@ export class Runner {
   }
 
   private readBootstrap(): Bootstrap {
-    const file = join(this.runDir, 'bootstrap.json');
+    // `<home>/br-run/bootstrap.json`, where the website writes it (`BOOTSTRAP_PATH`).
+    const file = join(this.runDir, basename(BOOTSTRAP_PATH));
     if (!existsSync(file)) throw new Error(`${file} is missing.`);
     const text = readFileSync(file, 'utf8');
     // Deleted before anything else, so no checkpoint of this disk holds the key.
@@ -660,6 +740,7 @@ export class Runner {
       at: new Date(this.now()).toISOString(),
       type: 'runner.hello',
       phase: null,
+      contract: CONTRACT_VERSION,
       commit: config.runnerCommit,
       filmCommit: config.filmCommit,
       adapter: config.adapter,
@@ -696,6 +777,8 @@ export class Runner {
     }
   }
 }
+
+const PHASES_KNOWN: readonly unknown[] = ['script', 'render', 'all'];
 
 /** Drops the film command's own `v` and `seq`; the runner numbers events itself. */
 function strip<E extends FilmEvent>(event: E): Omit<E, 'v' | 'seq'> {

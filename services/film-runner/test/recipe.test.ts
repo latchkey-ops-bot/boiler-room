@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { checkInput, readyCheck, setupScript } from '../scripts/recipe.ts';
+import { checkInput, LOCK_SUDO_SCRIPT, readyCheck, setupScript } from '../scripts/recipe.ts';
 
 const input = {
   repoUrl: 'https://github.com/example/boiler-room',
@@ -41,6 +41,29 @@ describe('the base snapshot recipe', () => {
     expect(check).toContain("r.openBrowser('chrome')");
     expect(check).toContain('node src/main.ts --self-test');
     expect(check.trim().endsWith('echo READY')).toBe(true);
+  });
+
+  it('leaves the film user one sudo rule, swapon of the swap file, and checks a fork has no more', () => {
+    expect(LOCK_SUDO_SCRIPT).toContain('NOPASSWD: $swapon_bin /swapfile');
+    expect(LOCK_SUDO_SCRIPT).toContain('visudo -cqf "$rule"');
+    expect(LOCK_SUDO_SCRIPT).toContain('visudo -cqf "$main"');
+    expect(LOCK_SUDO_SCRIPT).toContain('gpasswd -d');
+    expect(LOCK_SUDO_SCRIPT).toContain(
+      'if sudo -n true 2>/dev/null; then echo "sudo: still open"; exit 1; fi',
+    );
+    expect(readyCheck()).not.toContain('sudo -n true');
+    const fork = readyCheck({ sudoLocked: true });
+    expect(fork).toContain('if sudo -n true 2>/dev/null; then echo "sudo: still open"; exit 1; fi');
+    expect(fork).toContain('sudo -n -l');
+    // The runner's own swapon is the one command the rule allows.
+    const runner = readFileSync(new URL('../src/runner.ts', import.meta.url), 'utf8');
+    expect(runner).toContain("spawnSync('sudo', ['-n', 'swapon', swapfile]");
+  });
+
+  it('never puts a Naive key into the snapshot', () => {
+    const build = readFileSync(new URL('../scripts/build-snapshot.ts', import.meta.url), 'utf8');
+    expect(build).not.toMatch(/NAIVE_RUNNER_KEY|NAIVE_API_KEY=\$\{/);
+    expect(build).not.toMatch(/writeFile\(api, builder, `\$\{home\}\/\.boiler-room\.env/);
   });
 
   it('refuses a private URL or a short commit', () => {

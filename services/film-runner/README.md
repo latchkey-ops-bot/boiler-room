@@ -47,9 +47,12 @@ A sample film for GTM runs one launch with phase `all`: no pause.
 
 ### bootstrap.json
 
-Written by the website with `fs/write` to `<home>/br-run/bootstrap.json` before each launch. The
-runner reads it, keeps the key in memory and **deletes the file** before doing anything else, so
-no checkpoint holds a key. It names nothing to do: that comes from the signed instructions call.
+Written by the website with `fs/mkdir` and `fs/write` to `<home>/br-run/bootstrap.json`
+(`BOOTSTRAP_PATH`) before each launch: a fresh fork has no run dir, so the website makes it first.
+The runner reads it, keeps the key in memory and **deletes the file** before doing anything else.
+It names nothing to do: that comes from the signed instructions call. Before it takes a checkpoint,
+the website also runs `SCRUB_COMMAND`, which deletes the bootstrap and the key file, so no
+checkpoint holds a key even if a runner never started.
 
 ```json
 {
@@ -58,9 +61,16 @@ no checkpoint holds a key. It names nothing to do: that comes from the signed in
   "runId": "run_…",
   "callbackBase": "https://…/api/runner/v1",
   "key": "<64 hex>",
-  "issuedAt": 1794120000
+  "issuedAt": 1794120000,
+  "naiveKey": "sk_live_…"
 }
 ```
+
+`naiveKey` is the Naive key the film command runs its agents with, for this launch only, and is
+absent for the stand-in. The base snapshot holds no key. The runner writes it to
+`<home>/br-run/naive.env` (mode 600) just before it starts the film command, points
+`BOILER_ROOM_ENV` there, and deletes the file when the command exits. A `film` runner given no key
+stops with `no_naive_key` before the crew starts.
 
 `callbackBase` must be https; plain http is accepted only for `127.0.0.1` and `localhost`.
 
@@ -91,7 +101,7 @@ no checkpoint holds a key. It names nothing to do: that comes from the signed in
 | `PUT films/{filmId}/files?kind=&version=&variant=&name=` | the raw file                  | `{ ok, fileId, bytes }`                                   |
 
 Errors use the API's shape, `{ error: { code, message } }`. Upload kinds and their limits are
-`UPLOAD_KINDS`: `mp4` (95 MiB), `still`, `quality`, `campaign`, `research`, `decisions`,
+`UPLOAD_KINDS`: `mp4` (60 MiB, well under what one Worker request holds), `still`, `quality`, `campaign`, `research`, `decisions`,
 `manifest`, `qc`. The website picks every R2 key; the runner names only the kind, version, variant
 and a file name.
 
@@ -102,15 +112,19 @@ Instructions: `phase` (`script`, `render` or `all`), `mode`, `url`, `scriptVersi
 ### Events
 
 Every event has `seq` (the runner's, monotonic over the whole run and kept across launches), `at`,
-`type` and `phase`. The types are `runner.hello` (with `adapter`: `film` or `standin`, so the
-website can label a stand-in film), `runner.heartbeat`, `stage`, `decision`, `session`, `cost`,
+`type` and `phase`. The types are `runner.hello` (with `phase: null`, since the runner has no
+instructions yet; `contract`, the `CONTRACT_VERSION`, which the website must match; `adapter`,
+`film` or `standin`, so the website can label a stand-in film; and `launch`), `runner.heartbeat`, `stage`, `decision`, `session`, `cost`,
 `artifact` (with the stored `fileId`), `script_ready` (with `campaignFileId` and
 `unconfirmedClaims`), `qc`, `delivered`, `error` and `runner.exit`. The shapes are the
 `RunnerEvent` union in `src/contract.ts`. Messages are cut to 500 characters and scrubbed of keys.
 
 ## The runner
 
-1. Read and delete `bootstrap.json`. Turn swap on. `hello`, then the instructions.
+1. Read and delete `bootstrap.json`. Turn swap on. `hello`, then the instructions. Events a past
+   launch left unconfirmed are resent only when they belong to this launch's phase, and a past
+   launch's `runner.exit` never is: the website would read it as this launch's and fail the film.
+   They go to `~/br-run/outbox.dropped.jsonl` instead.
 2. Write `~/br-run/approval.json` or `revise.json`, and start the film command with `detached`, so
    it has its own process group. Its output goes to `~/br-run/film.log`.
 3. Follow `~/br-run/film/events-<phase>-<launch>.jsonl` (`fs.watch` and a 1 s poll). Each line is
@@ -119,7 +133,8 @@ website can label a stand-in film), `runner.heartbeat`, `stage`, `decision`, `se
    path outside the run dir is refused.
 4. The outbox (`~/br-run/outbox.jsonl`, `seq`, `outbox.acked`) sends in order, 50 at a time, with
    backoff from 1 s to 30 s. A relaunch resends what the last launch could not, under the same
-   numbers.
+   numbers. A batch the website answers `409 wrong_state` (the run has moved on) is set aside the
+   same way, never resent.
 5. A heartbeat every 30 s. The film is stopped (SIGTERM to its group, SIGKILL after 60 s) when the
    website answers `control.stop`, at `deadlineAt`, on SIGTERM to the runner (`bin/stop.sh`), after
    three 401s that are not `stale`, or after 15 minutes with no successful call.
@@ -153,7 +168,9 @@ command, the key file's mode, swap, no run dir, and signing.
   sends SIGTERM and leaves a detached killer behind.
 - **No secret goes in a command.** Command history keeps every command and its output for 30 days.
   The run key reaches the computer only through `fs/write`.
-- The website's key needs only `computers:write`.
+- The website's key holds exactly `computers:write` and `billing:read` (the balance tripwire), which
+  `secrets:sync` checks with Naive. Naive keys have no resource binding, so `computers:write` reaches
+  every computer and snapshot in the organization: keep no secret on any other computer there.
 
 ## The film command: what `feat/crew-agents` must add
 
@@ -165,7 +182,7 @@ pnpm film <url> --phase script|render|all --run-dir <abs dir> --events <file> --
   --render local --no-sync [--approval <file>] [--revise <file>]
 ```
 
-and the environment `BOILER_ROOM_ENV=$HOME/.boiler-room.env`, `CI=1`, `NODE_ENV=production`,
+and the environment `BOILER_ROOM_ENV=$HOME/br-run/naive.env` (the launch's key file), `CI=1`, `NODE_ENV=production`,
 `INIT_CWD=<crew checkout>`. What it must do, of which the first seven unblock a real film:
 
 1. `--phase script` runs the Researcher and the Director with its checks, writes the campaign to the
@@ -217,11 +234,19 @@ On a builder at the film size, with the admin key from `~/.boiler-room.env` (nev
 Chrome's libraries and fallback fonts as the render service installs them, 4 GiB of swap, pnpm,
 the crew checkout at the crew commit with `pnpm install --frozen-lockfile`, the Remotion browser,
 this package's checkout at the runner commit (linked at `~/film-runner`), and `~/.film-runner.json`.
-The setup runs detached and is polled, so no exec runs longer than 600 s. If the env file has
-`NAIVE_RUNNER_KEY`, it is written with `fs/write` to `~/.boiler-room.env` and made private. Then
-the ready check (swap on, the renderer's browser launches, the self-test passes), a clean-up, the
-snapshot, and the builder destroyed. A fork runs the ready check again before the id is printed.
-Both commits must be on origin, since the computer clones the public repo.
+The setup runs detached and is polled, so no exec runs longer than 600 s. Then the ready check
+(swap on, the renderer's browser launches, the self-test passes, which includes **no Naive key on
+disk**), a clean-up, and `LOCK_SUDO_SCRIPT`: the film user keeps one sudo rule, `swapon /swapfile`,
+and loses every other grant, since the film command drives agents on content from a customer's
+URL. Then the snapshot, and the builder destroyed. A fork runs the ready check again, which also
+checks that `sudo -n true` is refused, before the id is printed. Both commits must be on origin,
+since the computer clones the public repo.
+
+The snapshot holds no Naive key: every fork and checkpoint of it would hold the same long-lived
+key. The website sends the runner's key with each launch instead (`naiveKey` above).
+
+Pass `--adapter standin` until the film command has the contract: `feat/crew-agents` now has a
+`film` script, so `--adapter auto` would pick `film` for a command that cannot yet run a phase.
 
 ### The current snapshot
 

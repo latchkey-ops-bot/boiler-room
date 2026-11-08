@@ -14,7 +14,16 @@
  * - A paused computer is resumed by any `exec`, `fs` or `snapshot` call, so nothing here touches a
  *   paused computer except `resume` and `destroy`.
  */
-import type { Bootstrap } from './contract.ts';
+import {
+  BOOTSTRAP_PATH,
+  type Bootstrap,
+  LAUNCH_COMMAND,
+  RUN_DIR_NAME,
+  SCRUB_COMMAND,
+  STOP_COMMAND,
+} from './contract.ts';
+
+export { LAUNCH_COMMAND, RUN_DIR_NAME, SCRUB_COMMAND, STOP_COMMAND };
 
 export const NAIVE_API_URL = 'https://api.vetta.sh';
 /** The API version the SDK 0.12.3 sends. */
@@ -24,9 +33,6 @@ export const MAX_EXEC_MS = 600_000;
 
 /** The film computer: the base snapshot was built at this size, and a fork may not be smaller. */
 export const FILM_COMPUTER_SIZE = { vcpu: 4, memory_mb: 8192, disk_gb: 20 } as const;
-
-/** Where the runner keeps its files, under the home `fs/*` is rooted in. */
-export const RUN_DIR_NAME = 'br-run';
 
 export type ComputerStatus = 'creating' | 'running' | 'paused' | 'failed' | 'destroyed';
 
@@ -277,28 +283,10 @@ export async function writeBootstrap(
   bootstrap: Bootstrap,
 ): Promise<void> {
   await makeDir(api, computerId, `${home}/${RUN_DIR_NAME}`);
-  await writeFile(
-    api,
-    computerId,
-    `${home}/${RUN_DIR_NAME}/bootstrap.json`,
-    `${JSON.stringify(bootstrap)}\n`,
-  );
+  await writeFile(api, computerId, `${home}/${BOOTSTRAP_PATH}`, `${JSON.stringify(bootstrap)}\n`);
 }
 
-/**
- * Starts the runner detached. It names no film, phase or secret: all of that is in bootstrap.json.
- * `setsid -f` puts the runner in its own session, so the exec returns in about a second and the
- * runner outlives it; the redirects matter, because a detached child that kept the exec's output
- * pipe open would hold the exec until its timeout. `flock -n` makes a second launch, from a race or
- * a retried exec, exit at once.
- */
-export const LAUNCH_COMMAND = [
-  `mkdir -p "$HOME/${RUN_DIR_NAME}"`,
-  'cd "$HOME/film-runner"',
-  `setsid -f bash -c 'exec flock -n "$HOME/${RUN_DIR_NAME}/lock" node src/main.ts' </dev/null >>"$HOME/${RUN_DIR_NAME}/runner.log" 2>&1`,
-  'echo launched',
-].join(' && ');
-
+/** Starts the runner detached with `LAUNCH_COMMAND`, which answers in about a second. */
 export const LAUNCH_TIMEOUT_MS = 30_000;
 
 export async function launchRunner(api: NaiveApi, computerId: string): Promise<ExecResult> {
@@ -311,15 +299,19 @@ export async function launchRunner(api: NaiveApi, computerId: string): Promise<E
   return result;
 }
 
-/**
- * Asks the runner to stop: SIGTERM to its process group, which stops the film command and posts the
- * last events, then SIGKILL 75 s later from a detached killer. Returns at once.
- */
-export const STOP_COMMAND = 'bash "$HOME/film-runner/bin/stop.sh"';
+/** Asks the runner to stop with `STOP_COMMAND`. Returns at once. */
 export const STOP_TIMEOUT_MS = 20_000;
 
 export function stopRunner(api: NaiveApi, computerId: string): Promise<ExecResult> {
   return exec(api, computerId, STOP_COMMAND, STOP_TIMEOUT_MS);
+}
+
+/** Deletes the bootstrap and the run's key file from the disk, before a checkpoint. */
+export async function scrubSecrets(api: NaiveApi, computerId: string): Promise<void> {
+  const result = await exec(api, computerId, SCRUB_COMMAND, 20_000);
+  if (!result.stdout.includes('scrubbed')) {
+    throw new Error(`Could not delete the run's secrets on ${computerId}.`);
+  }
 }
 
 /**

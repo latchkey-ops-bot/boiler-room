@@ -62,6 +62,8 @@ export interface ReceiverOptions {
   stop?: () => { stop: boolean; reason?: string };
   /** Answer the next N calls with this status, for retry tests. */
   failNext?: { count: number; status: number; code?: string };
+  /** Refuse a batch of events with this status and code, as the website does in a wrong state. */
+  refuseEvents?: (events: RunnerEvent[]) => { status: number; code: string } | null;
   /** Server clock in ms. */
   now?: () => number;
   log?: (line: string) => void;
@@ -197,6 +199,8 @@ export async function startReceiver(options: ReceiverOptions): Promise<Receiver>
       if (!Array.isArray(parsed.events) || parsed.events.length < 1 || parsed.events.length > 100) {
         return reject(response, 400, 'batch', path);
       }
+      const refused = options.refuseEvents?.(parsed.events);
+      if (refused) return reject(response, refused.status, refused.code, path);
       const seen = new Set(state.events.map((event) => event.seq));
       for (const event of parsed.events) {
         if (

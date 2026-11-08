@@ -136,22 +136,76 @@ echo "setup: done"
 `;
 }
 
+/** `swapon` as sudo resolves it, so the one sudoers rule matches what the runner runs. */
+const SWAPON = '$(PATH=/usr/sbin:/sbin:/usr/bin:/bin command -v swapon)';
+
 /**
  * The ready check, one exec on the builder and again on a fork: swap is there, the renderer loads
- * and its browser launches, and the runner's self-test passes. Prints `READY` last when all pass.
+ * and its browser launches, and the runner's self-test passes. On a fork (`sudoLocked`) it also
+ * checks that `sudo` grants nothing but `swapon <swapfile>`. Prints `READY` last when all pass.
  */
-export function readyCheck({ allowRunDir = false }: { allowRunDir?: boolean } = {}): string {
+export function readyCheck({
+  allowRunDir = false,
+  sudoLocked = false,
+}: {
+  allowRunDir?: boolean;
+  sudoLocked?: boolean;
+} = {}): string {
+  const sudoCheck = sudoLocked
+    ? `sudo -k
+if sudo -n true 2>/dev/null; then echo "sudo: still open"; exit 1; fi
+sudo -n -l "${SWAPON}" ${SWAPFILE} > /dev/null
+echo "sudo: swapon only"
+`
+    : '';
   return `set -euo pipefail
-sudo swapon ${SWAPFILE} 2>/dev/null || true
+sudo -n swapon ${SWAPFILE} 2>/dev/null || true
 swapon --show=NAME --noheadings | grep -qx '${SWAPFILE}'
 echo "swap: on"
-cd "$HOME/boiler-room/services/render"
+${sudoCheck}cd "$HOME/boiler-room/services/render"
 node -e "import('@remotion/renderer').then(async (r) => { await r.ensureBrowser(); const b = await r.openBrowser('chrome'); await b.close({ silent: true }); console.log('browser: launches') })"
 cd "$HOME/film-runner"
 node src/main.ts --self-test${allowRunDir ? ' --allow-run-dir' : ''}
 echo READY
 `;
 }
+
+/**
+ * The last step on the builder: the film user keeps one sudo rule, \`swapon <swapfile>\` (the
+ * runner turns swap on at every start), and loses every other grant: the files in sudoers.d, any
+ * NOPASSWD line in /etc/sudoers, and the sudo, admin and wheel groups. The film command drives
+ * agents on content from a customer's URL, so it must not run as root. Each file is checked with
+ * \`visudo\` before it is installed.
+ */
+export const LOCK_SUDO_SCRIPT = `set -euo pipefail
+user="$(id -un)"
+swapon_bin="${SWAPON}"
+rule="$(mktemp)"
+main="$(mktemp)"
+echo "$user ALL=(root) NOPASSWD: $swapon_bin ${SWAPFILE}" > "$rule"
+sudo cat /etc/sudoers > "$main"
+sed -i -E 's/^([^#].*NOPASSWD.*)$/# br-film: \\1/' "$main"
+sudo visudo -cqf "$rule"
+sudo visudo -cqf "$main"
+for file in /etc/sudoers.d/*; do
+  if [ -f "$file" ] && [ "$file" != /etc/sudoers.d/README ]; then echo "sudo: removing $(basename "$file")"; fi
+done
+# One root shell for every change, since the grant it runs under may be one of the files it removes.
+sudo sh -euc '
+  install -m 0440 -o root -g root "$2" /etc/sudoers.d/zz-br-film
+  find /etc/sudoers.d -mindepth 1 ! -name zz-br-film ! -name README -delete
+  for group in sudo admin wheel; do
+    if id -nG "$3" | tr " " "\\n" | grep -qx "$group"; then gpasswd -d "$3" "$group" > /dev/null; fi
+  done
+  install -m 0440 -o root -g root "$1" /etc/sudoers
+  visudo -cq
+' sh "$main" "$rule" "$user"
+rm -f "$rule" "$main"
+sudo -k
+if sudo -n true 2>/dev/null; then echo "sudo: still open"; exit 1; fi
+sudo -n -l "$swapon_bin" ${SWAPFILE} > /dev/null
+echo "sudo: narrowed to $swapon_bin ${SWAPFILE}"
+`;
 
 /** Leaves the builder clean for the snapshot: no run dir, no build files, no shell history. */
 export const CLEAN_SCRIPT = `rm -rf "$HOME/br-run" "$HOME/br-build" "$HOME/.bash_history" "$HOME/.npm/_logs"
