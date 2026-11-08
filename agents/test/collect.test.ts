@@ -61,6 +61,22 @@ const LINK_SITE = `<!doctype html><html><head><title>Notes</title><meta name="co
 <p>Written over many years, these notes are kept as plain pages with no styling at all.</p></main>
 <footer>Footer text in the default colour.</footer></body></html>`;
 
+// Pictures that are not product UI: a faded decorative canvas, a canvas labelled with a person's
+// name and a word that contains "ui", a video and a video embed. And one that is: a named screen.
+const MEDIA_SITE = `<!doctype html><html><head><title>Media</title><style>
+  body { margin: 0; } header { position: fixed; top: 0; left: 0; right: 0; height: 64px; background: #fff; }
+  canvas, video, iframe, img { display: block; width: 1200px; height: 600px; margin: 40px 0; }
+  .faded { opacity: 0.42; }
+</style></head><body>
+<header><nav><a href="/">Home</a></nav></header>
+<div class="faded"><canvas aria-label="A product dashboard, drawn quietly"></canvas></div>
+<canvas aria-label="Dana Quill, COO of a quiet company"></canvas>
+<video aria-label="Our team"></video>
+<iframe src="https://www.youtube.com/embed/abc" title="Video"></iframe>
+<iframe src="https://app.storylane.io/share/xyz" title="Interactive tour"></iframe>
+<img alt="The app dashboard" width="1600" height="800" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='1600' height='800'/>">
+</body></html>`;
+
 let browser: Browser | undefined;
 
 beforeAll(async () => {
@@ -223,6 +239,33 @@ describe('collectPage in Chromium', () => {
     await page.goto(`${ORIGIN}/plain`);
     const plain = await page.evaluate(collectPage, { withStyles: true, withLogos: false });
     expect(plain.fonts?.declared).toBe(false);
+    await page.close();
+  });
+
+  it('grades pictures by whether they can show the product, and skips decorations', async (context) => {
+    if (!browser) return context.skip();
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 } });
+    await page.route(`${ORIGIN}/**`, (route) =>
+      route.fulfill({ status: 200, contentType: 'text/html', body: MEDIA_SITE }),
+    );
+    await page.route('https://www.youtube.com/**', (route) =>
+      route.fulfill({ status: 200, body: '' }),
+    );
+    await page.route('https://app.storylane.io/**', (route) =>
+      route.fulfill({ status: 200, body: '' }),
+    );
+    await page.goto(`${ORIGIN}/`);
+    const raw = await page.evaluate(collectPage, { withStyles: false, withLogos: false });
+    const graded = raw.ui.map((item) => [item.kind, item.grade]);
+    expect(graded).toContainEqual(['canvas', 'media']);
+    expect(graded).toContainEqual(['video', 'media']);
+    expect(graded).toContainEqual(['iframe', 'product']);
+    expect(graded).toContainEqual(['img', 'product']);
+    expect(raw.ui.filter((item) => item.kind === 'iframe').map((item) => item.grade)).toEqual(
+      expect.arrayContaining(['media', 'product']),
+    );
+    expect(raw.ui.some((item) => item.label.includes('drawn quietly'))).toBe(false);
+    expect(await page.locator('[data-br-header]').count()).toBe(1);
     await page.close();
   });
 });

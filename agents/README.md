@@ -61,10 +61,21 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   only interaction is scrolling. Sign-in pages are never loaded. The model has no `web_fetch`,
   `web_search` or `browser` tool, so every page goes through the capture tool.
 - `/demo`, `/tour`, `/playground`, `/sandbox`, `/product` and `/how-it-works` are probed on every
-  site, compared with the answer for a path that cannot exist, so soft 404s do not count.
+  site, compared with the answer for a path that cannot exist, so soft 404s do not count. A probe
+  that answers counts only when the site links to it (its pages or sitemap) or its title or first
+  heading names what was probed: sites that serve their users' pages at `/<username>` would
+  otherwise hand over a person's profile as the product.
+- A page whose address after redirects, or whose visible text, matches a page already captured is
+  not kept: one page at two addresses (`/` and `/homepage`) gets one copy and one set of shots.
+- A browser that closes under a page is replaced and the page loaded again. A page that failed or
+  read no text may be loaded once more by asking for it again; it does not count twice.
 - Text (`innerText`, `textContent` without scripts, meta tags and alt text) and styles are read
   before cookie banners are hidden with CSS and before any screenshot. Screenshots are 1920x1080:
-  the top of each page and each product UI candidate.
+  the top of each page and each product UI candidate, with a fixed site header hidden for the
+  shots further down. Candidates are graded: mockups, interactive demo embeds and pictures named
+  as screens are product UI; other large pictures count only on pages about the product, never on
+  about, customers, careers or blog pages; video, video embeds, canvases and anything faded or
+  `aria-hidden` are never shot. Contact, legal and careers pages are read but not shot.
 - Brand tokens come from computed styles, so they work with or without CSS variables and in any
   colour syntax: the painted background, the most used readable text colour, the brand colour from
   button fills, links and headings, accents, muted text, radius, light or dark, and fonts with how

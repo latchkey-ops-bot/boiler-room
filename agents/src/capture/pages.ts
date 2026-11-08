@@ -41,6 +41,8 @@ const RULES: [LinkKind, RegExp][] = [
   ],
   ['careers', /(^|\/)(careers?|jobs|hiring|join-us)(\/|$)/],
   ['pricing', /(^|\/)(pricing|plans|price|prices|buy|purchase)(\/|$)/],
+  // A demo behind a sales form is a contact page: /contact/demo is a form, not public product UI.
+  ['contact', /^\/(contact|contact-us|talk-to-sales|sales)(\/|$)/],
   ['demo', /(^|\/)(demo|tour|playground|sandbox|try|interactive|live-demo|how-it-works)(\/|$)/],
   [
     'docs',
@@ -114,12 +116,19 @@ export interface ProbeResponse {
   content_type: string | null;
   title: string;
   length: number;
+  /** The first `<h1>` the server sent. */
+  heading?: string;
 }
 
 /**
  * Whether a probed path is a real page. A status code is not enough (trap: soft 404s answer 200
  * with an app shell or the home page), so the answer is also compared with what the site sends
  * for a path that cannot exist, and a redirect to the home page or a sign-in page is not a find.
+ *
+ * A page that answers is still not a find unless the site links to it (`linked`: from its pages or
+ * its sitemap) or the page names what was probed in its title or first heading. Many sites serve
+ * their users' public pages at `/<username>`, so `/product` can be a person's profile or booking
+ * page; such a page is never linked as the product and never titled "product".
  */
 export function judgeProbe(
   path: string,
@@ -127,6 +136,7 @@ export function judgeProbe(
   response: ProbeResponse,
   baseline: ProbeResponse | null,
   home: string,
+  linked = false,
 ): ProbeResult {
   const result = { path, url, ...response };
   const verdict = (found: boolean, reason: string): ProbeResult => ({ ...result, found, reason });
@@ -149,7 +159,24 @@ export function judgeProbe(
     if (sameTitle && close)
       return verdict(false, 'same as the answer for a missing page (soft 404)');
   }
+  if (!linked && !namesProbe(path, response))
+    return verdict(
+      false,
+      'not linked from the site, and its title and heading do not name it (it may be a user’s page)',
+    );
   return verdict(true, `HTTP ${response.status}`);
+}
+
+/** Whether the page names the probed path, as `/how-it-works` is named by "How it works". */
+function namesProbe(path: string, response: ProbeResponse): boolean {
+  const word = path.replace(/^\//, '').replace(/[-_]+/g, ' ').toLowerCase();
+  const plain = (text: string) => text.toLowerCase().replace(/[-_]+/g, ' ');
+  if (plain(response.title).includes(word) || plain(response.heading ?? '').includes(word))
+    return true;
+  // A redirect to another path that names it, such as /product to /product-analytics.
+  if (!response.final_url) return false;
+  const finalPath = new URL(response.final_url).pathname.replace(/\/+$/, '') || '/';
+  return finalPath !== path && plain(finalPath).includes(word);
 }
 
 /** `Disallow` rules for every crawler (`User-agent: *`), from a robots.txt. */
@@ -205,6 +232,42 @@ export function robotsAllow(
     if (ruleMatches(rule, path) && rule.length > best.length)
       best = { length: rule.length, allowed: false };
   return best.allowed;
+}
+
+/** What identifies a captured page's content, to tell a second address of one page. */
+export interface PageIdentity {
+  finalUrl: string;
+  text: string;
+}
+
+/**
+ * The earlier page this one repeats, if any: the same address after redirects, or the same
+ * visible text (at least 200 characters of it). Sites often serve one page at two addresses, such
+ * as `/` and `/homepage`, and a second copy spends a page load and doubles its screenshots.
+ */
+export function duplicateOf<T extends PageIdentity>(
+  page: PageIdentity,
+  earlier: T[],
+): T | undefined {
+  const key = normaliseUrl(page.finalUrl);
+  const text = normaliseWhitespace(page.text);
+  return earlier.find(
+    (other) =>
+      (key !== undefined && key === normaliseUrl(other.finalUrl)) ||
+      (text.length >= 200 && text === normaliseWhitespace(other.text)),
+  );
+}
+
+/** A page that loaded as HTML but gave no text, or failed: the capture may load it once more. */
+export function needsRecapture(page: {
+  error: string | null;
+  status: number | null;
+  content_type: string | null;
+  text_chars?: number;
+}): boolean {
+  if (page.error) return true;
+  const html = page.status !== null && page.status < 400 && /html/.test(page.content_type ?? '');
+  return html && (page.text_chars ?? 1) === 0;
 }
 
 export interface CandidateLink {

@@ -19,9 +19,11 @@ export interface CollectOptions {
 
 /**
  * Runs inside the page through `page.evaluate`, so it must not reference anything outside its own
- * body. It only reads the document. The one thing it writes is a `data-br-overlay` attribute on
- * cookie banners and pop-ups, which the capture hides with CSS for screenshots, after their text
- * has been read. It scrolls the window to sample colours and returns to the top.
+ * body. It only reads the document. The one thing it writes is a marker attribute: `data-br-overlay`
+ * on cookie banners and pop-ups, which the capture hides for every screenshot, and
+ * `data-br-header` on a fixed or sticky site header, which it hides for screenshots of product UI
+ * further down the page, after the text has been read. It scrolls the window to sample colours
+ * and returns to the top.
  */
 export async function collectPage(options: CollectOptions): Promise<RawPage> {
   const vw = window.innerWidth;
@@ -287,7 +289,10 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       rect.height < 160 &&
       el.querySelector('a, nav') !== null &&
       !CONSENT_TEXT.test(text);
-    if (isHeader) continue;
+    if (isHeader) {
+      el.setAttribute('data-br-header', '1');
+      continue;
+    }
     const share = (rect.width * rect.height) / (vw * vh);
     const zIndex = Number.parseInt(style.zIndex, 10) || 0;
     if (dialog || (OVERLAY_TEXT.test(text) && share < 0.8) || (zIndex >= 1000 && share > 0.3)) {
@@ -383,9 +388,23 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     });
   }
 
-  // Product UI: real screenshots and videos, live embeds, canvases, and HTML mockups.
+  // Product UI: real screenshots and videos, live embeds, canvases, and HTML mockups. Words are
+  // matched whole, after camelCase is split, so "quiet" is not "ui" and "happy" is not "app".
   const UI_WORDS =
-    /(dashboard|screenshot|screen|app|product|ui|interface|console|editor|preview|demo|platform|analytics|workflow)/i;
+    /\b(dashboards?|screenshots?|screens?|apps?|product|ui|interface|console|editor|preview|demo|platform|analytics|workflows?|inbox|settings|form)\b/i;
+  const uiWords = (text: string) => UI_WORDS.test(text.replace(/([a-z])([A-Z])/g, '$1 $2'));
+  const DEMO_EMBED =
+    /storylane|navattic|arcade|supademo|walnut|reprise|howdygo|tourial|\/(demo|tour|interactive)\b/i;
+  const VIDEO_EMBED = /youtube|youtu\.be|vimeo|loom|wistia|vidyard|player\./i;
+  // A decoration: hidden from assistive technology, or faded into the background.
+  const decorative = (el: Element) => {
+    let opacity = 1;
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      if (node.getAttribute('aria-hidden') === 'true') return true;
+      opacity *= Number(styleOf(node).opacity) || 0;
+    }
+    return opacity < 0.6;
+  };
   const ui: RawUiCandidate[] = [];
   const media: RawPage['media'] = [];
   const addUi = (
@@ -395,7 +414,9 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     label: string,
     score: number,
     mock: boolean,
+    grade: RawUiCandidate['grade'],
   ) => {
+    if (decorative(el)) return;
     const rect = el.getBoundingClientRect();
     ui.push({
       kind,
@@ -406,6 +427,7 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
       width: Math.round(rect.width),
       height: Math.round(rect.height),
       mock,
+      grade,
       score,
     });
   };
@@ -414,35 +436,48 @@ export async function collectPage(options: CollectOptions): Promise<RawPage> {
     const rect = img.getBoundingClientRect();
     if (img.naturalWidth < 600 || rect.width < 360 || rect.height < 200) continue;
     const label = `${img.alt} ${img.currentSrc || img.src} ${img.getAttribute('class') ?? ''}`;
-    if (/logo|avatar|portrait|headshot|team|photo/i.test(label)) continue;
-    addUi(img, 'img', img.currentSrc || img.src, img.alt, UI_WORDS.test(label) ? 3 : 1, false);
+    if (/logo|avatar|portrait|headshot|team|photo|people|person/i.test(label)) continue;
+    const named = uiWords(label);
+    // A large picture with no word for a screen is often art, so it must fill a third of the width.
+    if (!named && rect.width < vw / 3) continue;
+    addUi(
+      img,
+      'img',
+      img.currentSrc || img.src,
+      img.alt,
+      named ? 3 : 1,
+      false,
+      named ? 'product' : 'image',
+    );
   }
   for (const video of Array.from(document.querySelectorAll('video')) as HTMLVideoElement[]) {
     const src =
       video.currentSrc || video.src || video.querySelector('source')?.src || video.poster || null;
     if (src) media.push({ kind: 'video', src });
     if (visible(video) && video.getBoundingClientRect().width >= 360)
-      addUi(video, 'video', src, video.getAttribute('aria-label') ?? '', 2, false);
+      addUi(video, 'video', src, video.getAttribute('aria-label') ?? '', 2, false, 'media');
   }
   for (const frame of Array.from(document.querySelectorAll('iframe')) as HTMLIFrameElement[]) {
     const src = frame.src;
     if (!src) continue;
-    if (/youtube|vimeo|loom|wistia|storylane|navattic|arcade|supademo|demo|tour|embed/i.test(src)) {
+    const demo = DEMO_EMBED.test(src) && !VIDEO_EMBED.test(src);
+    if (demo || VIDEO_EMBED.test(src) || /embed/i.test(src)) {
       media.push({ kind: 'iframe', src });
       if (visible(frame) && frame.getBoundingClientRect().width >= 360)
-        addUi(frame, 'iframe', src, frame.title ?? '', 2, false);
+        addUi(frame, 'iframe', src, frame.title ?? '', 2, false, demo ? 'product' : 'media');
     }
   }
   for (const item of Array.from(document.querySelectorAll('canvas'))) {
     const rect = item.getBoundingClientRect();
+    const label = attrText(item);
     if (visible(item) && rect.width >= 400 && rect.height >= 250)
-      addUi(item, 'canvas', null, attrText(item), 1, false);
+      addUi(item, 'canvas', null, label, 1, false, uiWords(label) ? 'product' : 'media');
   }
   for (const el of illustrative) {
     if (el.tagName === 'PRE') continue;
     const rect = el.getBoundingClientRect();
     if (visible(el) && rect.width >= 400 && rect.height >= 250)
-      addUi(el, 'frame', null, attrText(el), 1.5, true);
+      addUi(el, 'frame', null, attrText(el), 1.5, true, 'product');
   }
   ui.sort((a, b) => b.score * b.width * b.height - a.score * a.width * a.height);
 

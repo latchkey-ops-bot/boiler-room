@@ -4,7 +4,7 @@ import { describeSubstitute, type ResolvedFont } from './fonts.ts';
 import type { LogoSource } from './logo.ts';
 import type { LinkKind, ProbeResult } from './pages.ts';
 import type { DerivedColors } from './tokens.ts';
-import type { RawCta, RawLink, RawUiCandidate } from './types.ts';
+import type { RawCta, RawLink, RawUiCandidate, UiGrade } from './types.ts';
 
 /** A file the agent must publish, and the placeholder in the template its `fil_` id replaces. */
 export interface PublishItem {
@@ -20,7 +20,7 @@ export interface Shot {
   label: string;
   mock: boolean;
   /** Product UI candidates this shot shows. */
-  ui: { label: string; mock: boolean }[];
+  ui: { label: string; mock: boolean; grade?: UiGrade }[];
   width: number;
   height: number;
   sourceUrl: string;
@@ -40,6 +40,8 @@ export interface CapturedPage {
   ui: RawUiCandidate[];
   hidden_overlays: number;
   error: string | null;
+  /** Characters of visible text read, so an empty capture is told from a page with no text. */
+  text_chars?: number;
 }
 
 export interface MaterialEntry {
@@ -88,10 +90,34 @@ export const TODO = 'TODO';
 
 export const placeholderFor = (relativePath: string) => `${PLACEHOLDER}${relativePath}`;
 
+/** Pages whose pictures show people and other companies' marks more often than the product. */
+export const PEOPLE_PAGES: ReadonlySet<LinkKind> = new Set([
+  'about',
+  'customers',
+  'careers',
+  'blog',
+]);
+
+/**
+ * Whether a candidate a shot shows is product UI a film can use: a mockup, an interactive demo or
+ * a picture named as a screen, or another large picture on a page about the product. Video,
+ * embeds of video and canvases are not, and nor are pictures on pages about people and customers,
+ * where they are portraits and other companies' logos.
+ */
+export function showsProduct(ui: Shot['ui'][number], kind: LinkKind): boolean {
+  const grade = ui.grade ?? 'image';
+  return grade === 'product' || (grade === 'image' && !PEOPLE_PAGES.has(kind));
+}
+
+/** Pages whose buttons are navigation, not calls to action a film would end on. */
+const NO_CTA_PAGES: ReadonlySet<LinkKind> = new Set(['docs', 'blog', 'legal', 'careers', 'login']);
+
 function productUiStatus(
   manifest: CaptureManifest,
 ): ResearchOutput['brief']['product_ui']['status'] {
-  const seen = manifest.pages.flatMap((page) => page.shots.flatMap((shot) => shot.ui));
+  const seen = manifest.pages.flatMap((page) =>
+    page.shots.flatMap((shot) => shot.ui.filter((ui) => showsProduct(ui, page.kind))),
+  );
   if (seen.some((ui) => !ui.mock)) return 'public';
   if (seen.length > 0) return 'mock-only';
   return manifest.login_links.length > 0 ? 'login-required' : 'none';
@@ -210,10 +236,13 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
   const seenCtas = new Set<string>();
   const ctas: ResearchOutput['brief']['ctas'] = [];
   for (const page of manifest.pages) {
+    if (NO_CTA_PAGES.has(page.kind)) continue;
     for (const cta of page.ctas) {
       if (!cta.href?.startsWith('http') || seenCtas.has(cta.text.toLowerCase()) || ctas.length >= 8)
         continue;
-      if (cta.placement === 'footer') continue;
+      // A call to action is drawn as a button and says what to do in a few words.
+      if (cta.placement === 'footer' || (!cta.background && !cta.border) || cta.text.length > 40)
+        continue;
       seenCtas.add(cta.text.toLowerCase());
       ctas.push({
         label: cta.text,
@@ -288,7 +317,9 @@ export function buildTemplate(manifest: CaptureManifest): ResearchOutput {
         status,
         notes: TODO,
         asset_ids: manifest.pages.flatMap((page) =>
-          page.shots.filter((shot) => shot.ui.length > 0).map((shot) => shot.assetId),
+          page.shots
+            .filter((shot) => shot.ui.some((ui) => showsProduct(ui, page.kind)))
+            .map((shot) => shot.assetId),
         ),
       },
     },

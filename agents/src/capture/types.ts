@@ -98,8 +98,16 @@ export interface RawUiCandidate {
   height: number;
   /** An HTML mockup, whose figures are samples, rather than a picture of the product. */
   mock: boolean;
+  /**
+   * How likely it shows the product: `product` for a mockup, an interactive demo embed or an
+   * image named as a screen of the product; `image` for any other large image; `media` for video,
+   * video embeds and canvases, which show people, animations or nothing in a still frame.
+   */
+  grade: UiGrade;
   score: number;
 }
+
+export type UiGrade = 'product' | 'image' | 'media';
 
 export interface RawLink {
   url: string;

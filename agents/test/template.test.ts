@@ -237,6 +237,63 @@ describe('buildTemplate', () => {
     expect(need?.request).toContain('font files');
   });
 
+  // Product UI listed a video of a person on the about page and customer logo cards, which a film
+  // template trusting the list would show as product shots.
+  it('lists as product UI only shots of the product, never video or pictures of people', () => {
+    const mixed = manifest();
+    const shot = (
+      assetId: string,
+      ui: CaptureManifest['pages'][number]['shots'][number]['ui'],
+    ) => ({
+      file: `shots/${assetId}.png`,
+      assetId,
+      kind: 'ui' as const,
+      label: assetId,
+      mock: false,
+      ui,
+      width: 1920,
+      height: 1080,
+      sourceUrl: SITE,
+    });
+    const home = mixed.pages[0];
+    if (!home) throw new Error('fixture page missing');
+    home.shots = [
+      shot('home-ui-1', [{ label: 'img: app screenshot', mock: false, grade: 'product' }]),
+      shot('home-ui-2', [{ label: 'video', mock: false, grade: 'media' }]),
+    ];
+    mixed.pages.push({
+      ...home,
+      url: `${SITE}about`,
+      final_url: `${SITE}about`,
+      slug: 'about',
+      kind: 'about',
+      shots: [shot('about-ui-1', [{ label: 'img', mock: false, grade: 'image' }])],
+    });
+    const template = buildTemplate(mixed);
+    expect(template.brief.product_ui).toMatchObject({ status: 'public', asset_ids: ['home-ui-1'] });
+  });
+
+  it('proposes only drawn buttons as calls to action, and none from docs pages', () => {
+    const navs = manifest();
+    const home = navs.pages[0];
+    if (!home) throw new Error('fixture page missing');
+    const button = home.ctas[0];
+    if (!button) throw new Error('fixture cta missing');
+    home.ctas = [
+      { ...button, text: 'Menu', href: `${SITE}menu`, background: null, border: null },
+      button,
+    ];
+    navs.pages.push({
+      ...home,
+      url: `${SITE}docs`,
+      final_url: `${SITE}docs`,
+      slug: 'docs',
+      kind: 'docs',
+      ctas: [{ ...button, text: 'Start Guide', href: `${SITE}docs/start` }],
+    });
+    expect(buildTemplate(navs).brief.ctas.map((cta) => cta.label)).toEqual(['Start free trial']);
+  });
+
   it('asks for product UI behind a login as a blocking request', () => {
     const noUi = manifest();
     const home = noUi.pages[0];

@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { APIRequestContext, Browser } from 'playwright';
 import { normaliseUrl, normaliseWhitespace, siteHost, slugify } from '../researcher/text.ts';
@@ -30,6 +30,7 @@ import {
   type CaptureManifest,
   guessBrandName,
   type MaterialEntry,
+  PEOPLE_PAGES,
   type PublishItem,
   placeholderFor,
   type Shot,
@@ -38,9 +39,11 @@ import {
   BASELINE_PATH,
   type CandidateLink,
   classifyLink,
+  duplicateOf,
   judgeProbe,
   type LinkKind,
   MAX_PAGES,
+  needsRecapture,
   PROBE_PATHS,
   type ProbeResponse,
   type ProbeResult,
@@ -49,7 +52,7 @@ import {
   sameSite,
   suggestPages,
 } from './pages.ts';
-import { htmlTitle, htmlToText } from './text-extract.ts';
+import { htmlHeading, htmlTitle, htmlToText } from './text-extract.ts';
 import { deriveColors } from './tokens.ts';
 import type { RawPage, RawUiCandidate } from './types.ts';
 
@@ -59,6 +62,11 @@ const REQUEST_GAP_MS = 1000;
 const PAGE_TIMEOUT_MS = 90_000;
 const MAX_UI_SHOTS_PER_PAGE = 3;
 const MAX_UI_SHOTS = 10;
+/** Pages with nothing a film would show: forms and legal text. Their text is still read. */
+const NO_SHOTS: ReadonlySet<LinkKind> = new Set(['contact', 'legal', 'careers', 'login']);
+/** What Playwright says when the browser under a page has gone. */
+const BROWSER_GONE =
+  /Target page, context or browser has been closed|Browser has been closed|browser has disconnected/i;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const log = (message: string) =>
@@ -131,12 +139,21 @@ export function setup(base: string): void {
 class Ledger {
   private readonly file: string;
   readonly pages: string[];
+  /** Pages loaded a second time because the first load failed. Each page gets one. */
+  readonly retried: string[];
   constructor(out: string) {
     this.file = join(out, 'ledger.json');
-    this.pages = existsSync(this.file) ? readJson<{ pages: string[] }>(this.file).pages : [];
+    const saved = existsSync(this.file)
+      ? readJson<{ pages: string[]; retried?: string[] }>(this.file)
+      : { pages: [], retried: [] };
+    this.pages = saved.pages;
+    this.retried = saved.retried ?? [];
   }
   has(url: string): boolean {
     return this.pages.includes(normaliseUrl(url) ?? url);
+  }
+  private save() {
+    writeJson(this.file, { limit: MAX_PAGES, pages: this.pages, retried: this.retried });
   }
   /** Records a page load, or refuses it past the per-site limit. */
   take(url: string): boolean {
@@ -144,8 +161,58 @@ class Ledger {
     if (this.pages.includes(key)) return true;
     if (this.pages.length >= MAX_PAGES) return false;
     this.pages.push(key);
-    writeJson(this.file, { limit: MAX_PAGES, pages: this.pages });
+    this.save();
     return true;
+  }
+  /** Allows one more load of a page whose load failed, or refuses a second retry. */
+  retry(url: string): boolean {
+    const key = normaliseUrl(url) ?? url;
+    if (!this.pages.includes(key) || this.retried.includes(key)) return false;
+    this.retried.push(key);
+    this.save();
+    return true;
+  }
+}
+
+/**
+ * The browser a capture uses, started again when it has gone. Chromium can be killed under a
+ * page (out of memory, or a stray `pkill`); the page is then loaded once more in a new browser
+ * instead of being stored with no text.
+ */
+export class Browsers {
+  private browser: Browser | undefined;
+  async get(): Promise<Browser> {
+    if (this.browser && !this.browser.isConnected()) {
+      log('  the browser had closed; starting a new one');
+      await closeBrowser(this.browser);
+      this.browser = undefined;
+    }
+    this.browser ??= await launch();
+    return this.browser;
+  }
+  async close() {
+    await closeBrowser(this.browser);
+    this.browser = undefined;
+  }
+}
+
+export async function captureResilient(
+  browsers: Browsers,
+  ...args: Parameters<typeof capturePage> extends [Browser, ...infer Rest] ? Rest : never
+): Promise<PageFile> {
+  for (let attempt = 1; ; attempt++) {
+    let file: PageFile;
+    try {
+      file = await capturePage(await browsers.get(), ...args);
+    } catch (cause) {
+      if (attempt < 2 && BROWSER_GONE.test(String(cause))) continue;
+      throw cause;
+    }
+    if (attempt < 2 && file.record.error && BROWSER_GONE.test(file.record.error)) {
+      log(`  ${args[1]}: the browser closed during the load; loading it again`);
+      continue;
+    }
+    return file;
   }
 }
 
@@ -292,6 +359,7 @@ async function capturePage(
         record.hidden_overlays = collected.hidden;
         stored.title = collected.title;
         stored.text = collected.text;
+        record.text_chars = normaliseWhitespace(collected.text.rendered).length;
 
         await page.evaluate(() => {
           for (const el of Array.from(document.querySelectorAll('[data-br-overlay]'))) {
@@ -302,6 +370,7 @@ async function capturePage(
           window.scrollTo(0, 0);
         });
         await page.waitForTimeout(500);
+        if (NO_SHOTS.has(kind)) return;
         const file = join('shots', `${slug}.png`);
         await page.screenshot({ path: join(paths.out, file), type: 'png', timeout: 30_000 });
         const top: Shot = {
@@ -319,11 +388,22 @@ async function capturePage(
 
         // One 1920x1080 shot per product UI candidate, unless an earlier shot of this page already
         // shows it; then that shot is marked as showing product UI instead of taking a duplicate.
+        // Video, video embeds and canvases are never shot: a still frame of them shows a person,
+        // a player or a decoration. On pages about people and customers only product UI is.
+        const wanted = collected.ui.filter(
+          (ui) => ui.grade === 'product' || (ui.grade === 'image' && !PEOPLE_PAGES.has(kind)),
+        );
+        // A fixed header would cover the top of every shot further down the page.
+        if (wanted.length > 0)
+          await page.evaluate(() => {
+            for (const el of Array.from(document.querySelectorAll('[data-br-header]')))
+              (el as HTMLElement).style.setProperty('visibility', 'hidden', 'important');
+          });
         const taken: { y: number; shot: Shot }[] = [{ y: 0, shot: top }];
         let uiCount = 0;
-        for (const ui of collected.ui) {
+        for (const ui of wanted) {
           if (uiCount >= options.uiShots) break;
-          const seen = { label: describeUi(ui), mock: ui.mock };
+          const seen = { label: describeUi(ui), mock: ui.mock, grade: ui.grade };
           const covering = taken.find(
             (item) =>
               ui.top >= item.y && ui.top + Math.min(ui.height, 600) <= item.y + VIEWPORT.height,
@@ -332,8 +412,8 @@ async function capturePage(
             covering.shot.ui.push(seen);
             continue;
           }
-          const wanted = Math.max(0, ui.top - Math.max(0, (VIEWPORT.height - ui.height) / 2));
-          await page.evaluate((target) => window.scrollTo(0, target), wanted);
+          const target = Math.max(0, ui.top - Math.max(0, (VIEWPORT.height - ui.height) / 2));
+          await page.evaluate((y) => window.scrollTo(0, y), target);
           await page.waitForTimeout(700);
           const y = await page.evaluate(() => window.scrollY);
           uiCount += 1;
@@ -466,6 +546,7 @@ function probeResponse(fetched: Fetched | null): ProbeResponse {
     content_type: fetched.contentType,
     title: htmlTitle(html),
     length: htmlToText(html).length,
+    heading: htmlHeading(html),
   };
 }
 
@@ -490,12 +571,11 @@ export async function discover(base: string, url: string, script: string): Promi
     mkdirSync(join(paths.out, dir), { recursive: true });
   log(`swap: ${ensureSwap().replace(/\n/g, ' | ') || 'none'}`);
   const ledger = new Ledger(paths.out);
-  let browser: Browser | undefined;
+  const browsers = new Browsers();
   try {
-    browser = await launch();
     log(`loading ${url}`);
     if (!ledger.take(url)) throw new Error('The 15-page limit for this site is already used.');
-    const home = await capturePage(browser, paths, url, 'home', 'home', {
+    const home = await captureResilient(browsers, paths, url, 'home', 'home', {
       withStyles: true,
       withLogos: true,
       uiShots: MAX_UI_SHOTS_PER_PAGE,
@@ -504,7 +584,7 @@ export async function discover(base: string, url: string, script: string): Promi
       throw new Error(`The home page could not be loaded: ${home.record.error}`);
     savePage(paths, home);
     const site = home.record.final_url;
-    const fetchContext = await browser.newContext({ viewport: VIEWPORT });
+    const fetchContext = await (await browsers.get()).newContext({ viewport: VIEWPORT });
     const request = fetchContext.request;
 
     const origin = new URL(site).origin;
@@ -547,6 +627,15 @@ export async function discover(base: string, url: string, script: string): Promi
     );
 
     log('probing for public product UI');
+    // What the site links to. A probe that answers but is neither linked nor named for what was
+    // probed is not taken: it may be a user's page served at /<username>.
+    const linked = new Set(
+      [...(home.raw?.links ?? []).map((link) => link.url), ...sitemapUrls]
+        .map((item) => normaliseUrl(item))
+        .filter((item): item is string => Boolean(item)),
+    );
+    const isLinked = (address: string | null) =>
+      Boolean(address && linked.has(normaliseUrl(address) ?? ''));
     const baseline = probeResponse(
       await fetchResource(request, `${origin}${BASELINE_PATH}`, 2_000_000, true),
     );
@@ -567,13 +656,15 @@ export async function discover(base: string, url: string, script: string): Promi
         });
         continue;
       }
+      const response = probeResponse(await fetchResource(request, target, 2_000_000, true));
       probes.push(
         judgeProbe(
           path,
           target,
-          probeResponse(await fetchResource(request, target, 2_000_000, true)),
+          response,
           baseline,
           site,
+          isLinked(target) || isLinked(response.final_url),
         ),
       );
     }
@@ -622,7 +713,7 @@ export async function discover(base: string, url: string, script: string): Promi
     const lines = [
       `DISCOVER DONE for ${site}`,
       `Home: "${home.record.title}" (HTTP ${home.record.status}). Page loads used: ${ledger.pages.length} of ${MAX_PAGES}.`,
-      `robots.txt: ${robots.disallow.length} disallow rules. Sitemap URLs: ${sitemapUrls.length}. llms.txt: ${llmsTxt ? 'yes' : 'no'}.`,
+      `robots.txt: ${robots.disallow.length} disallow rules for all crawlers (User-agent: *), which the capture honours. Sitemap URLs: ${sitemapUrls.length}. llms.txt: ${llmsTxt ? 'yes' : 'no'}.`,
       '',
       'Probes for public product UI:',
       ...probes.map(
@@ -652,7 +743,7 @@ export async function discover(base: string, url: string, script: string): Promi
     ];
     writeFileSync(join(base, 'jobs', 'discover-summary.txt'), `${lines.join('\n')}\n`);
   } finally {
-    await closeBrowser(browser);
+    await browsers.close();
   }
 }
 
@@ -899,7 +990,13 @@ export async function capture(
   const taken = new Set(existing.map((page) => page.record.slug));
   const known = new Map(found.links.map((link) => [normaliseUrl(link.url), link]));
   const skipped: CaptureManifest['skipped'] = [];
-  const queue: { url: string; kind: LinkKind }[] = [];
+  const queue: { url: string; kind: LinkKind; slug?: string }[] = [];
+  // A page whose earlier load failed or read no text may be loaded once more, under its old slug.
+  const failed = new Map(
+    existing
+      .filter((page) => needsRecapture(page.record))
+      .map((page) => [normaliseUrl(page.record.url), page]),
+  );
   for (const item of requested) {
     const key = normaliseUrl(item);
     if (!key) {
@@ -919,13 +1016,19 @@ export async function capture(
       skipped.push({ url: item, reason: 'disallowed by robots.txt' });
       continue;
     }
-    if (ledger.has(item) || queue.some((entry) => normaliseUrl(entry.url) === key)) continue;
+    if (queue.some((entry) => normaliseUrl(entry.url) === key)) continue;
+    if (ledger.has(item)) {
+      const earlier = failed.get(key);
+      if (earlier && ledger.retry(item))
+        queue.push({ url: item, kind: earlier.record.kind, slug: earlier.record.slug });
+      continue;
+    }
     queue.push({ url: item, kind });
   }
 
-  let browser: Browser | undefined;
+  const browsers = new Browsers();
   try {
-    browser = await launch();
+    const kept = existing.filter((page) => !failed.has(normaliseUrl(page.record.url)));
     let uiShots = existing.reduce(
       (sum, page) => sum + page.record.shots.filter((shot) => shot.kind === 'ui').length,
       0,
@@ -935,15 +1038,33 @@ export async function capture(
         skipped.push({ url: item.url, reason: `over the ${MAX_PAGES}-page limit` });
         continue;
       }
-      const slug = slugFor(item.url, taken);
-      log(`loading ${item.url} (${ledger.pages.length}/${MAX_PAGES})`);
-      const page = await capturePage(browser, paths, item.url, slug, item.kind, {
+      const slug = item.slug ?? slugFor(item.url, taken);
+      log(`loading ${item.url} (${ledger.pages.length}/${MAX_PAGES})${item.slug ? ' again' : ''}`);
+      const page = await captureResilient(browsers, paths, item.url, slug, item.kind, {
         withStyles: false,
         withLogos: false,
         uiShots: Math.max(0, Math.min(MAX_UI_SHOTS_PER_PAGE, MAX_UI_SHOTS - uiShots)),
       });
+      const identity = (file: PageFile) => ({
+        finalUrl: file.record.final_url,
+        text: file.stored.text.rendered,
+        file,
+      });
+      const same = page.record.error ? undefined : duplicateOf(identity(page), kept.map(identity));
+      if (same) {
+        // One page at a second address: no second copy of its text or its screenshots.
+        for (const shot of page.record.shots) rmSync(join(paths.out, shot.file), { force: true });
+        rmSync(page.record.text_file, { force: true });
+        skipped.push({
+          url: item.url,
+          reason: `the same page as ${same.file.record.final_url}, which is already captured`,
+        });
+        log(`  ${item.url} is the same page as ${same.file.record.final_url}; not kept`);
+        continue;
+      }
       uiShots += page.record.shots.filter((shot) => shot.kind === 'ui').length;
       savePage(paths, page);
+      kept.push(page);
     }
 
     const pages = loadPages(paths).sort((a, b) =>
@@ -953,7 +1074,7 @@ export async function capture(
     const raw = home?.raw;
     if (!raw?.styles) throw new Error('The home page has no measured styles. Run discover again.');
 
-    const fetchContext = await browser.newContext({ viewport: VIEWPORT });
+    const fetchContext = await (await browsers.get()).newContext({ viewport: VIEWPORT });
     const request = fetchContext.request;
     const colors = deriveColors(raw.styles);
     const { fonts, notes: fontNotes } = await resolveBrandFonts(request, raw, site);
@@ -1049,7 +1170,7 @@ export async function capture(
     );
     log(done);
   } finally {
-    await closeBrowser(browser);
+    await browsers.close();
   }
 }
 
@@ -1073,7 +1194,7 @@ function captureSummary(manifest: CaptureManifest, paths: Paths, script: string)
     `Pages (${manifest.pages.length} of at most ${MAX_PAGES}). Read each text file before writing claims:`,
     ...manifest.pages.map(
       (page) =>
-        `  ${page.kind.padEnd(9)} HTTP ${page.status ?? '---'} ${page.final_url}  "${page.title}"  -> ${page.text_file}${page.error ? `  ERROR ${page.error}` : ''}${page.hidden_overlays ? `  (${page.hidden_overlays} overlay(s) hidden for screenshots)` : ''}`,
+        `  ${page.kind.padEnd(9)} HTTP ${page.status ?? '---'} ${page.final_url}  "${page.title}"  -> ${page.text_file}${page.error ? `  ERROR ${page.error}` : ''}${!page.error && needsRecapture(page) ? '  NO TEXT READ' : ''}${page.hidden_overlays ? `  (${page.hidden_overlays} overlay(s) hidden for screenshots)` : ''}`,
     ),
     ...(manifest.skipped.length
       ? ['Skipped:', ...manifest.skipped.map((item) => `  ${item.url}: ${item.reason}`)]
@@ -1131,5 +1252,12 @@ function captureSummary(manifest: CaptureManifest, paths: Paths, script: string)
   ];
   if (manifest.errors.length)
     lines.push('', 'Errors:', ...manifest.errors.map((error) => `  ${error}`));
+  const again = manifest.pages.filter((page) => needsRecapture(page));
+  if (again.length)
+    lines.push(
+      '',
+      `These pages failed or read no text. Run capture again with the same site address and these pages; each may be loaded once more. Never ask the customer for text a public page shows:`,
+      `  node ${script} capture ${manifest.site} ${again.map((page) => page.url).join(' ')}`,
+    );
   return lines.join('\n');
 }
