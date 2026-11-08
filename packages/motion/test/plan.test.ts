@@ -92,10 +92,10 @@ describe('prepareFilm', () => {
 
   it('refuses a scene type that has no template yet, by name', async () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 1).type = 'stat-counter';
+    at(campaign.scenes, 1).type = 'proof-bars';
     const rejection = prepareFilm({ campaign, format: '16:9' }, exampleProbe());
     await expect(rejection).rejects.toThrow(
-      /SCENE_TYPE_UNBUILT at scenes\[1\]\.type: Scene type "stat-counter" is in the scene library, but motion has no template for it yet/,
+      /SCENE_TYPE_UNBUILT at scenes\[1\]\.type: Scene type "proof-bars" is in the scene library, but motion has no template for it yet/,
     );
   });
 
