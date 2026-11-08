@@ -27,9 +27,17 @@ export function sampleFrames(durationInFrames: number, count: number): number[] 
 export interface PlanShape {
   durationInFrames: number;
   scenes: { span: { id: string; from: number; durationInFrames: number } }[];
+  transitions?: { index: number; name: string; boundary: number; qc: number[] }[];
 }
 
-/** The frames that show each scene once its copy has landed, each boundary, and the last frame. */
+/** How far a frame is from a seam, as the spec writes it: `S`, `S-12`, `S+14`. */
+const fromSeam = (frame: number, boundary: number) =>
+  frame === boundary ? 'S' : `S${frame > boundary ? '+' : '-'}${Math.abs(frame - boundary)}`;
+
+/**
+ * The frames that show each scene once its copy has landed, the QC frames of every transition, as
+ * `docs/motion/transitions.md` lists them for its id, and the last frame.
+ */
 export function framesWorthSeeing(plan: PlanShape): { label: string; frame: number }[] {
   const frames: { label: string; frame: number }[] = [];
   for (const { span } of plan.scenes) {
@@ -37,10 +45,14 @@ export function framesWorthSeeing(plan: PlanShape): { label: string; frame: numb
       label: `${span.id}-settled`,
       frame: span.from + Math.round(span.durationInFrames * 0.62),
     });
-    if (span.from > 0) frames.push({ label: `${span.id}-boundary`, frame: span.from });
+  }
+  for (const { index, name, boundary, qc } of plan.transitions ?? []) {
+    for (const frame of qc) {
+      frames.push({ label: `seam${index + 1}-${name}-${fromSeam(frame, boundary)}`, frame });
+    }
   }
   frames.push({ label: 'last', frame: plan.durationInFrames - 1 });
-  return frames.sort((a, b) => a.frame - b.frame);
+  return frames.sort((a, b) => a.frame - b.frame || a.label.localeCompare(b.label));
 }
 
 /**
@@ -66,3 +78,12 @@ export function pixelDifference(
   }
   return { pixels, maxDelta };
 }
+
+/**
+ * Chrome's known raster variance: a rounded corner drawn one level apart in another tab. A frame
+ * pair inside this is reported and tolerated. Anything larger is a determinism failure.
+ */
+export const RASTER_VARIANCE = { maxDelta: 1, pixels: 32 } as const;
+
+export const withinRasterVariance = ({ pixels, maxDelta }: { pixels: number; maxDelta: number }) =>
+  maxDelta <= RASTER_VARIANCE.maxDelta && pixels <= RASTER_VARIANCE.pixels;

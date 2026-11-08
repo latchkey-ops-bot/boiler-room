@@ -1,9 +1,10 @@
 import type { Campaign, Scene } from '@boiler-room/schema';
 import type { ResolvedLogo } from '../brand/logo.ts';
-import type { CarryElement } from '../components/scene-runtime.tsx';
-import { type SceneExit, type SceneTiming, sceneTiming } from '../core/presence.ts';
-import { FORMAT_SIZES, type Format, stageFor } from '../layout/stage.ts';
-import type { ImageAnchor } from '../scenes/definition.ts';
+import { skinOf } from '../brand/skin.ts';
+import { framesBefore } from '../core/curves.ts';
+import { type SceneTiming, sceneTiming } from '../core/presence.ts';
+import { FORMAT_SIZES, type Format } from '../layout/stage.ts';
+import { type Ground, groundOf, type Skin } from '../scenes/definition.ts';
 import { definitionOf } from '../scenes/registry.ts';
 import { buildTimeline, type SceneSpan, type TransitionWindow } from '../transitions/timeline.ts';
 import { type ImageSize, screenImageIds } from './media.ts';
@@ -18,19 +19,10 @@ export interface ScenePlan {
   index: number;
   span: SceneSpan;
   timing: SceneTiming;
-  /** The images the scene shows, in the order of its `assetIds`. A carry moves the first. */
+  /** The ground the `Stage` draws under this scene. */
+  ground: Ground;
+  /** The images the scene shows, in the order of its `assetIds`. */
   images: PlannedImage[];
-  carriedIn: CarryElement | undefined;
-  carriedOut: CarryElement | undefined;
-}
-
-export interface CarryPlan {
-  window: TransitionWindow;
-  element: CarryElement;
-  outgoing: number;
-  incoming: number;
-  /** Where a carried image starts and ends. A mark is placed when it is drawn. */
-  image: { from: ImageAnchor; to: ImageAnchor } | undefined;
 }
 
 /**
@@ -45,8 +37,12 @@ export interface FilmPlan {
   fps: number;
   durationInFrames: number;
   logo: ResolvedLogo;
+  skin: Skin;
   scenes: ScenePlan[];
-  carries: CarryPlan[];
+  /** The transition on each boundary, as the resolver chose it, in order. */
+  transitions: TransitionWindow[];
+  /** The film frame from which nothing moves, the ground included, or the film's length. */
+  stillFrom: number;
 }
 
 export interface PlanInputs {
@@ -58,14 +54,6 @@ export interface PlanInputs {
   imageSizes: Record<string, ImageSize>;
 }
 
-/**
- * A push moves the scene, a carry clears the words for the element it moves, and a cut or the end
- * of the film keeps everything to the last frame, as a dead-stop cut does.
- */
-function exitOf(span: SceneSpan): SceneExit {
-  return span.out?.name === 'carry' ? 'text' : 'hold';
-}
-
 function imagesOf(scene: Scene, campaign: Campaign, sizes: Record<string, ImageSize>) {
   return screenImageIds(scene, campaign).map((assetId): PlannedImage => {
     const size = sizes[assetId];
@@ -74,88 +62,33 @@ function imagesOf(scene: Scene, campaign: Campaign, sizes: Record<string, ImageS
   });
 }
 
-function imageAnchor(
-  plan: ScenePlan,
-  scene: Scene,
-  stage: ReturnType<typeof stageFor>,
-  fps: number,
-  frame: number,
-): ImageAnchor | undefined {
-  const definition = definitionOf(scene.type);
-  const [first] = plan.images;
-  if (!definition?.imageAnchor || !first) return undefined;
-  return definition.imageAnchor({
-    props: definition.props.parse(scene.props),
-    stage,
-    image: { width: first.width, height: first.height, aspect: first.width / first.height },
-    durationInFrames: plan.span.durationInFrames,
-    fps,
-    timing: plan.timing,
-    frame,
-    text: scene.text,
-  });
-}
-
 export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): FilmPlan {
   const timeline = buildTimeline(campaign);
   const { width, height } = FORMAT_SIZES[format];
-  const stage = stageFor(width, height);
+  const skin = skinOf(campaign.brand.colors.background);
+  let stillFrom = timeline.durationInFrames;
 
   const scenes = timeline.spans.map((span, index): ScenePlan => {
     const scene = campaign.scenes[index] as Scene;
+    const definition = definitionOf(scene.type);
+    if (!definition) throw new Error(`Scene type "${scene.type}" is not registered.`);
+    const holdFrom = definition.holdFrom?.(span.durationInFrames, timeline.fps);
+    if (holdFrom !== undefined) stillFrom = Math.min(stillFrom, span.from + holdFrom);
     return {
       index,
       span,
+      // Scenes keep everything to their last frame: T1 moves it, and T3 and T5 cut. A T5 entry
+      // starts after its blank frames.
       timing: sceneTiming({
         durationInFrames: span.durationInFrames,
         fps: timeline.fps,
-        exit: exitOf(span),
-        enterAfter: span.in ? span.in.to - span.in.boundary : 0,
-        clearBefore: span.out ? span.out.boundary - span.out.from : 0,
-        arrivesWhole: span.in?.name === 'push',
+        exit: 'hold',
+        enterAfter: framesBefore(span.in?.blank ?? 0, timeline.fps),
       }),
+      ground: groundOf(definition, definition.props.parse(scene.props), skin),
       images: imagesOf(scene, campaign, imageSizes),
-      carriedIn: undefined,
-      carriedOut: undefined,
     };
   });
-
-  const carries: CarryPlan[] = [];
-  for (const [index, before] of scenes.entries()) {
-    const after = scenes[index + 1];
-    const window = before.span.out;
-    if (!after || window?.name !== 'carry') continue;
-    const from = imageAnchor(
-      before,
-      campaign.scenes[index] as Scene,
-      stage,
-      timeline.fps,
-      window.from - before.span.from,
-    );
-    const to = imageAnchor(
-      after,
-      campaign.scenes[index + 1] as Scene,
-      stage,
-      timeline.fps,
-      window.to - after.span.from,
-    );
-    // The product moves when both scenes hold the same image where a carry can meet it, and the
-    // brand mark moves otherwise.
-    const shared = before.images[0]?.assetId;
-    const element: CarryElement =
-      shared && shared === after.images[0]?.assetId && from && to
-        ? { kind: 'image', assetId: shared }
-        : { kind: 'mark' };
-    before.carriedOut = element;
-    after.carriedIn = element;
-    carries.push({
-      window,
-      element,
-      outgoing: index,
-      incoming: index + 1,
-      image: element.kind === 'image' && from && to ? { from, to } : undefined,
-    });
-  }
 
   return {
     campaign,
@@ -165,7 +98,9 @@ export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): Fi
     fps: timeline.fps,
     durationInFrames: timeline.durationInFrames,
     logo,
+    skin,
     scenes,
-    carries,
+    transitions: timeline.windows,
+    stillFrom,
   };
 }

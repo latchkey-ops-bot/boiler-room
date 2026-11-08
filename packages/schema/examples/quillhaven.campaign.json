@@ -79,13 +79,13 @@
         "claimIds": []
       },
       "assetIds": [],
-      "transitionOut": "push"
+      "transitionOut": "t3"
     },
     {
       "id": "revise",
       "type": "site-hero",
       "start": 3.5,
-      "end": 8.75,
+      "end": 6.75,
       "props": { "focus": { "x": 720, "y": 360, "w": 1440, "h": 900 } },
       "text": [
         {
@@ -96,13 +96,13 @@
         }
       ],
       "assetIds": ["editor-shot"],
-      "transitionOut": "carry"
+      "transitionOut": "t3"
     },
     {
       "id": "features",
       "type": "feature-card",
-      "start": 8.75,
-      "end": 14,
+      "start": 6.75,
+      "end": 9.25,
       "props": {},
       "text": [
         {
@@ -115,7 +115,45 @@
         { "id": "features-effect", "role": "label", "value": "Always kept", "claimIds": [] }
       ],
       "assetIds": ["editor-shot"],
-      "transitionOut": "carry"
+      "transitionOut": "t5"
+    },
+    {
+      "id": "compare",
+      "type": "feature-card",
+      "start": 9.25,
+      "end": 11.75,
+      "props": {},
+      "text": [
+        {
+          "id": "compare-headline",
+          "role": "headline",
+          "value": "Compare drafts at a glance",
+          "claimIds": []
+        },
+        { "id": "compare-cause", "role": "label", "value": "Old draft", "claimIds": [] },
+        { "id": "compare-effect", "role": "label", "value": "New draft", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "notes",
+      "type": "feature-card",
+      "start": 11.75,
+      "end": 14,
+      "props": { "accent": { "textId": "notes-headline", "from": 1, "to": 2 } },
+      "text": [
+        {
+          "id": "notes-headline",
+          "role": "headline",
+          "value": "Every note stays put",
+          "claimIds": []
+        },
+        { "id": "notes-cause", "role": "label", "value": "Margin notes", "claimIds": [] },
+        { "id": "notes-effect", "role": "label", "value": "Kept in place", "claimIds": [] }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
     },
     {
       "id": "close",

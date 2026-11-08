@@ -1,0 +1,146 @@
+{
+  "schemaVersion": 1,
+  "id": "nova-mark",
+  "sourceUrl": "https://nova.example.com",
+  "fps": 30,
+  "durationSeconds": 14,
+  "brand": {
+    "name": "Nova",
+    "colors": {
+      "background": "#0B1020",
+      "foreground": "#F4F6FB",
+      "primary": "#7C9CFF",
+      "accent": "#FFB86B",
+      "muted": "#8A93A8"
+    },
+    "fonts": {
+      "display": {
+        "family": "Sora",
+        "source": "font-display"
+      },
+      "body": {
+        "family": "Inter",
+        "source": "font-body"
+      }
+    },
+    "logoAssetId": "logo",
+    "radius": 12
+  },
+  "assets": {
+    "logo": {
+      "kind": "svg",
+      "src": "assets/nova/logo.svg",
+      "provenance": "captured",
+      "sourceUrl": "https://nova.example.com"
+    },
+    "dashboard-shot": {
+      "kind": "image",
+      "src": "assets/nova/dashboard.png",
+      "provenance": "captured",
+      "width": 2880,
+      "height": 1800,
+      "sourceUrl": "https://nova.example.com/product"
+    },
+    "font-display": {
+      "kind": "font",
+      "src": "assets/fonts/sora.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    },
+    "font-body": {
+      "kind": "font",
+      "src": "assets/fonts/inter.woff2",
+      "provenance": "library",
+      "license": "OFL-1.1"
+    }
+  },
+  "claims": [],
+  "scenes": [
+    {
+      "id": "open",
+      "type": "word-slam",
+      "start": 0,
+      "end": 3,
+      "props": {},
+      "text": [
+        {
+          "id": "open-headline",
+          "role": "headline",
+          "value": "Your builds are waiting.",
+          "claimIds": []
+        }
+      ],
+      "assetIds": [],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "mark",
+      "type": "logo-reveal",
+      "start": 3,
+      "end": 6,
+      "props": {
+        "mode": "mask"
+      },
+      "text": [
+        {
+          "id": "mark-tagline",
+          "role": "subhead",
+          "value": "Builds that keep up",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["logo"],
+      "transitionOut": "t1"
+    },
+    {
+      "id": "surface",
+      "type": "site-hero",
+      "start": 6,
+      "end": 9.5,
+      "props": {},
+      "text": [
+        {
+          "id": "surface-address",
+          "role": "label",
+          "value": "nova.example.com/product",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
+    },
+    {
+      "id": "close",
+      "type": "end-card",
+      "start": 9.5,
+      "end": 14,
+      "props": {},
+      "text": [
+        {
+          "id": "close-cta",
+          "role": "cta",
+          "value": "Start free",
+          "claimIds": []
+        },
+        {
+          "id": "close-address",
+          "role": "label",
+          "value": "nova.example.com",
+          "claimIds": []
+        }
+      ],
+      "assetIds": ["logo"]
+    }
+  ],
+  "variants": {
+    "hooks": [],
+    "formats": ["16:9", "9:16", "1:1"],
+    "ctas": [
+      {
+        "id": "start-free",
+        "label": "Start free",
+        "href": "https://nova.example.com/signup"
+      }
+    ]
+  }
+}

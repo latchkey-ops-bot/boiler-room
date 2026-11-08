@@ -1,29 +1,15 @@
-import { campaignSchema, FORMATS, type Scene } from '@boiler-room/schema';
+import { campaignSchema, FORMATS } from '@boiler-room/schema';
 import { useEffect, useMemo, useState } from 'react';
-import {
-  AbsoluteFill,
-  type CalculateMetadataFunction,
-  Sequence,
-  useCurrentFrame,
-  useDelayRender,
-} from 'remotion';
+import { type CalculateMetadataFunction, useDelayRender } from 'remotion';
 import { z } from 'zod';
-import { assetUrl } from '../brand/assets.ts';
 import { BrandProvider } from '../brand/brand-context.tsx';
 import { loadBrandFonts } from '../brand/fonts.ts';
 import { resolveTheme } from '../brand/theme.ts';
-import {
-  type CarryElement,
-  SceneRuntimeProvider,
-  StageProvider,
-} from '../components/scene-runtime.tsx';
-import { type Stage, stageFor } from '../layout/stage.ts';
-import { definitionOf } from '../scenes/registry.ts';
-import { CarryOverlay } from '../transitions/carry.tsx';
-import { pushProgress, pushStyle } from '../transitions/push.ts';
-import { windowProgress } from '../transitions/timeline.ts';
-import type { CarryPlan, FilmPlan, ScenePlan } from './plan.ts';
+import { StageProvider } from '../components/scene-runtime.tsx';
+import { stageFor } from '../layout/stage.ts';
+import type { FilmPlan } from './plan.ts';
 import { prepareFilm } from './prepare.ts';
+import { Stage } from './stage.tsx';
 
 export const campaignFilmSchema = z.object({
   campaign: campaignSchema,
@@ -67,94 +53,10 @@ function useBrandFonts(campaign: FilmPlan['campaign']): boolean {
   return ready;
 }
 
-const inWindow = (frame: number, window: { from: number; to: number } | undefined) =>
-  window !== undefined && frame >= window.from && frame < window.to;
-
-function transitionStyle(plan: ScenePlan, filmFrame: number, stage: Stage) {
-  const { in: incoming, out: outgoing } = plan.span;
-  if (incoming && inWindow(filmFrame, incoming)) {
-    if (incoming.name === 'push') return pushStyle(pushProgress(filmFrame, incoming), 'in', stage);
-    return { opacity: windowProgress(filmFrame, incoming) };
-  }
-  if (outgoing?.name === 'push' && inWindow(filmFrame, outgoing)) {
-    return pushStyle(pushProgress(filmFrame, outgoing), 'out', stage);
-  }
-  return {};
-}
-
-const SceneHost = ({
-  plan,
-  scene,
-  film,
-  stage,
-}: {
-  plan: ScenePlan;
-  scene: Scene;
-  film: FilmPlan;
-  stage: Stage;
-}) => {
-  const filmFrame = useCurrentFrame() + plan.span.mountFrom;
-  const definition = definitionOf(scene.type);
-  if (!definition) throw new Error(`Scene type "${scene.type}" is not registered.`);
-  const props = useMemo(() => definition.props.parse(scene.props), [definition, scene.props]);
-  const images = plan.images.flatMap(({ assetId, width, height }) => {
-    const asset = film.campaign.assets[assetId];
-    return asset ? [{ src: assetUrl(asset.src), width, height, aspect: width / height }] : [];
-  });
-  const { in: incoming, out: outgoing } = plan.span;
-
-  const overlayHides = (element: CarryElement['kind']) =>
-    (plan.carriedIn?.kind === element && incoming !== undefined && filmFrame < incoming.to) ||
-    (plan.carriedOut?.kind === element && outgoing !== undefined && filmFrame >= outgoing.from);
-
-  const Component = definition.component;
-  return (
-    <AbsoluteFill style={transitionStyle(plan, filmFrame, stage)}>
-      <SceneRuntimeProvider
-        value={{
-          frame: filmFrame - plan.span.from,
-          fps: film.fps,
-          durationInFrames: plan.span.durationInFrames,
-          stage,
-          timing: plan.timing,
-          images,
-          image: images[0],
-          carriedIn: plan.carriedIn?.kind,
-          carriedOut: plan.carriedOut?.kind,
-          overlayHides,
-        }}
-      >
-        <Component scene={scene} props={props} />
-      </SceneRuntimeProvider>
-    </AbsoluteFill>
-  );
-};
-
-const Carry = ({ carry, film, stage }: { carry: CarryPlan; film: FilmPlan; stage: Stage }) => {
-  const before = film.campaign.scenes[carry.outgoing] as Scene;
-  const after = film.campaign.scenes[carry.incoming] as Scene;
-  const marks = {
-    from: definitionOf(before.type)?.markAnchor(stage),
-    to: definitionOf(after.type)?.markAnchor(stage),
-  };
-  if (!marks.from || !marks.to) return null;
-  const src =
-    carry.element.kind === 'image' ? film.campaign.assets[carry.element.assetId]?.src : undefined;
-  return (
-    <CarryOverlay
-      carry={carry}
-      filmFrom={carry.window.from}
-      imageSrc={src}
-      marks={{ from: marks.from, to: marks.to }}
-      stage={stage}
-    />
-  );
-};
-
 /**
- * One cut of a campaign in one format. Each scene is mounted for its own frames plus any frames a
- * transition shares with a neighbour, so transitions sit on the boundaries and the film keeps the
- * length `sceneFrames` gives it.
+ * One cut of a campaign in one format, on the `Stage`. Each scene is mounted for its own frames,
+ * and each transition is drawn inside the two scenes it joins, so the film keeps the length
+ * `sceneFrames` gives it.
  */
 export const CampaignFilm = ({ plan }: CampaignFilmProps) => {
   if (!plan) throw new Error('<CampaignFilm> renders only a plan from calculateCampaignFilm.');
@@ -164,37 +66,7 @@ export const CampaignFilm = ({ plan }: CampaignFilmProps) => {
   return (
     <BrandProvider theme={theme}>
       <StageProvider value={stage}>
-        <AbsoluteFill style={{ background: theme.colors.background, overflow: 'hidden' }}>
-          {ready
-            ? plan.scenes.map((scenePlan) => (
-                <Sequence
-                  key={scenePlan.span.id}
-                  from={scenePlan.span.mountFrom}
-                  durationInFrames={scenePlan.span.mountFrames}
-                  name={scenePlan.span.id}
-                >
-                  <SceneHost
-                    plan={scenePlan}
-                    scene={plan.campaign.scenes[scenePlan.index] as Scene}
-                    film={plan}
-                    stage={stage}
-                  />
-                </Sequence>
-              ))
-            : null}
-          {ready
-            ? plan.carries.map((carry) => (
-                <Sequence
-                  key={`carry-${carry.window.boundary}`}
-                  from={carry.window.from}
-                  durationInFrames={carry.window.to - carry.window.from}
-                  name={`carry ${carry.element.kind}`}
-                >
-                  <Carry carry={carry} film={plan} stage={stage} />
-                </Sequence>
-              ))
-            : null}
-        </AbsoluteFill>
+        <Stage plan={plan} stage={stage} ready={ready} />
       </StageProvider>
     </BrandProvider>
   );

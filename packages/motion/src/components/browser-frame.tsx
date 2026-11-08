@@ -7,8 +7,14 @@ import { chromeHeight } from '../layout/scenes.ts';
 
 export interface BrowserFrameProps {
   rect: Rect;
-  src: string;
+  /** The image that fills the window, cropped to it. Not needed when `children` fill it. */
+  src?: string;
   pose: Pose;
+  /**
+   * Drawn in the window in place of the image, and clipped to it, such as a long page that
+   * scrolls. Its box is the window below the bar.
+   */
+  children?: ReactNode;
   /** The height of the bar across the top. 0 draws the image alone, with the frame's corners. */
   chrome?: number;
   /** Copy in the address bar, which comes from `scene.text`. Without it the bar is empty. */
@@ -52,6 +58,7 @@ export const BrowserFrame = ({
   shadow = true,
   overlay,
   style,
+  children,
 }: BrowserFrameProps) => {
   const { colors, radius, fonts } = useBrand();
   // Whole pixels, because Chrome reuses a blurred shadow it drew at one sub-pixel offset for the
@@ -138,17 +145,20 @@ export const BrowserFrame = ({
           </div>
         ) : null}
         <div style={{ inset: `${chrome}px 0 0 0`, overflow: 'hidden', position: 'absolute' }}>
-          <Img
-            src={src}
-            style={{
-              display: 'block',
-              height: '100%',
-              objectFit: 'cover',
-              transform: poseTransform(pose),
-              transformOrigin: '0 0',
-              width: '100%',
-            }}
-          />
+          {children ??
+            (src ? (
+              <Img
+                src={src}
+                style={{
+                  display: 'block',
+                  height: '100%',
+                  objectFit: 'cover',
+                  transform: poseTransform(pose),
+                  transformOrigin: '0 0',
+                  width: '100%',
+                }}
+              />
+            ) : null)}
         </div>
       </div>
       {overlay}

@@ -20,6 +20,12 @@ describe('planQuality', () => {
     expect(plan.contact.at(-1)).toEqual({ frame: 570, second: 19, scene: 'close' });
   });
 
+  it("takes a matched-velocity seam's stills 12 frames before it and 14 after, in spec frames", () => {
+    const seam = planQuality(quillhaven as Campaign).transitions.find(({ name }) => name === 't1');
+    // 24 fps: 12 spec frames are 10 film frames, and 14 are 11.
+    expect(seam?.stills.map(({ frame }) => frame - (seam?.boundary ?? 0))).toEqual([-10, 0, 11]);
+  });
+
   it('counts seconds at the campaign frame rate', () => {
     const plan = planQuality(quillhaven as Campaign);
     expect(plan.fps).toBe(24);
@@ -31,14 +37,15 @@ describe('planQuality', () => {
   it('shows each transition the frame before its window, its boundary and the frame after', () => {
     const plan = planQuality(nova as Campaign);
     expect(plan.transitions.map(({ name, boundary }) => [name, boundary])).toEqual([
-      ['push', 120],
-      ['carry', 270],
+      ['t3', 120],
+      ['t3', 270],
+      ['t3', 420],
     ]);
-    const push = plan.transitions[0];
-    expect(push?.stills).toEqual([
-      { when: 'before', frame: (push?.from ?? 0) - 1 },
+    // A dead-stop cut: the last outgoing frame, the cut, and the word rise at rest 13 frames on.
+    expect(plan.transitions[0]?.stills).toEqual([
+      { when: 'before', frame: 119 },
       { when: 'during', frame: 120 },
-      { when: 'after', frame: push?.to },
+      { when: 'after', frame: 133 },
     ]);
     for (const transition of plan.transitions) {
       const [before, during, after] = transition.stills.map(({ frame }) => frame) as number[];

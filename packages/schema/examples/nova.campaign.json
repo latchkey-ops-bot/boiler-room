@@ -106,7 +106,7 @@
       ],
       "voiceover": { "text": "Your builds are waiting. Nova gets them moving.", "claimIds": [] },
       "assetIds": [],
-      "transitionOut": "push"
+      "transitionOut": "t3"
     },
     {
       "id": "speed",
@@ -129,7 +129,7 @@
         "claimIds": ["build-times"]
       },
       "assetIds": ["dashboard-shot"],
-      "transitionOut": "carry"
+      "transitionOut": "t3"
     },
     {
       "id": "adoption",
@@ -149,7 +149,8 @@
         "text": "More than 1,200 teams ship with Nova, and customers deploy 3x more often.",
         "claimIds": ["team-count", "deploy-rate"]
       },
-      "assetIds": ["dashboard-shot"]
+      "assetIds": ["dashboard-shot"],
+      "transitionOut": "t3"
     },
     {
       "id": "close",

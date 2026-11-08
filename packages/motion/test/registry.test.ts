@@ -1,6 +1,7 @@
 import { sceneRegistry } from '@boiler-room/schema';
 import { describe, expect, it } from 'vitest';
 import { validateForRender } from '../src/film/validate-render.ts';
+import { anchorVelocities, groundOf } from '../src/scenes/definition.ts';
 import {
   IMPLEMENTED_SCENE_TYPES,
   renderSceneRegistry,
@@ -9,8 +10,20 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw four of the scene types in the schema registry, under its names', () => {
-    expect(IMPLEMENTED_SCENE_TYPES).toEqual(['word-slam', 'site-hero', 'feature-card', 'end-card']);
+  it('draw eleven of the scene types in the schema registry, under its names', () => {
+    expect(IMPLEMENTED_SCENE_TYPES).toEqual([
+      'word-slam',
+      'logo-reveal',
+      'site-hero',
+      'type-card',
+      'site-scroll',
+      'proof-bars',
+      'stat-counter',
+      'feature-card',
+      'tile-wall',
+      'colour-event',
+      'end-card',
+    ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
       expect(Object.hasOwn(sceneRegistry, type)).toBe(true);
   });
@@ -29,15 +42,128 @@ describe('scene templates', () => {
     },
   );
 
+  it('declare the kind, ground and anchors each scene file gives', () => {
+    const declared = Object.fromEntries(
+      Object.entries(sceneImplementations).map(([type, definition]) => [
+        type,
+        {
+          kind: definition.kind,
+          ground:
+            groundOf(definition, {}, 'neutral-cut') +
+            ' ' +
+            groundOf(definition, {}, 'kinetic-plate'),
+          anchors: anchorVelocities(definition, {}),
+        },
+      ]),
+    );
+    expect(declared).toEqual({
+      'word-slam': {
+        kind: 'type',
+        ground: 'base plate',
+        anchors: [{ id: 'headline', entry: undefined, exit: undefined }],
+      },
+      'logo-reveal': {
+        kind: 'mark',
+        ground: 'base plate',
+        anchors: [{ id: 'logo', entry: undefined, exit: { axis: 'y', sign: -1, v: 36 } }],
+      },
+      'site-hero': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'browser',
+            entry: { axis: 'y', sign: -1, v: 36 },
+            exit: { axis: 'scale', sign: 1, v: 0.03 },
+          },
+        ],
+      },
+      'type-card': {
+        kind: 'type',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
+      'site-scroll': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [{ id: 'browser', entry: undefined, exit: { axis: 'x', sign: 1, v: 46 } }],
+      },
+      'proof-bars': {
+        kind: 'proof',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+          { id: 'bar-0', entry: undefined, exit: undefined },
+          { id: 'bar-1', entry: undefined, exit: undefined },
+          { id: 'bar-2', entry: undefined, exit: undefined },
+        ],
+      },
+      'stat-counter': {
+        kind: 'proof',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'number',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
+      'feature-card': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          {
+            id: 'headline',
+            entry: { axis: 'x', sign: 1, v: 46 },
+            exit: { axis: 'x', sign: 1, v: 46 },
+          },
+        ],
+      },
+      'tile-wall': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [{ id: 'wall', entry: undefined, exit: undefined }],
+      },
+      'colour-event': {
+        kind: 'type',
+        ground: 'event event',
+        anchors: [{ id: 'card', entry: undefined, exit: undefined }],
+      },
+      'end-card': {
+        kind: 'mark',
+        ground: 'base plate',
+        anchors: [{ id: 'logo', entry: { axis: 'y', sign: -1, v: 36 }, exit: undefined }],
+      },
+    });
+  });
+
   it('give every template a component and a props schema that needs no props', () => {
-    for (const definition of Object.values(sceneImplementations)) {
+    // site-scroll's pages are capture data it cannot land page 2 without, so it needs them.
+    const needsProps = new Set(['site-scroll']);
+    for (const [type, definition] of Object.entries(sceneImplementations)) {
       expect(typeof definition.component).toBe('function');
-      expect(definition.props.safeParse({}).success).toBe(true);
+      expect(definition.props.safeParse({}).success).toBe(!needsProps.has(type));
     }
   });
 });
 
 describe('validateForRender', () => {
+  /** A type the scene library specifies that no template draws yet. */
+  const unbuilt = Object.keys(sceneRegistry).find(
+    (type) => !IMPLEMENTED_SCENE_TYPES.includes(type),
+  ) as string;
+
   it.each(Object.entries(examples))('passes %s as it stands', async (_name, copy) => {
     const campaign = copy();
     expect(await validateForRender(campaign)).toEqual({ ok: true, issues: [], campaign });
@@ -45,7 +171,7 @@ describe('validateForRender', () => {
 
   it('refuses a scene type the library specifies but no template draws, by name', async () => {
     const campaign = novaCopy();
-    at(campaign.scenes, 1).type = 'proof-bars';
+    at(campaign.scenes, 1).type = unbuilt;
     const { ok, issues } = await validateForRender(campaign);
     expect(ok).toBe(false);
     expect(issues).toEqual([
@@ -53,16 +179,15 @@ describe('validateForRender', () => {
         code: 'SCENE_TYPE_UNBUILT',
         severity: 'error',
         path: 'scenes[1].type',
-        message:
-          'Scene type "proof-bars" is in the scene library, but motion has no template for it yet, so it cannot be rendered.',
-        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
+        message: `Scene type "${unbuilt}" is in the scene library, but motion has no template for it yet, so it cannot be rendered.`,
+        fix: `Change scenes[1].type to a type motion renders: ${IMPLEMENTED_SCENE_TYPES.join(', ')}. Or keep it and render once the ${unbuilt} template is built.`,
       },
     ]);
   });
 
   it('refuses a hook of a type with no template', async () => {
     const campaign = novaCopy();
-    at(campaign.variants.hooks, 0).type = 'type-card';
+    at(campaign.variants.hooks, 0).type = unbuilt;
     const { issues } = await validateForRender(campaign);
     expect(issues).toEqual([
       expect.objectContaining({ code: 'SCENE_TYPE_UNBUILT', path: 'variants.hooks[0].type' }),
@@ -74,7 +199,7 @@ describe('validateForRender', () => {
     at(campaign.scenes, 1).type = 'carousel';
     const { issues } = await validateForRender(campaign);
     expect(issues.map(({ code }) => code)).toEqual(['SCENE_TYPE_UNKNOWN']);
-    expect(issues[0]?.fix).toContain('word-slam, site-hero, feature-card, end-card');
+    expect(issues[0]?.fix).toContain(IMPLEMENTED_SCENE_TYPES.join(', '));
   });
 
   it('applies the limits the schema gives each type', async () => {
