@@ -126,21 +126,35 @@ function assertFresh(deps: RunnerDeps, ts: number): void {
   }
 }
 
-/** Reads a JSON body up to `limit` bytes and checks it against the signed hash. */
-async function readSignedJson(
+/**
+ * Reads a JSON body (or the empty body of a GET) up to `limit` bytes. The signed length is the
+ * length actually read, so a missing or wrong Content-Length header cannot shift what was signed.
+ * Nothing is written here; the signature and the hash are checked next.
+ */
+async function readBody(
   request: Request,
   parts: SignedParts,
   limit: number,
-): Promise<unknown> {
-  if (parts.contentLength > limit)
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (parts.contentLength > limit) {
     throw new ApiError(413, 'body_too_large', 'The body is too large.');
+  }
   const type = request.headers.get('content-type') ?? '';
   if (parts.method !== 'GET' && !type.toLowerCase().startsWith('application/json')) {
     throw new ApiError(415, 'unsupported_media_type', 'Send the body as application/json.');
   }
   const bytes = new Uint8Array(await request.arrayBuffer());
   if (bytes.byteLength > limit) throw new ApiError(413, 'body_too_large', 'The body is too large.');
-  if ((await sha256Hex(bytes)) !== parts.bodySha256 || bytes.byteLength !== parts.contentLength) {
+  parts.contentLength = bytes.byteLength;
+  return bytes;
+}
+
+/** The body against its signed hash, then as JSON. */
+async function parseSignedJson(
+  bytes: Uint8Array<ArrayBuffer>,
+  parts: SignedParts,
+): Promise<unknown> {
+  if ((await sha256Hex(bytes)) !== parts.bodySha256) {
     throw new ApiError(400, 'body_hash', 'The body does not match its signed hash.');
   }
   if (bytes.byteLength === 0) return null;
@@ -199,21 +213,22 @@ export function runnerRoute(getDeps: () => RunnerDeps, spec: RouteSpec, handler:
       assertFresh(deps, signed.parts.ts);
       const secret = deps.config.signingSecret;
       if (!secret) throw new ApiError(503, 'not_configured', 'Real films are not set up here.');
+      // A JSON body is read first, bounded, so its real length is what the signature covers. An
+      // upload is not read: its Content-Length is required and signed, and R2 checks its hash.
+      const raw =
+        spec.jsonLimit !== null || request.method === 'GET'
+          ? await readBody(request, signed.parts, spec.jsonLimit ?? 0)
+          : null;
       const run = await getRun(deps.db, signed.parts.runId);
       if (!run || run.filmId !== filmId) throw unauthorized();
       const key = await deriveRunKey(secret, filmId, run.id);
       if (!(await verifyParts(key, signed.parts, signed.signature))) throw unauthorized();
 
-      const body =
-        spec.jsonLimit === null
-          ? request.method === 'GET'
-            ? await readSignedJson(request, signed.parts, 0)
-            : null
-          : await readSignedJson(request, signed.parts, spec.jsonLimit);
+      const body = raw ? await parseSignedJson(raw, signed.parts) : null;
       await spendNonce(deps, filmId, signed.parts.nonce);
 
       const film = await deps.db.query.films.findFirst({ where: eq(films.id, filmId) });
-      if (!film || film.pipeline !== 'naive' || film.pipelineRunId !== run.id) {
+      if (film?.pipeline !== 'naive' || film.pipelineRunId !== run.id) {
         throw new ApiError(409, 'wrong_run', 'This run is not the film’s current run.');
       }
       return await handler(request, { deps, run, film, body, key, url });
@@ -453,10 +468,11 @@ export function watchdogRoute(getDeps: () => RunnerDeps) {
       assertFresh(deps, signed.parts.ts);
       const secret = deps.config.signingSecret;
       if (!secret) throw new ApiError(503, 'not_configured', 'Real films are not set up here.');
+      const raw = await readBody(request, signed.parts, RUNNER_BODY_LIMITS.watchdog);
       if (!(await verifyParts(await deriveWatchdogKey(secret), signed.parts, signed.signature))) {
         throw unauthorized();
       }
-      await readSignedJson(request, signed.parts, RUNNER_BODY_LIMITS.watchdog);
+      await parseSignedJson(raw, signed.parts);
       await spendNonce(deps, WATCHDOG_ID, signed.parts.nonce);
       return json(await watchdogTick(deps));
     } catch (error) {

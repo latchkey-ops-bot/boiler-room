@@ -54,6 +54,15 @@ export async function advance(
   if (!run) return;
   try {
     await step(deps, naive, run, options);
+    // A step that ended the film (a launch that gave up, a stop that ran out) cleans up at once.
+    const after = await getRun(deps.db, runId);
+    if (
+      after &&
+      after.state !== run.state &&
+      (after.state === 'done' || after.state === 'failed')
+    ) {
+      await cleanUp(deps, naive, after);
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     logLine(deps, `advance: film ${run.filmId} (${run.state}): ${message}`);

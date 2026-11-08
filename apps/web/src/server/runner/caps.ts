@@ -13,10 +13,18 @@ export interface CapScope {
   now: number;
 }
 
-/** Real films queued or working for this founder, in any of their accounts. */
-const workingForAccount = ({ accountId, userId }: CapScope) => sql`(select count(*) from films f
-  where f.pipeline = 'naive' and f.status in ('queued', 'working')
-    and (f.account_id = ${accountId} or f.created_by = ${userId}))`;
+/**
+ * Real films at work for this founder, in any of their accounts, by the run's own state, which the
+ * callbacks keep current whether or not a page is open. A film waiting for the founder's approval
+ * is paused and does not count.
+ */
+const workingForAccount = ({ accountId, userId, now }: CapScope) => sql`(
+  (select count(*) from film_runs r join films f on f.id = r.film_id
+    where r.state not in ('script_ready', 'awaiting_approval', 'done', 'failed', 'ended')
+      and (f.account_id = ${accountId} or f.created_by = ${userId}))
+  + (select count(*) from films f where f.pipeline = 'naive' and f.pipeline_run_id is null
+      and f.created_at > ${now - RESERVED_MS}
+      and (f.account_id = ${accountId} or f.created_by = ${userId})))`;
 
 /**
  * Real films holding the org's one Researcher, across the environment. A run waiting for approval

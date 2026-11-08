@@ -38,7 +38,7 @@ export class NaivePipeline implements PipelineClient {
 
   #ready(): RunnerDeps {
     const deps = this.#deps;
-    if (!deps || !deps.naive || !runnerReady(deps.config)) throw notWired();
+    if (!deps?.naive || !runnerReady(deps.config)) throw notWired();
     return deps;
   }
 

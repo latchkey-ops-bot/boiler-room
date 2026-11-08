@@ -208,7 +208,11 @@ export async function applyEvents(
     }
   }
   run = (await patchRun(deps, run.id, { heartbeatAt: now })) ?? run;
-  const stop = run.state === 'stopping' || run.state === 'failed';
+  // The cleanup `advance()` starts at once, so a failed run may already read `ended` here.
+  const stop =
+    run.state === 'stopping' ||
+    run.state === 'failed' ||
+    (run.state === 'ended' && run.deliveredAt === null);
   return {
     ok: true,
     lastSeq,
