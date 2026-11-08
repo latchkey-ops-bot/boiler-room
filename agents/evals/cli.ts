@@ -30,7 +30,7 @@ const { positionals, values } = parseArgs({
     role: { type: 'string' },
     only: { type: 'string' },
     budget: { type: 'string', default: '12' },
-    // Fire each CEO sweep by hand while Naive's scheduler does not fire (harness.ts, manualFire).
+    // Fire each CEO sweep by hand while Naive's scheduler fires late (harness.ts, manualFire).
     'manual-sweep': { type: 'boolean', default: false },
   },
 });

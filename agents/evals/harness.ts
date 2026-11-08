@@ -51,6 +51,13 @@ export const MAX_ITERATIONS_GRACE_MS = 30_000;
 /** The practice sweep's schedule: the next five-minute mark (Naive's shortest), paused as soon as it fires. */
 export const SWEEP_SCHEDULE = '*/5 * * * *';
 
+/**
+ * How long a resumed practice sweep is given to fire. Naive's scheduler fires late: on 2026-11-08
+ * the live sweep due at 11:00 ran at 11:10, the one due at 15:00 at 15:10, and from about 14:10 no
+ * practice sweep fired within the 7 minutes this used to be.
+ */
+export const FIRE_WAIT_MS = 15 * 60_000;
+
 /** Resumes a paused deployment until its next scheduled fire starts a session, then pauses it. */
 async function fireOnce(client: Naive, deploymentId: string, log: (line: string) => void) {
   const seen = new Set(
@@ -59,13 +66,13 @@ async function fireOnce(client: Naive, deploymentId: string, log: (line: string)
   await client.deployments.resume(deploymentId);
   const begun = Date.now();
   try {
-    while (Date.now() - begun < 7 * 60_000) {
+    while (Date.now() - begun < FIRE_WAIT_MS) {
       const runs = await client.deployments.runs(deploymentId, { limit: 50 });
       const fresh = runs.data.find((run) => !seen.has(run.id) && run.session_id);
       if (fresh) return fresh.session_id;
       await sleep(3000);
     }
-    throw new Error('The practice sweep did not fire within 7 minutes.');
+    throw new Error(`The practice sweep did not fire within ${FIRE_WAIT_MS / 60_000} minutes.`);
   } finally {
     await client.deployments
       .pause(deploymentId)
@@ -79,8 +86,9 @@ export function standingBody(deploymentId: string, cron: string, input: string):
 }
 
 /**
- * A sweep fired by hand, for when Naive's scheduler does not fire: on 2026-11-08 from about 14:10
- * UTC every practice deployment stayed `scheduled` past its `next_run_at` with no run. A scheduled
+ * A sweep fired by hand, for when Naive's scheduler fires too late: on 2026-11-08 from about 14:10
+ * UTC every practice deployment stayed `scheduled` past its `next_run_at` with no run for the 7
+ * minutes the harness then waited, and the live sweep due at 15:00 ran at 15:10. A scheduled
  * fire claims the schedule's one standing card, `Recurring: <first line>` (the same card on every
  * fire), puts it in `doing` and starts the CEO. Here the harness does what the fire does to the
  * card: it writes that card, with the schedule's title and body, assigned to the CEO and in
