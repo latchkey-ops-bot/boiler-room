@@ -72,6 +72,15 @@ const hostOf = (url: string) => {
   }
 };
 
+/**
+ * True when a URL is on the site or one of its subdomains. The host is compared on a label
+ * boundary, so `docs.linear.app` is on `linear.app` and the lookalike `getlinear.app` is not.
+ */
+export function onSite(url: string, host: string): boolean {
+  const own = hostOf(url);
+  return host !== '' && (own === host || own.endsWith(`.${host}`));
+}
+
 export function researchFacts(research: ResearchOutput): ResearchFacts {
   const home = research.brief.pages.find((page) => page.kind === 'home')?.url;
   const host = hostOf(home ?? research.claims[0]?.sourceUrl ?? '');
@@ -96,7 +105,7 @@ export function researchFacts(research: ResearchOutput): ResearchFacts {
       .filter((claim) => extractNumericTokens(claim.quote).length > 0)
       .map((claim) => claim.id),
     surfaces,
-    capturedTiles: captured.filter((asset) => hostOf(asset.sourceUrl ?? '').endsWith(host)).length,
+    capturedTiles: captured.filter((asset) => onSite(asset.sourceUrl ?? '', host)).length,
   };
 }
 
@@ -411,7 +420,7 @@ function checkVariants(
         'Write CTA labels in 4 words and 24 characters or fewer.',
       );
     }
-    if (!hostOf(cta.href).endsWith(facts.host)) {
+    if (!onSite(cta.href, facts.host)) {
       push(
         'CTA',
         `${path}.href`,

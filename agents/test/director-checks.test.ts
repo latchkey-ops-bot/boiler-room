@@ -5,6 +5,7 @@ import {
   checkSubmission,
   expectedSeams,
   expectedTemplate,
+  onSite,
   researchFacts,
 } from '../src/director/checks.ts';
 import { OUTREACH_BRIEF } from '../src/director/output.ts';
@@ -297,6 +298,42 @@ describe('checkSubmission', () => {
     },
   ])('sends back $name', async ({ edit, expected }) => {
     expect(await codesAfter(edit)).toContain(expected);
+  });
+
+  it('refuses a CTA on a lookalike host that only ends with the site host', async () => {
+    const edited = await codesAfter((s) => {
+      for (const cta of s.campaign.variants.ctas)
+        cta.href = 'https://getfernhook.example.com/signup';
+    });
+    expect(edited).toEqual([
+      'CTA campaign.variants.ctas[0].href',
+      'CTA campaign.variants.ctas[1].href',
+    ]);
+    const subdomain = await codesAfter((s) => {
+      for (const cta of s.campaign.variants.ctas)
+        cta.href = 'https://docs.fernhook.example.com/signup';
+    });
+    expect(subdomain).toEqual([]);
+  });
+
+  it('compares hosts on a label boundary', () => {
+    expect(onSite('https://getlinear.app/signup', 'linear.app')).toBe(false);
+    expect(onSite('https://linear.app.evil.example/signup', 'linear.app')).toBe(false);
+    expect(onSite('https://docs.linear.app/signup', 'linear.app')).toBe(true);
+    expect(onSite('https://www.linear.app/signup', 'linear.app')).toBe(true);
+    expect(onSite('https://linear.app', 'linear.app')).toBe(true);
+    expect(onSite('not a url', '')).toBe(false);
+  });
+
+  it('counts only captured tiles from the site or its subdomains', () => {
+    const research = exampleResearch();
+    const before = researchFacts(research).capturedTiles;
+    const [id, asset] = Object.entries(research.assets).find(
+      ([, each]) => each.kind === 'image' && each.provenance === 'captured',
+    ) ?? ['', undefined];
+    if (!asset) throw new Error('the example research has no captured image');
+    research.assets[id] = { ...asset, sourceUrl: 'https://getfernhook.example.com/' };
+    expect(researchFacts(research).capturedTiles).toBe(before - 1);
   });
 
   it('leaves contrast to the Art Director without blocking the Director', async () => {
