@@ -148,8 +148,21 @@ into batches of at most 10 candidates per tick.
 
 A film not ready by 09:45 is withdrawn and drops out of the day: no backfill, and the withdrawn film
 stops spending and does not count against tomorrow's `MAX_FILMS_IN_PROGRESS`. The CLI runs the
-phases back to back with no hold wait; the timer starts it at 05:00 so a person can read the review
-file before acting on anything, and nothing goes out from the CLI before S4 anyway.
+phases back to back. In dry run it does not wait. When a lane is live and a draft can go out, it
+waits `HOLD_WINDOW_MINUTES` (45) after `compose` in the same process, the way `films` waits for
+films, and `execute` then re-reads every hold. The `POST` and `EMAIL` comments name the real time
+("Goes out after 05:45 Pacific unless someone comments HOLD").
+
+**A live lane needs the company board.** With the default local day card nobody can see a draft or
+comment `HOLD`, so every lane is dry run unless the run writes the company board (`--board`).
+
+**Caps count the real day.** Every cap and every spend row is counted on today's Pacific date, never
+on the run's `--date` label. A run for any other date is a replay and every lane is dry run; the
+CLI refuses `--date` with `--live`.
+
+**Every tick, before any phase,** code also looks up each `planned` post or email from any day (an
+answer that was lost): two ticks without a provider id make it `unknown` and open
+`FOUNDER: gtm unknown-send`.
 
 ## 6. The agents
 
@@ -262,10 +275,16 @@ bounds the risk, in code (`agents/src/gtm/guard.ts`):
   time (two agents with one name fail). `sendToSession` reaches only sessions this process started.
 - Card writes force `assignee: null`, never write `assignee` on a move, and take only titles that
   start `GTM: `, `REMOVE: ` or `FOUNDER: gtm `. Comments go only on such cards.
-- Data runs reach only `Search Google`, `Search Web Pages` and `Find Domain Emails`.
-- Posts go only to the GTM identity; only posts the executor made can be deleted.
+- Data runs reach only `Search Google`, `Search Web Pages` and `Find Domain Emails`, each resolved by
+  exact name **and** its catalogue domain **and** a listed price no higher than ours. The catalogue
+  holds two tools named `Search Google` (`search` at $0.00015 a call, `seo` at $0.008), so a name
+  alone resolves nothing; each tool is looked up with two searches, because the catalogue search
+  ranks. A tool that does not resolve is reported as refused, never as a cap.
+- Posts go only to the GTM identity; only posts the executor made can be deleted. Every `gtm:day`
+  is a new process, so the CLI hands the guard the provider id of every post the store records as
+  sent.
 - Each day the executor compares the four GTM agents as Naive stores them with this repo (model,
-  prompt, allowed tools, board tools, budget). On a mismatch every lane is dry run and
+  prompt, allowed tools, board tools, budget, MCP servers). On a mismatch every lane is dry run and
   `FOUNDER: gtm tampered` opens.
 - The key is rotated every 30 days; `FOUNDER: gtm rotate-key` opens at day 25.
 
@@ -280,7 +299,9 @@ such as `x-post:2026-11-08`, `email:quillbox.example:2026-11-08` or
 **An X post or an email is never retried:** a `planned` row of either kind that cannot be matched to
 a provider id within 2 ticks becomes `unknown`, is never sent again, and opens
 `FOUNDER: gtm unknown-send`. An error from the provider counts as "may have gone out", not as a
-failure. Only film orders and data runs, which the provider dedupes by the same key, may retry.
+failure: the contact row is written before the call, so the 90-day rule and "never post twice" hold
+whether or not it went out, and the day card reads `unknown`. Only film orders and data runs, which
+the provider dedupes by the same key, may retry.
 
 **Halt.** Every tick reads `company:halt`'s marker on `br-ceo` (its stored definition hash reads
 `halted`; unreadable counts as halted), any open card titled `GTM-HOLD: <reason>`, and the store's
@@ -395,22 +416,28 @@ Then, per candidate:
    `contact`, `team`, `founders`, `info`, `partnerships`, `press`, `media`) on the lead's own
    registrable domain. If none, one `Find Domain Emails` run may add addresses, under the same role
    rule, marked `provenance: found`, with a source URL on the startup's domain. Never `generated` or
-   `inferred`.
+   `inferred`. **The finder runs after the scout**, best fit first, only for a qualified lead whose
+   email lane is closed by nothing but the missing address, so no finder run is spent on a candidate
+   the scout rejects.
 5. **A no-solicitation notice closes the email lane** (`no_solicitation_notice`): "no
    solicitations", "we do not accept unsolicited ...", "will not sell, share or transfer email
    addresses". Harvesting from such a site is an aggravating factor under CAN-SPAM §5(b)(1), and
    CASL's published-address exception fails.
 6. The product name copy may use must appear in the homepage's `<title>`, `og:site_name` or first
    `<h1>`, be at most 30 characters, hold only letters, digits, spaces, `.` and `-`, and not read as a
-   domain ("logo.deal" is refused: X would link it). The name the source gives (an HN title, a PH
-   entry) is preferred when the site carries it. With no valid name the lead cannot qualify.
+   domain ("logo.deal" is refused: X would link it), and pass the claims screen every line passes
+   (no superlative, no claim about funding, backers, customers or partners: "Best Stripe Partner"
+   is no name). The name the source gives (an HN title, a PH entry) is preferred when the site
+   carries it. With no valid name the lead cannot qualify, and code records `no_product_name`.
 7. Brand safety: a word-list screen over the site text and, before an X post, the film's script
    (slurs, adult, gambling, weapons, token sales, health claims). Any match closes the X lane.
+   Apple's "AirDrop", spelled with its capital D, is not a token airdrop unless the text also talks
+   of crypto, tokens, coins or NFTs.
 
 **Jurisdiction.** The scout claims one, with a quote; code decides:
 
-- `us` only with a verified quote naming a US state of incorporation ("a Delaware corporation") or
-  a US postal address. "Inc." alone gives `unknown`: Canadian companies use it too, and CASL needs
+- `us` only with a verified quote naming a US state of incorporation ("a Delaware corporation",
+  "a Delaware company") or a US postal address. "Inc." alone gives `unknown`: Canadian companies use it too, and CASL needs
   consent.
 - `uk_ltd` only with a verified quote saying "registered in England and Wales", Scotland or
   Northern Ireland, or a Companies House number. "Ltd" alone gives `unknown`: Irish, Indian, Israeli
@@ -452,13 +479,14 @@ from `FilmFile.durationSeconds` and is left out when there is no file.
 (`CAPTION_TEMPLATES` in `copy.ts`, eight of them) with the verified product name, the source phrase
 and the verified quote, and appends the fixed label. Rules code checks:
 
-| Rule                                                                                                     | Check                                                                                |
-| -------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| At most 280 characters including the label and the `#AIgenerated` line Naive adds                        | Count                                                                                |
-| A template not used in the last 7 days                                                                   | Copy history                                                                         |
-| The variable part (product name and quote) under 0.6 word overlap with every caption of the last 30 days | Overlap                                                                              |
-| No link, no domain, no @, no #, no digit                                                                 | Patterns                                                                             |
-| Templates are the approved set                                                                           | The X lane is live only while `templatesHash()` equals the hash the founder approved |
+| Rule                                                                                                                           | Check                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------ |
+| At most 280 characters including the label and the `#AIgenerated` line Naive adds                                              | Count                                                                                |
+| A template not used in the last 7 days                                                                                         | Copy history                                                                         |
+| The variable part (product name and quote) under 0.6 word overlap with every caption of the last 30 days                       | Overlap                                                                              |
+| No link, no domain, no @, no #, no digit                                                                                       | Patterns                                                                             |
+| The claims screen the email lines pass: no superlative and no company claim in the product name, no company claim in the quote | `claimProblems` in `copy.ts`, the same lists as the opener                           |
+| Templates are the approved set                                                                                                 | The X lane is live only while `templatesHash()` equals the hash the founder approved |
 
 The post goes out with `ai_generated: true`.
 
@@ -473,9 +501,12 @@ Made by Boiler Room, not by Quillbox. Removal on request: see our bio.
 ### 10.2 The quote pack (a person posts)
 
 In `pack` mode the executor posts nothing. The review file carries the launch post's URL, the
-film's download link, and a caption a person may paste when quote-posting from the X app. A person
-may @mention in a quote they make by hand; the same claims rules apply. The person comments
-`POSTED <url>` on the day card so the report counts it.
+film page (which has the download button; the file link itself expires in 10 minutes), and a
+caption a person may paste when quote-posting from the X app; every X draft carries this pack, in
+every mode. A person may @mention in a quote they make by hand; the same claims rules apply. The
+person comments `POSTED <url>` on the day card. Built: the pack in the review file and the
+`POSTED` command's parsing. Not built: counting a `POSTED` post in the report and the contact
+history.
 
 ### 10.3 The cold email
 
@@ -603,9 +634,13 @@ export interface EmailSender {
 **Stop rules, all in code** (`bounces.ts`): a permanent bounce suppresses the address and its
 domain at once; a complaint does the same and pauses the lane; the lane also pauses on its own at
 2 permanent bounces in the trailing 7 days, and opens `FOUNDER: gtm email-paused`. A paused lane
-stays paused until the founder comments `RESUME email` on the day card. Complaint feeds are not
+stays paused until the founder comments `RESUME email` on the day card, **after** the pause began:
+each new complaint or bounce signal moves the pause's time to now, so a RESUME written earlier does
+not lift it. A valid RESUME clears the pause, so the lane stays resumed on later days. Complaint feeds are not
 required at 5 emails a day: opt-outs and `not_interested` replies stand in as the complaint signal.
-Before each send, code checks that the recipient's domain has MX records and skips the lead if not.
+Before each send, code checks again that the recipient is exactly one role address on the lead's
+domain, then that its domain has MX records, and skips the lead if not. Every address, `mailto:`
+ones included, must be exactly one address: a second `@`, a comma, `?` or whitespace makes it none.
 
 ## 13. Suppression, dedupe, removal and opt-out
 
@@ -645,7 +680,12 @@ with `>`-quoted lines and our own footer lines removed; our footer says "unsubsc
 kept it would suppress every lead that replies (`scanText` and `stopMatch` in `removal.ts`, built and
 tested; the inbox reading is S6).
 
-Suppression, post deletion and film withdrawal run in every mode, under halt and under hold. A
+Suppression, post deletion and film withdrawal run in every mode, under halt and under hold. Each
+request is queued in the store (`pending_removals`) before the app cursor moves on or the board
+comment is marked received, and stays queued until every post is deleted and every film withdrawn.
+A delete that fails, or a run whose ports are dry run (they delete nothing), leaves it queued,
+retried on every run, with `FOUNDER: gtm removal` open; the `REMOVAL` comment counts only what
+really came down, and the `REMOVE:` card is written when nothing is left up. A
 confirmation email to the requester obeys halt and the reply cap, and goes only to an authenticated
 sender in one of our threads. A request for a domain with no lead, film or post of ours writes a
 suppression row and increments a count in the report, and touches the board in no other way.
