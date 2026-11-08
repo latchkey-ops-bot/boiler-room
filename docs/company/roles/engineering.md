@@ -145,10 +145,12 @@ card it found blocked waiting for that pull request.
    card is `blocked_by`. Merge it only if an `ENG` card of the slug names it.
 2. If it is not merged yet, check it, then merge it into `dev` with a merge commit through the REST
    API.
-3. Move to `todo`, with a comment, every card of the slug that is blocked waiting for that PR. A
-   card the board can no longer start (parked, or at its three wakes) is replaced by a fresh card
-   with the same brief for the same assignee; the old one is closed with a note, or, when another
-   card waits on it, kept open until a `MERGE: <slug> <n> r2` card merges the fresh card's work.
+3. Move to `todo`, with a comment, every card of the slug that is blocked waiting for that PR. The
+   engineer's own block waiting for the PR is the usual case, and such a card is woken, whatever
+   its `reported_status` says. Only a card the board can no longer start, at its three wakes
+   (`wake_count` 3), is replaced by a fresh card with the same brief for the same assignee; the old
+   one is closed with a note, or, when another card waits on it, kept open until a
+   `MERGE: <slug> <n> r2` card merges the fresh card's work.
 4. Move the `MERGE` card to `done` with the PR, the merge commit and the cards it woke.
 5. If the PR fails, comment why on it, create `ENG: <slug> fix <n>` and `MERGE: <slug> <n> r2`
    blocked by the fix card, and move this card to `blocked`, not `done`, so nothing that waits on it

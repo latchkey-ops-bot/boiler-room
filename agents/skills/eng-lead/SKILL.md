@@ -152,13 +152,16 @@ plan makes `MERGE: <slug> <n>`, and `MERGE: <slug> <n> r2` after a fix. The CEO 
 6. Wake the cards that wait for this pull request. `board_read` with no arguments, then open each
    `blocked` card of the slug. A card whose note or latest comment says it waits for this pull
    request to be merged is waiting for it.
-   - **It can be woken**: its `wake_count` is below 3 (the board starts a card at most three times)
-     and it was not parked (its `reported_status` is `blocked`: its assignee blocked it, the board
-     did not). Comment `PR #<n> is merged into dev at <commit>. Start from origin/dev.` and move it
-     to `todo`. That starts its assignee.
-   - **It cannot be woken.** Create a fresh card for the same assignee, titled as the old one with
-     ` r2` at the end (` r3` if that exists), with the old card's body and a last line
-     `PR #<n> is merged into dev at <commit>.`, and no `blocked_by`. If no card is `blocked_by` the
+   - **It can be woken** when its `wake_count` is below 3: the board starts a card at most three
+     times, and that is the only limit. A card its assignee moved to `blocked` with a note that it
+     waits for this pull request is the usual case, and it can be woken. Its `reported_status` then
+     reads `blocked` as well; that only says the board has reported the block, and is no reason to
+     replace the card. Comment `PR #<n> is merged into dev at <commit>. Start from origin/dev.` and
+     move it to `todo`. That starts its assignee.
+   - **It cannot be woken** when its `wake_count` is 3 or more. Create a fresh card for the same
+     assignee, titled as the old one with ` r2` at the end (` r3` if that exists), with the old
+     card's body and a last line `PR #<n> is merged into dev at <commit>.`, and no `blocked_by`.
+     If no card is `blocked_by` the
      old one, move the old one to `done` with the note `replaced by <crd_ id of the fresh card>`.
      If one is, the old card must stay open until the fresh card's work is merged, or what waits on
      it starts too early: create `MERGE: <slug> <m> r2` (`<m>` is the old card's number) assigned

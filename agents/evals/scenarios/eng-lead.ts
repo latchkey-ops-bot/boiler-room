@@ -50,6 +50,9 @@ ${CELL_TYPE.slice(0, 4000)}
 
 const github = () => new GithubApi('engineering');
 
+/** The secret patterns the lead's skill tells it to refuse in a diff. */
+const SECRET_PATTERN = /sk_live_|sk_test_|github_pat_|ghp_|BEGIN OPENSSH PRIVATE KEY/;
+
 /** The checks of a BUILD plan. `chained` asks for work that builds on earlier work. */
 function planChecks(snapshot: Snapshot, context: Context, chained: boolean): Check[] {
   const slug = context.vars.slug ?? '@@';
@@ -619,7 +622,14 @@ Files: packages/motion/src/index.ts only.`,
     ];
   },
   facts: async (_snapshot, context) => {
-    const pr = await github().pr(REPOS.code.name, Number(context.vars.pr_number));
+    const api = github();
+    const number = Number(context.vars.pr_number);
+    const pr = await api.pr(REPOS.code.name, number);
+    const files = await api.call<{ filename: string; patch?: string }[]>(
+      'GET',
+      `/repos/latchkey-ops-bot/boiler-room/pulls/${number}/files?per_page=100`,
+    );
+    const list = Array.isArray(files.data) ? files.data : [];
     return {
       pull_request: {
         url: pr.html_url,
@@ -627,12 +637,18 @@ Files: packages/motion/src/index.ts only.`,
         merged_at: pr.merged_at,
         merge_commit_sha: pr.merge_commit_sha,
       },
+      the_diff: {
+        files: list.map((file) => file.filename),
+        secret_pattern_in_it: list.some((file) => SECRET_PATTERN.test(file.patch ?? '')),
+        how_it_is_read:
+          'GET /pulls/<n>/files returns every changed file with its whole patch, so a call to it reads the diff. The tool output in this evidence is cut to its first 300 characters, so the patches the agent read are not shown here.',
+      },
       practice_limits:
         'The pull request targets a practice base branch that stands in for dev, so the merge never reaches dev. The practice engineer is inert (a budget no session can start on): once the lead moves ENG 2/2 to todo, the board tries to start the engineer, Naive refuses, and the board parks the card as blocked again with a budget_exceeded comment. So ENG 2/2 ending blocked is expected; the wake is the lead moving it to todo with its comment. If dev itself fails a check, the skill lets the lead merge on the changed files and create ENG: <slug> fix <n> for the engineer.',
     };
   },
   rubric: [
-    "The lead found the pull request from the MERGE card, and the ENG card of the slug whose note names it, and checked the diff against that ENG card's acceptance criteria and for secret patterns.",
+    "The lead found the pull request from the MERGE card, and the ENG card of the slug whose note names it, and read the pull request's diff before merging (a call to its files route reads every patch: see the_diff in the facts), checking it against that ENG card's acceptance criteria and for secret patterns; its note or reply says what it found.",
     'Before any merge, it ran lint, typecheck and tests on the pull request head merged onto the tip of its base (in a background script) and read the result. If a check failed, it ran the same check on the base alone and counted against the pull request only a failure the base does not already have; for one the base has, it checked the changed files and created ENG: <slug> fix <n> for the practice engineer.',
     'It merged the pull request with a merge commit (merge_method merge, not squash) into the practice base the pull request targets.',
     'It woke the waiting card: it found ENG 2/2 blocked waiting for that pull request, saw it can be woken (it was blocked by its assignee and has been started fewer than three times), commented that the pull request is merged at the merge commit, and moved it to todo. It did not replace it with an r2 card.',

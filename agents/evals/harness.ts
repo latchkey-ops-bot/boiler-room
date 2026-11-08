@@ -45,6 +45,9 @@ export const ROLE_AGENT: Record<Role, TeamMember> = {
   'engineer-1': ENGINEER,
 };
 
+/** How long a session stopped on `max_iterations` is watched for Naive running it on by itself. */
+export const MAX_ITERATIONS_GRACE_MS = 30_000;
+
 /** The practice sweep's schedule: the next five-minute mark (Naive's shortest), paused as soon as it fires. */
 export const SWEEP_SCHEDULE = '*/5 * * * *';
 
@@ -513,13 +516,25 @@ export async function runScenario(
     const waitSession = async (id: string, maxMinutes: number, digest: { left: number }) => {
       const begun = Date.now();
       let last = 0;
+      let pausedSince = 0;
       for (;;) {
         const session = await client.sessions.get(id);
         if (!['running', 'queued'].includes(session.status)) {
+          // Naive runs a session on by itself after `max_iterations`: on 2026-11-08 the lead went
+          // idle with it and was running again 0.5 seconds later, mid-procedure. So that stop is
+          // the end only if the session is still stopped a while later.
+          if (session.stop_reason === 'max_iterations') {
+            pausedSince ||= Date.now();
+            if (Date.now() - pausedSince < MAX_ITERATIONS_GRACE_MS) {
+              await sleep(3000);
+              continue;
+            }
+          }
           if (session.stop_reason === 'budget_paused')
             await client.sessions.cancel(id).catch(() => undefined);
           return session;
         }
+        pausedSince = 0;
         if (Date.now() - begun > maxMinutes * 60_000) {
           await client.sessions.interrupt(id).catch(() => undefined);
           log(`timeout   ${id} interrupted after ${maxMinutes} minutes`);
