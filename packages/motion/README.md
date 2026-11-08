@@ -27,7 +27,12 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    `site-hero` needs a capture at device scale 2, as its scene file says. This fit check is
    exported as `checkImageFit`: it needs only the images' sizes, so the Director runs it on every
    submission from the sizes the research recorded, before anything is rendered;
-6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
+6. loads the brand fonts and lays out every `type-card` and `stat-counter` of the cut
+   (`copyFitIssues`). Copy a template would refuse to set at its cap height is refused here as
+   `TYPE_CARD_LAYOUT` or `LAYOUT_UNFIT`, every scene at once, rather than while frames are drawn.
+   The render service selects the film on its own machine, so this costs no computer.
+   `layoutRefusals` reads the same refusals out of any text, such as a failed render's output;
+7. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, the skin
    and each scene's ground, and the transition the seam resolver chose for each boundary.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with
