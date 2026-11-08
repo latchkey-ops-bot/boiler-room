@@ -11,6 +11,13 @@ export interface RunnerBindings {
   NAIVE_WEB_KEY?: string;
   /** Secret. The master key every per-run signing key is derived from. */
   RUNNER_SIGNING_SECRET?: string;
+  /**
+   * Secret, optional. The Naive key the film command runs its agents with. The base snapshot holds
+   * none: the website sends it in the bootstrap of each launch. Never the admin key.
+   */
+  NAIVE_RUNNER_KEY?: string;
+  /** `true` lets a computer that runs the stand-in film command make a film, labelled as one. */
+  RUNNER_ALLOW_STANDIN?: string;
   /** Secret. Comma-separated Clerk user ids who get real films. Everyone else gets simulated ones. */
   REAL_FILM_USERS?: string;
   /** `snp_…`: the base snapshot every film computer is forked from. */
@@ -41,6 +48,10 @@ export interface RunnerConfig {
   naiveKey: string | null;
   naiveApiUrl: string;
   signingSecret: string | null;
+  /** Sent to the runner in each bootstrap, for the film command. Null: the stand-in only. */
+  runnerNaiveKey: string | null;
+  /** A stand-in runner may make a (labelled) film here. Off unless the var says `true`. */
+  allowStandIn: boolean;
   realFilmUsers: ReadonlySet<string>;
   snapshotId: string | null;
   publicUrl: string | null;
@@ -97,6 +108,8 @@ export function runnerConfig(bindings: RunnerBindings): RunnerConfig {
     naiveKey: present(bindings.NAIVE_WEB_KEY),
     naiveApiUrl: present(bindings.NAIVE_API_URL) ?? NAIVE_API_URL,
     signingSecret: present(bindings.RUNNER_SIGNING_SECRET),
+    runnerNaiveKey: present(bindings.NAIVE_RUNNER_KEY),
+    allowStandIn: bindings.RUNNER_ALLOW_STANDIN === 'true',
     realFilmUsers: new Set(
       (bindings.REAL_FILM_USERS ?? '')
         .split(',')

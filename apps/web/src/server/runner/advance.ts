@@ -5,7 +5,9 @@ import {
   type Bootstrap,
   deriveRunKey,
   LAUNCH_COMMAND,
+  RUN_DIR_NAME,
   RUNNER_BASE_PATH,
+  SCRUB_COMMAND,
   STOP_COMMAND,
 } from './contract.ts';
 import { isGone, type NaiveApi, NaiveApiError, type NaiveComputer } from './naive-api.ts';
@@ -181,7 +183,7 @@ async function bringUp(
         disk_gb: deps.config.size.diskGb,
         snapshot_id: run.checkpointId,
       },
-      `${run.id}:fork:${run.launchAttempts}`,
+      `${run.id}:fork:${run.queuedAt ?? 0}:${run.launchAttempts}`,
     );
     await patchRun(deps, run.id, {
       computerId: computer.id,
@@ -209,21 +211,17 @@ async function bringUp(
   if (fresh) await launch(deps, naive, fresh);
 }
 
-/** Writes the bootstrap file and starts the runner. The runner's hello moves the run on. */
+/**
+ * Writes the bootstrap file and starts the runner. The runner's hello moves the run on.
+ *
+ * The attempt is counted before any Naive call, so a launch that fails every time still ends at
+ * `MAX_LAUNCHES`. A computer Naive says is gone fails the film at once: there is nothing to launch.
+ */
 async function launch(deps: RunnerDeps, naive: NaiveApi, run: FilmRun): Promise<void> {
   const { config } = deps;
   if (!run.computerId || !config.signingSecret || !config.publicUrl) return;
+  const computerId = run.computerId;
   const now = deps.now().getTime();
-  const home = await naive.home(run.computerId);
-  const bootstrap: Bootstrap = {
-    v: 1,
-    filmId: run.filmId,
-    runId: run.id,
-    callbackBase: `${config.publicUrl}${RUNNER_BASE_PATH}`,
-    key: await deriveRunKey(config.signingSecret, run.filmId, run.id),
-    issuedAt: Math.floor(now / 1000),
-  };
-  await naive.writeFile(run.computerId, `${home}/${BOOTSTRAP_PATH}`, JSON.stringify(bootstrap));
   // `launching` is set before the exec, so a fast hello never finds the run still provisioning.
   const launching = await moveRun(
     deps,
@@ -241,15 +239,57 @@ async function launch(deps: RunnerDeps, naive: NaiveApi, run: FilmRun): Promise<
     },
   );
   if (!launching) return;
-  const result = await naive.exec(run.computerId, LAUNCH_COMMAND, 30_000);
-  if (result.exit_code !== 0 || result.timed_out) {
-    // Left in `launching`: the next tick launches again, and `flock` keeps it to one runner.
-    await patchRun(deps, run.id, { lastError: `launch exited ${result.exit_code}` });
+  try {
+    const home = await naive.home(computerId);
+    const bootstrap: Bootstrap = {
+      v: 1,
+      filmId: run.filmId,
+      runId: run.id,
+      callbackBase: `${config.publicUrl}${RUNNER_BASE_PATH}`,
+      key: await deriveRunKey(config.signingSecret, run.filmId, run.id),
+      issuedAt: Math.floor(now / 1000),
+      ...(config.runnerNaiveKey ? { naiveKey: config.runnerNaiveKey } : {}),
+    };
+    // A fresh fork has no run dir, and `fs/write` makes no parent directory.
+    await naive.mkdir(computerId, `${home}/${RUN_DIR_NAME}`);
+    await naive.writeFile(computerId, `${home}/${BOOTSTRAP_PATH}`, JSON.stringify(bootstrap));
+    const result = await naive.exec(computerId, LAUNCH_COMMAND, 30_000);
+    if (result.exit_code !== 0 || result.timed_out) {
+      // Left in `launching`: the next tick launches again, and `flock` keeps it to one runner.
+      await patchRun(deps, run.id, { lastError: `launch exited ${result.exit_code}` });
+    }
+  } catch (error) {
+    if (await failIfGone(deps, naive, launching, error)) return;
+    throw error;
   }
   logLine(
     deps,
-    `advance: film ${run.filmId}: launched the ${run.phase} phase on ${run.computerId} (try ${launching.launchAttempts})`,
+    `advance: film ${run.filmId}: launched the ${run.phase} phase on ${computerId} (try ${launching.launchAttempts})`,
   );
+}
+
+/**
+ * After a Naive call failed with 404 or 409: when Naive has no such computer, or says it is
+ * destroyed or failed, records that, so no more compute is counted for it, and fails the film.
+ * True when it did.
+ */
+async function failIfGone(
+  deps: RunnerDeps,
+  naive: NaiveApi,
+  run: FilmRun,
+  error: unknown,
+): Promise<boolean> {
+  if (!run.computerId || !(error instanceof NaiveApiError)) return false;
+  if (error.status !== 404 && error.status !== 409) return false;
+  // A 404 from `fs/*` may mean a missing path, so ask about the computer itself.
+  const computer = await computerOrNull(naive, run.computerId).catch(() => undefined);
+  const gone =
+    computer === null || computer?.status === 'destroyed' || computer?.status === 'failed';
+  if (!gone) return false;
+  await patchRun(deps, run.id, { computerState: 'destroyed', runningSince: null });
+  await failRun(deps, run, 'computer_failed');
+  logLine(deps, `advance: film ${run.filmId}: ${run.computerId} is gone (${error.code})`);
+  return true;
 }
 
 /**
@@ -269,7 +309,21 @@ async function pauseForApproval(deps: RunnerDeps, naive: NaiveApi, run: FilmRun)
   }
   if (run.computerId && run.computerState === 'running') {
     let checkpointId = run.checkpointId;
+    // No checkpoint may hold a key: a runner that never started never deleted its bootstrap.
+    let scrubbed = false;
     if (!checkpointId) {
+      try {
+        const result = await naive.exec(run.computerId, SCRUB_COMMAND, 20_000);
+        scrubbed = result.exit_code === 0;
+      } catch {
+        scrubbed = false;
+      }
+      if (!scrubbed) {
+        await patchRun(deps, run.id, { lastError: 'scrub_failed: no checkpoint taken' });
+        logLine(deps, `advance: film ${run.filmId}: scrub_failed, so no checkpoint`);
+      }
+    }
+    if (!checkpointId && scrubbed) {
       try {
         checkpointId = (await naive.snapshot(run.computerId)).snapshot_id;
         await patchRun(deps, run.id, { checkpointId });

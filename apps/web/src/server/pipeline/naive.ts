@@ -1,9 +1,10 @@
 import { campaignSchema } from '@boiler-room/schema';
-import { and, asc, eq, gt, isNotNull } from 'drizzle-orm';
+import { and, asc, eq, gt, inArray, isNotNull } from 'drizzle-orm';
 import { type FilmRun, filmRuns, films, runEvents, runFiles } from '../../db/schema.ts';
 import { displayHost, FORMATS, type Format } from '../../lib/film.ts';
 import { newId } from '../ids.ts';
 import { advance, computerName } from '../runner/advance.ts';
+import { approvalCaps, approvalRefusal } from '../runner/caps.ts';
 import { runnerReady } from '../runner/config.ts';
 import type { ApprovalInput } from '../runner/contract.ts';
 import { addWebEvent, getRun, moveRun, type RunnerDeps } from '../runner/runs.ts';
@@ -181,6 +182,10 @@ export class NaivePipeline implements PipelineClient {
    * Records the approval and queues the render. It does not wait for the computer to come back,
    * so a slow Naive call never turns an approval into an error: `advance()` resumes the computer,
    * or forks the checkpoint, from `waitUntil` now and from the cron after.
+   *
+   * The caps are checked again here, in the same statement that queues the render: a founder's
+   * other film may have started while this script waited, and the rest of this film's cap must
+   * still fit the day's. A refused approval leaves the script waiting.
    */
   async approveScript(runId: string, input: ScriptApproval): Promise<void> {
     const deps = this.#ready();
@@ -200,15 +205,42 @@ export class NaivePipeline implements PipelineClient {
       formats: input.formats,
       confirmedClaimIds: input.confirmedClaimIds,
     };
-    const queued = await moveRun(deps, runId, ['script_ready', 'awaiting_approval'], {
-      state: 'render_queued',
-      phase: 'render',
-      stage: 'art_direction',
-      status: 'working',
-      approvalJson: JSON.stringify(approval),
-      queuedAt: deps.now().getTime(),
-    });
-    if (!queued || queued.scriptVersion !== input.version) {
+    const film = await deps.db.query.films.findFirst({ where: eq(films.id, run.filmId) });
+    if (!film) throw new PipelineConflictError('There is no such film.');
+    const now = deps.now().getTime();
+    const scope = { accountId: film.accountId, userId: film.createdBy, now };
+    const [queued] = await deps.db
+      .update(filmRuns)
+      .set({
+        state: 'render_queued',
+        phase: 'render',
+        stage: 'art_direction',
+        status: 'working',
+        approvalJson: JSON.stringify(approval),
+        queuedAt: now,
+        // Each phase gets its own launch tries.
+        launchAttempts: 0,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(filmRuns.id, runId),
+          inArray(filmRuns.state, ['script_ready', 'awaiting_approval']),
+          eq(filmRuns.scriptVersion, input.version),
+          approvalCaps(deps.config, scope, runId),
+        ),
+      )
+      .returning();
+    if (!queued) {
+      const current = await getRun(deps.db, runId);
+      if (
+        current &&
+        ['script_ready', 'awaiting_approval'].includes(current.state) &&
+        current.scriptVersion === input.version
+      ) {
+        const refusal = await approvalRefusal(deps.db, deps.config, scope, runId);
+        if (refusal) throw refusal;
+      }
       throw new PipelineConflictError('The script is not waiting for approval.');
     }
     const shapes = input.formats.join(', ');
@@ -235,6 +267,7 @@ export class NaivePipeline implements PipelineClient {
       status: 'working',
       reviseJson: JSON.stringify({ version: input.version, note: input.note }),
       queuedAt: deps.now().getTime(),
+      launchAttempts: 0,
     });
     if (!queued || queued.scriptVersion !== input.version) {
       throw new PipelineConflictError('The script is not waiting for approval.');

@@ -1,6 +1,6 @@
 import { eq, lt, ne, sql } from 'drizzle-orm';
 import { type FilmRun, filmRuns, runnerControl, runnerNonces } from '../../db/schema.ts';
-import { advance, computerPrefix } from './advance.ts';
+import { advance, computerPrefix, MAX_LAUNCHES, RELAUNCH_AFTER_MS } from './advance.ts';
 import { BLOCK_MS, blockMicroUsd } from './config.ts';
 import { isGone } from './naive-api.ts';
 import { failRun, logLine, patchRun, type RunnerDeps, stopRun } from './runs.ts';
@@ -8,6 +8,14 @@ import type { RunState } from './states.ts';
 
 export const SILENT_AFTER_MS = 5 * 60_000;
 export const NEVER_STARTED_AFTER_MS = 10 * 60_000;
+/**
+ * A launch is tried again `RELAUNCH_AFTER_MS` after the last try, on the next tick, and the run
+ * fails after `MAX_LAUNCHES` tries. A run still `launching` this long after its last try is
+ * stuck, since no new try could even begin, and fails too.
+ */
+export const LAUNCH_STUCK_AFTER_MS = RELAUNCH_AFTER_MS + 3 * 60_000;
+/** The longest a healthy start can stay `launching`: every try, and the stuck margin. */
+export const LAUNCHING_MAX_MS = RELAUNCH_AFTER_MS * (MAX_LAUNCHES - 1) + LAUNCH_STUCK_AFTER_MS;
 export const NEAR_EXPIRY_MS = 11 * 3600_000;
 export const ORPHAN_MAX_AGE_MS = 11.5 * 3600_000;
 export const ORPHAN_MIN_AGE_MS = 10 * 60_000;
@@ -49,6 +57,13 @@ export async function watchdogTick(deps: RunnerDeps): Promise<TickReport> {
       } else if (state === 'provisioning' && now - run.createdAt > NEVER_STARTED_AFTER_MS) {
         if (await failRun(deps, run, 'computer_start_timeout')) {
           note(`failed film ${run.filmId} (computer_start_timeout)`);
+        }
+      } else if (
+        state === 'launching' &&
+        now - (run.launchedAt ?? run.updatedAt) > LAUNCH_STUCK_AFTER_MS
+      ) {
+        if (await failRun(deps, run, 'computer_start_timeout')) {
+          note(`failed film ${run.filmId} (computer_start_timeout, stuck launching)`);
         }
       } else if (
         (state === 'script_running' || state === 'render_running' || state === 'delivering') &&
@@ -198,17 +213,25 @@ async function sweepOrphans(deps: RunnerDeps, note: (line: string) => void): Pro
   if (!naive) return;
   const now = deps.now().getTime();
   const prefix = computerPrefix(deps);
-  const owned = new Set(
-    (
-      await deps.db
-        .select({ computerId: filmRuns.computerId })
-        .from(filmRuns)
-        .where(ne(filmRuns.state, 'ended'))
-    ).map((row) => row.computerId),
-  );
+  const live = await deps.db
+    .select({
+      id: filmRuns.id,
+      computerId: filmRuns.computerId,
+      computerState: filmRuns.computerState,
+    })
+    .from(filmRuns)
+    .where(ne(filmRuns.state, 'ended'));
+  const owned = new Set(live.map((row) => row.computerId));
+  const listedIds = new Set<string>();
+  let complete = false;
   let after: string | undefined;
   for (let page = 0; page < 10; page++) {
     const listed = await naive.listComputers({ limit: 100, ...(after ? { after } : {}) });
+    for (const computer of listed.data) {
+      if (computer.status !== 'destroyed' && computer.status !== 'failed') {
+        listedIds.add(computer.id);
+      }
+    }
     for (const computer of listed.data) {
       if (!computer.name.startsWith(prefix) || computer.status === 'destroyed') continue;
       const age = now - Date.parse(computer.created_at);
@@ -224,7 +247,30 @@ async function sweepOrphans(deps: RunnerDeps, note: (line: string) => void): Pro
           );
       }
     }
-    if (!listed.has_more || !listed.next_cursor) break;
+    if (!listed.has_more || !listed.next_cursor) {
+      complete = true;
+      break;
+    }
     after = listed.next_cursor;
+  }
+  // A computer D1 thinks is up but Naive no longer lists is gone: Naive's 12-hour limit, a host
+  // failure, a destroy that answered late. Stop counting compute for it, and let the film's next
+  // step find out (a run waiting for its computer then fails, or forks its checkpoint).
+  if (!complete) return;
+  for (const row of live) {
+    if (!row.computerId || !['creating', 'running', 'paused'].includes(row.computerState)) continue;
+    if (listedIds.has(row.computerId)) continue;
+    const computer = await naive.getComputer(row.computerId).catch((error: unknown) => {
+      if (isGone(error)) return null;
+      throw error;
+    });
+    if (computer && computer.status !== 'destroyed' && computer.status !== 'failed') continue;
+    await patchRun(deps, row.id, { computerState: 'destroyed', runningSince: null });
+    note(`${row.computerId} is gone from Naive; its film no longer counts compute for it`);
+    const run = await deps.db.query.filmRuns.findFirst({ where: eq(filmRuns.id, row.id) });
+    if (run && ['launching', 'script_running', 'render_running'].includes(run.state)) {
+      if (await failRun(deps, run, 'computer_failed'))
+        note(`failed film ${run.filmId} (computer_failed)`);
+    }
   }
 }

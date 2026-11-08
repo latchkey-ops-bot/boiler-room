@@ -10,9 +10,9 @@ import {
   requestRevision,
   reviewScript,
 } from '../src/server/api/films.ts';
-import { LAUNCH_COMMAND, sha256Hex } from '../src/server/runner/contract.ts';
+import { LAUNCH_COMMAND, SCRUB_COMMAND, sha256Hex } from '../src/server/runner/contract.ts';
 import { startWorkerEnv } from './helpers.ts';
-import { body, type Harness, runnerClient, runnerHarness } from './runner-helpers.ts';
+import { body, type Harness, HOME, runnerClient, runnerHarness } from './runner-helpers.ts';
 
 type Proxy = Awaited<ReturnType<typeof startWorkerEnv>>;
 let proxy: Proxy;
@@ -89,7 +89,7 @@ async function runScriptPhase(harness: Harness, runner: ReturnType<typeof runner
       kind: 'passed',
       message: 'Every number is backed by a quote.',
     },
-    { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: 1 },
+    { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: ['pricing'] },
     { type: 'runner.exit', exitCode: 0, signal: null, durationMs: 1000 },
   ]);
   expect(ready.status).toBe(200);
@@ -110,8 +110,20 @@ describe('a real film, end to end', () => {
     // One computer, forked from the base snapshot, named for the film, and the runner launched.
     expect(harness.naive.calls[0]).toMatchObject({ op: 'create', detail: 'snp_base' });
     expect([...harness.naive.computers.values()][0]?.name).toBe(`br-film-staging-${film.id}`);
-    expect(harness.naive.ops()).toEqual(['create', 'get', 'inspect', 'fs/write', 'exec']);
+    expect(harness.naive.ops()).toEqual([
+      'create',
+      'get',
+      'inspect',
+      'fs/mkdir',
+      'fs/write',
+      'exec',
+    ]);
     expect(harness.naive.calls.at(-1)?.detail).toBe(LAUNCH_COMMAND);
+    // Where the runner reads it: `<home>/br-run/bootstrap.json`, in a directory made first.
+    expect(harness.naive.calls.slice(3, 5).map((call) => call.detail)).toEqual([
+      `${HOME}/br-run`,
+      `${HOME}/br-run/bootstrap.json`,
+    ]);
     // The bootstrap names this film and run only, and the launch command carries no key.
     const boot = harness.naive.bootstrap(run.computerId as string);
     expect(boot).toMatchObject({ v: 1, filmId: film.id, runId: run.id });
@@ -132,9 +144,11 @@ describe('a real film, end to end', () => {
 
     await runScriptPhase(harness, runner);
 
-    // The approval gate: checkpoint, then pause. A paused computer costs nothing.
-    const gated = harness.naive.ops().slice(5);
-    expect(gated).toEqual(['snapshot', 'pause']);
+    // The approval gate: delete any key left on the disk, checkpoint, then pause. A paused
+    // computer costs nothing.
+    const gated = harness.naive.calls.slice(6);
+    expect(gated.map((call) => call.op)).toEqual(['exec', 'snapshot', 'pause']);
+    expect(gated[0]?.detail).toBe(SCRUB_COMMAND);
     let detail = await getFilmDetail(ctx, film.id);
     expect(detail.film).toMatchObject({ status: 'needs_you', stage: 'approval', scriptVersion: 1 });
     expect(detail.campaign?.brand.name).toBe('Nova');
@@ -154,9 +168,16 @@ describe('a real film, end to end', () => {
     detail = await reviewScript(ctx, film.id, approve);
     expect(detail.film).toMatchObject({ status: 'working', stage: 'art_direction' });
     await harness.flush();
-    expect(harness.naive.ops().slice(7)).toEqual(['get', 'resume', 'inspect', 'fs/write', 'exec']);
+    expect(harness.naive.ops().slice(9)).toEqual([
+      'get',
+      'resume',
+      'inspect',
+      'fs/mkdir',
+      'fs/write',
+      'exec',
+    ]);
 
-    expect((await runner.hello('render')).status).toBe(200);
+    expect((await runner.hello()).status).toBe(200);
     const render = await body(await runner.send('instructions'));
     expect(render).toMatchObject({
       phase: 'render',
@@ -322,7 +343,7 @@ describe('a real film, end to end', () => {
     expect(
       (
         await runner.events('all', [
-          { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: 0 },
+          { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: [] },
         ])
       ).status,
     ).toBe(200);
@@ -379,7 +400,7 @@ describe('a real film, end to end', () => {
     );
     const { fileId } = (await body(upload)) as { fileId: string };
     await runner.events('script', [
-      { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: 0 },
+      { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: [] },
     ]);
     await harness.flush();
     const detail = await getFilmDetail(ctx, film.id);
@@ -427,3 +448,77 @@ describe('a real film, end to end', () => {
     expect(rows[0]?.sha256).toBe(await sha256Hex(new TextEncoder().encode('{}')));
   });
 });
+
+describe('the script runner still exiting when the founder approves', () => {
+  it('takes its last batch after the approval, and a resend of it never fails the render', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { ctx, film, run, runner } = await startRealFilm(harness, user);
+    expect((await runner.hello()).status).toBe(200);
+    const upload = await runner.upload(
+      { kind: 'campaign', version: '1' },
+      campaignBytes,
+      'application/json',
+    );
+    const { fileId } = (await body(upload)) as { fileId: string };
+    await runner.events('script', [
+      { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: ['pricing'] },
+    ]);
+    await harness.flush();
+    expect((await runOf(harness, run.id))?.state).toBe('script_ready');
+    // A scripted approval lands before the script runner's runner.exit.
+    await reviewScript(ctx, film.id, approve);
+    await harness.flush();
+    expect((await runOf(harness, run.id))?.state).toBe('render_queued');
+
+    // The script runner's last batch: taken (not 409), and it says the runner exited.
+    const exit = { type: 'runner.exit', exitCode: 0, signal: null, durationMs: 1 };
+    const late = await runner.events('script', [
+      { type: 'cost', step: 'director', microUsd: 300_000, totalMicroUsd: 700_000 },
+      exit,
+    ]);
+    expect(late.status).toBe(200);
+    expect(await body(late)).toMatchObject({ ok: true, control: { stop: false } });
+    const queued = await runOf(harness, run.id);
+    expect(queued?.exitedAt).not.toBeNull();
+    // Its cost still counts; nothing else of it does.
+    expect(queued?.costCrewMicroUsd).toBe(700_000);
+
+    // With the exit in, the computer comes back without waiting out the grace.
+    await harness.flush();
+    const { watchdogTick } = await import('../src/server/runner/watchdog.ts');
+    await watchdogTick(harness.deps());
+    await harness.flush();
+    expect((await runOf(harness, run.id))?.state).toBe('launching');
+    expect((await runner.hello()).status).toBe(200);
+    expect((await runOf(harness, run.id))?.state).toBe('render_running');
+
+    // An old runner.exit sent again, as an outbox might: stored, and the render goes on.
+    const again = await runner.events('script', [exit]);
+    expect(again.status).toBe(200);
+    await harness.flush();
+    expect((await runOf(harness, run.id))?.state).toBe('render_running');
+    const errorFirst = await runner.events('script', [
+      { type: 'error', code: 'stopped', message: 'Stopped.', stage: null, retryable: false },
+    ]);
+    expect(errorFirst.status).toBe(200);
+    await harness.flush();
+    expect((await runOf(harness, run.id))?.state).toBe('render_running');
+  });
+
+  it('takes an error that names no stage, as a runner stopped before its first stage sends it', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { run, runner } = await startRealFilm(harness, user);
+    expect((await runner.hello()).status).toBe(200);
+    const stopped = await runner.events('script', [
+      { type: 'error', code: 'stopped', message: 'Stopped.', stage: null, retryable: false },
+    ]);
+    expect(stopped.status).toBe(200);
+    await harness.flush();
+    expect(await runOf(harness, run.id)).toMatchObject({ failureCode: 'stopped' });
+  });
+});
+
+const runOf = (harness: Harness, runId: string) =>
+  harness.db.query.filmRuns.findFirst({ where: eq(filmRuns.id, runId) });

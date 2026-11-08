@@ -83,6 +83,11 @@ export const films = sqliteTable(
     launchDate: text('launch_date'),
     /** Where the founder will post the film, as a JSON array of channels such as ["x","reels"]. */
     launchChannelsJson: text('launch_channels_json').notNull().default('[]'),
+    /**
+     * A real film's computer ran the stand-in film command, which calls no agent and makes a
+     * labelled test film. Such a film is labelled simulated everywhere and never shown publicly.
+     */
+    standIn: integer('stand_in', { mode: 'boolean' }).notNull().default(false),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
   },
@@ -243,6 +248,8 @@ export const filmRuns = sqliteTable(
     /** A snapshot of the film's computer, taken at the approval gate. */
     checkpointId: text('checkpoint_id'),
     runnerCommit: text('runner_commit'),
+    /** What the runner's hello said it runs: `film`, the crew, or `standin`. Null before a hello. */
+    adapter: text('adapter'),
     heartbeatAt: integer('heartbeat_at'),
     launchedAt: integer('launched_at'),
     phaseStartedAt: integer('phase_started_at'),

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 // pnpm web:deploy:<env> — builds and deploys the Worker, then runs the smoke check.
 //
 // Staging deploys the commit at the tip of origin/dev; production deploys the tip of origin/main.
@@ -11,10 +13,12 @@ import {
   fail,
   git,
   guardProduction,
+  REPO_DIR,
   readEnvFile,
   requireCloudflare,
   runTee,
 } from './lib/env.mjs';
+import { CONTRACT_FILE, contractDrift } from './lib/runner-secrets.mjs';
 import { environmentConfig } from './lib/wrangler-config.mjs';
 import { smoke } from './smoke.mjs';
 
@@ -41,6 +45,14 @@ if (head !== tip) {
   }
   console.log(`Deploying ${head} to staging, which is not origin/dev. Redeploy dev after testing.`);
 }
+
+// The runner in the base snapshot must speak the contract this commit deploys.
+const drift = contractDrift(
+  target.vars,
+  readFileSync(join(REPO_DIR, CONTRACT_FILE), 'utf8'),
+  (commit, path) => git(['show', `${commit}:${path}`]),
+);
+if (drift) fail(drift);
 
 await guardProduction(env, `deploy ${head.slice(0, 12)}`);
 

@@ -206,7 +206,7 @@ describe('the watchdog', () => {
     );
     const { fileId } = (await body(upload as Response)) as { fileId: string };
     await runner?.events('script', [
-      { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: 0 },
+      { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: [] },
       { type: 'runner.exit', exitCode: 0, signal: null, durationMs: 1 },
     ]);
     await harness.flush();
@@ -312,5 +312,89 @@ describe('the watchdog', () => {
     });
     expect(control?.halted).toBe(true);
     await harness.db.delete(runnerControl);
+  });
+});
+
+describe('a launch that cannot happen', () => {
+  it('fails at once, and counts no more compute, when the computer is gone before the launch', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    harness.naive.createStatus = 'creating';
+    const { run } = await realFilm(harness, user);
+    expect(run.state).toBe('provisioning');
+    // Naive lost the computer before it ever ran (a host failure, say).
+    const computer = harness.naive.computers.get(run.computerId as string);
+    if (computer) computer.status = 'destroyed';
+    harness.clock.advance(60);
+    await tick(harness);
+    const failed = await runOf(harness, run.id);
+    expect(failed).toMatchObject({ state: 'ended', failureCode: 'computer_failed' });
+    expect(failed?.computerState).toBe('destroyed');
+    const charged = failed?.costComputeMicroUsd;
+    harness.clock.advance(60 * 60);
+    await tick(harness);
+    expect((await runOf(harness, run.id))?.costComputeMicroUsd).toBe(charged);
+  });
+
+  it('fails a film whose launch fails before its computer answers, after its tries', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    harness.naive.failNext('inspect', 502, 'bad_gateway');
+    const { film } = await createFilm(await harness.context(user), { url: 'nova.com' });
+    await harness.flush();
+    const run = await harness.db.query.filmRuns.findFirst({ where: eq(filmRuns.filmId, film.id) });
+    if (!run) throw new Error('no run');
+    // The try is counted though `inspect` failed before anything was written.
+    expect(await runOf(harness, run.id)).toMatchObject({ state: 'launching', launchAttempts: 1 });
+    for (let minute = 0; minute < 12; minute++) {
+      harness.naive.failNext('inspect', 502, 'bad_gateway');
+      harness.clock.advance(60);
+      await tick(harness);
+    }
+    expect(await runOf(harness, run.id)).toMatchObject({
+      state: 'ended',
+      failureCode: 'computer_start_timeout',
+      launchAttempts: 3,
+    });
+    expect(harness.naive.live()).toEqual([]);
+  });
+
+  it('fails a run left launching when no new try could begin', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { run } = await realFilm(harness, user);
+    // As if its advance() kept stopping short: no try is counted, and launchedAt stays old.
+    await harness.db.update(filmRuns).set({ computerId: null }).where(eq(filmRuns.id, run.id));
+    harness.clock.advance(5 * 60);
+    await tick(harness);
+    expect((await runOf(harness, run.id))?.state).toBe('launching');
+    harness.clock.advance(2 * 60);
+    await tick(harness);
+    expect(await runOf(harness, run.id)).toMatchObject({
+      failureCode: 'computer_start_timeout',
+    });
+  });
+
+  it('stops counting compute for a computer Naive no longer has, and fails the film at work on it', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { run, runner } = await realFilm(harness, user);
+    await runner?.hello();
+    harness.naive.computers.delete(run.computerId as string);
+    harness.clock.advance(60);
+    await harness.db
+      .update(filmRuns)
+      .set({ heartbeatAt: harness.clock.now().getTime() })
+      .where(eq(filmRuns.id, run.id));
+    const report = await tick(harness);
+    expect(report.actions.join('\n')).toContain('is gone from Naive');
+    expect(await runOf(harness, run.id)).toMatchObject({ state: 'failed', runningSince: null });
+    await tick(harness);
+    expect(await runOf(harness, run.id)).toMatchObject({
+      state: 'ended',
+      failureCode: 'computer_failed',
+      computerState: 'destroyed',
+      runningSince: null,
+    });
   });
 });

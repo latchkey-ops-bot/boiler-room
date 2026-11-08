@@ -10,8 +10,9 @@ import {
   realFilmsFor,
   runnerConfig,
 } from '../runner/config.ts';
-import { HttpNaiveApi, type NaiveApi } from '../runner/naive-api.ts';
-import type { RunnerDeps } from '../runner/runs.ts';
+import { type RunnerRuntime, runnerDeps } from '../runner/deps.ts';
+
+export { runnerDeps };
 
 /** Who is asking, from Clerk. `orgId` is the active organisation, if any. */
 export interface Principal {
@@ -30,12 +31,7 @@ export interface Bindings extends RunnerBindings {
 }
 
 /** What the request runs in, beyond the bindings. Tests pass a fake Naive and collect `waitUntil`. */
-export interface Runtime {
-  waitUntil?: (promise: Promise<unknown>) => void;
-  /** Overrides the Naive client built from `NAIVE_WEB_KEY`. */
-  naive?: NaiveApi | null;
-  log?: (line: string) => void;
-}
+export type Runtime = RunnerRuntime;
 
 export interface ApiContext {
   db: Db;
@@ -89,35 +85,6 @@ export function pipelineKindFor(bindings: Bindings, principal: Principal): Pipel
   return realFilmsFor(runnerConfig(bindings), principal.userId)
     ? 'naive'
     : pipelineKindFrom(bindings.PIPELINE);
-}
-
-/** The runner's deps from the bindings: the Naive client is built only when the key is set. */
-export function runnerDeps(
-  bindings: Bindings,
-  db: Db,
-  clock: () => Date,
-  runtime: Runtime = {},
-): RunnerDeps {
-  const config = runnerConfig(bindings);
-  const naive =
-    runtime.naive !== undefined
-      ? runtime.naive
-      : config.naiveKey
-        ? new HttpNaiveApi({ key: config.naiveKey, baseUrl: config.naiveApiUrl })
-        : null;
-  return {
-    db,
-    films: bindings.FILMS,
-    naive,
-    config,
-    now: clock,
-    waitUntil:
-      runtime.waitUntil ??
-      ((promise) => {
-        promise.catch((error: unknown) => console.error('Background step failed', error));
-      }),
-    log: runtime.log,
-  };
 }
 
 /**

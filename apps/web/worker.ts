@@ -1,26 +1,37 @@
-// The Worker's entry: OpenNext's generated fetch handler, plus a cron for the real-film watchdog.
-// All the watchdog's logic stays in the Next bundle, behind the signed route it calls here, so this
-// file imports only the runner contract, which has no imports of its own.
+// The Worker's entry: the runner's signed routes, then OpenNext's generated fetch handler for
+// everything else, plus a cron for the real-film watchdog.
+//
+// The runner's routes are served here, before OpenNext, because OpenNext's converter reads every
+// non-GET body whole into memory before routing: an upload must stream into R2 instead
+// (src/server/runner/worker-routes.ts). Every other request with a body is bounded first, for the
+// same reason.
 // biome-ignore lint/suspicious/noTsIgnore: the file exists after a build and not before, so expect-error would fail one of the two
 // @ts-ignore `.open-next/worker.js` is generated at build time
 import { default as handler } from './.open-next/worker.js';
 import { RUNNER_BASE_PATH, signWatchdog } from './src/server/runner/contract.ts';
+import type { RunnerEnv } from './src/server/runner/deps.ts';
+import { boundAppRequest, isRunnerPath, runnerFetch } from './src/server/runner/worker-routes.ts';
 
-interface CronEnv {
+interface Env extends RunnerEnv {
   WORKER_SELF_REFERENCE: { fetch(input: string, init: RequestInit): Promise<Response> };
   RUNNER_SIGNING_SECRET?: string;
   RUNNER_PUBLIC_URL?: string;
 }
 
+interface Ctx {
+  waitUntil(promise: Promise<unknown>): void;
+}
+
 export default {
-  fetch: handler.fetch,
+  fetch(request: Request, env: Env, ctx: Ctx): Promise<Response> | Response {
+    if (isRunnerPath(new URL(request.url).pathname)) return runnerFetch(request, env, ctx);
+    const bounded = boundAppRequest(request);
+    if (bounded instanceof Response) return bounded;
+    return handler.fetch(bounded, env, ctx);
+  },
 
   /** Every minute on staging (`triggers.crons`). Production has no cron until it is released. */
-  async scheduled(
-    controller: { scheduledTime: number },
-    env: CronEnv,
-    ctx: { waitUntil(promise: Promise<unknown>): void },
-  ) {
+  async scheduled(controller: { scheduledTime: number }, env: Env, ctx: Ctx) {
     const base = env.RUNNER_PUBLIC_URL?.replace(/\/+$/, '');
     if (!env.RUNNER_SIGNING_SECRET || !base) return;
     const url = `${base}${RUNNER_BASE_PATH}/watchdog`;

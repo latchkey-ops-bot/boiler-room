@@ -30,6 +30,7 @@ import {
   eventsBody,
   expectedVariants,
   helloEvent,
+  isStale,
   parseApproval,
 } from './events.ts';
 import { getRun, logLine, type RunnerDeps } from './runs.ts';
@@ -143,9 +144,39 @@ async function readBody(
   if (parts.method !== 'GET' && !type.toLowerCase().startsWith('application/json')) {
     throw new ApiError(415, 'unsupported_media_type', 'Send the body as application/json.');
   }
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > limit) throw new ApiError(413, 'body_too_large', 'The body is too large.');
+  const bytes = await readAtMost(request, limit);
   parts.contentLength = bytes.byteLength;
+  return bytes;
+}
+
+/**
+ * The body, read chunk by chunk, and refused with 413 as soon as it passes `limit`: a body with no
+ * Content-Length is never held whole first.
+ */
+export async function readAtMost(
+  request: Request,
+  limit: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  if (!request.body) return new Uint8Array(0);
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel().catch(() => undefined);
+      throw new ApiError(413, 'body_too_large', 'The body is too large.');
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
   return bytes;
 }
 
@@ -301,6 +332,10 @@ export const events: Handler = async (_request, { deps, run, body, key }) => {
   assertState(run, ACCEPTS.events);
   const batch = parsed(eventsBody, body);
   if (batch.runId !== run.id) throw new ApiError(400, 'wrong_run', 'The body names another run.');
+  // A launch says hello before it sends anything of its own; only a past launch's events come first.
+  if (run.state === 'launching' && batch.events.some((event) => !isStale(run, event))) {
+    throw new ApiError(409, 'wrong_state', 'The run is launching. Say hello first.');
+  }
   return json(await applyEvents(deps, run, batch.events, [key]));
 };
 
@@ -317,10 +352,11 @@ function uploadAllowed(run: FilmRun, kind: UploadKind): boolean {
 const VARIANT = /^(16:9|9:16|1:1)\.([a-z0-9][a-z0-9-]{0,63})\.([a-z0-9][a-z0-9-]{0,63})$/;
 
 /**
- * R2 stores a stream only when it knows the stream's length. Next can hand a route a body it has
- * wrapped, which loses it, so the signed Content-Length is put back with the Workers runtime's
- * `FixedLengthStream`, which also fails the put if the body is any other length. Outside workerd
- * (the unit tests) there is no such class and the body goes as it is.
+ * R2 stores a stream only when it knows the stream's length. The signed Content-Length is put on
+ * the body with the Workers runtime's `FixedLengthStream`, which also fails the put if the body is
+ * any other length. Outside workerd (the unit tests) there is no such class and the body goes as it
+ * is. The body is the Worker's own request stream (`worker.ts` serves this route before OpenNext),
+ * so it streams into R2 and is never held whole.
  */
 function withLength(body: ReadableStream<Uint8Array>, length: number): ReadableStream<Uint8Array> {
   const Fixed = (

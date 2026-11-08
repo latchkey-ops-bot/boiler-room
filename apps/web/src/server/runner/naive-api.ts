@@ -1,6 +1,6 @@
 /**
  * The handful of Naive API routes the website calls, over plain `fetch`. The SDK would bring far
- * more into the Worker bundle than these ten routes need. Paths and bodies follow
+ * more into the Worker bundle than these thirteen routes need. Paths and bodies follow
  * `@usenaive-sdk/managed-agents` 0.12.3, which `services/render` uses.
  *
  * The key is the website's own scoped key (`NAIVE_WEB_KEY`). It never appears in an error, a log
@@ -42,6 +42,8 @@ export interface NaiveApi {
   }>;
   /** Where the computer's file API is rooted: `fs/*` paths are under it. */
   home(id: string): Promise<string>;
+  /** Makes a directory and its parents. `writeFile` makes none. */
+  mkdir(id: string, path: string): Promise<void>;
   writeFile(id: string, path: string, content: string): Promise<void>;
   exec(id: string, command: string, timeoutMs: number): Promise<ExecResult>;
   pause(id: string): Promise<NaiveComputer>;
@@ -149,6 +151,10 @@ export class HttpNaiveApi implements NaiveApi {
       throw new NaiveApiError(502, 'no_home', `Naive did not say where ${id}'s files live.`);
     }
     return inspected.home.replace(/\/+$/, '');
+  }
+
+  async mkdir(id: string, path: string) {
+    await this.#call('POST', `/v1/computers/${encodeURIComponent(id)}/fs/mkdir`, { path });
   }
 
   async writeFile(id: string, path: string, content: string) {

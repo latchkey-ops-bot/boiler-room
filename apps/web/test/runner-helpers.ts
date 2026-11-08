@@ -6,7 +6,12 @@ import {
   type Runtime,
   runnerDeps,
 } from '../src/server/api/context.ts';
-import { BOOTSTRAP_PATH, type Bootstrap, signedHeaders } from '../src/server/runner/contract.ts';
+import {
+  BOOTSTRAP_PATH,
+  type Bootstrap,
+  CONTRACT_VERSION,
+  signedHeaders,
+} from '../src/server/runner/contract.ts';
 import {
   type ComputerStatus,
   type CreateComputer,
@@ -110,10 +115,23 @@ export class FakeNaive implements NaiveApi {
     return HOME;
   }
 
+  readonly dirs = new Set<string>();
+
+  async mkdir(id: string, path: string) {
+    this.#enter('fs/mkdir', id, path);
+    if (this.#find(id).status !== 'running')
+      throw new NaiveApiError(409, 'state_conflict', 'not running');
+    this.dirs.add(`${id}:${path}`);
+  }
+
   async writeFile(id: string, path: string, content: string) {
     this.#enter('fs/write', id, path);
     if (this.#find(id).status !== 'running')
       throw new NaiveApiError(409, 'state_conflict', 'not running');
+    // Like Naive, `fs/write` makes no parent directory.
+    const parent = path.slice(0, path.lastIndexOf('/'));
+    if (parent !== HOME && !this.dirs.has(`${id}:${parent}`))
+      throw new NaiveApiError(404, 'not_found', `${parent} does not exist`);
     this.written.set(`${id}:${path}`, content);
   }
 
@@ -282,6 +300,13 @@ export interface CallOptions {
   body?: Uint8Array<ArrayBuffer>;
 }
 
+export type HelloExtra = Partial<{
+  contract: number | undefined;
+  commit: string;
+  filmCommit: string;
+  adapter: string | undefined;
+}>;
+
 /** What the runner on a film's computer would send, signed with the key from its bootstrap. */
 export function runnerClient(harness: Harness, boot: Pick<Bootstrap, 'filmId' | 'runId' | 'key'>) {
   let seq = 0;
@@ -322,18 +347,26 @@ export function runnerClient(harness: Harness, boot: Pick<Bootstrap, 'filmId' | 
     build,
     send,
     nextSeq: () => ++seq,
-    async hello(phase: 'script' | 'render' | 'all') {
+    /**
+     * The runner's hello. The real runner names no phase (`null`): it learns it from the answer.
+     * Passing one checks the website's phase check.
+     */
+    async hello(phase: 'script' | 'render' | 'all' | null = null, extra: HelloExtra = {}) {
       seq += 1;
       return send('hello', {
         seq,
         at: at(),
         phase,
         type: 'runner.hello',
-        commit: 'abc123',
-        filmCommit: 'def456',
+        contract: CONTRACT_VERSION,
+        commit: 'abc1234',
+        filmCommit: 'def4567',
+        adapter: 'film',
+        launch: 1,
         node: 'v24.0.0',
         freeDiskGb: 12,
         swapMb: 4096,
+        ...extra,
       });
     },
     async events(

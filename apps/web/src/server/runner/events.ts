@@ -1,30 +1,41 @@
 import { validateCampaign } from '@boiler-room/schema';
 import { and, eq, sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { type FilmRun, runFiles } from '../../db/schema.ts';
+import { type FilmRun, films, runFiles } from '../../db/schema.ts';
 import { CREW, type CrewMember, type EventKind, STAGES, type Stage } from '../../lib/film.ts';
 import { ApiError } from '../api/errors.ts';
 import { advance } from './advance.ts';
 import type { ApprovalInput, EventsAnswer } from './contract.ts';
-import { SAMPLE_FORMATS, variantKey } from './contract.ts';
+import { ADAPTERS, CONTRACT_VERSION, SAMPLE_FORMATS, variantKey } from './contract.ts';
 import { failRun, getRun, moveRun, patchRun, type RunnerDeps, stopRun } from './runs.ts';
 import { asStage, PHASE_DEADLINE_MS, visibleStatus } from './states.ts';
 
-// ---------- Shapes. Extra fields are allowed, so a newer runner still talks to this website. ----------
+// ---------- Shapes: the website's check of `RunnerEvent` in the one contract file. Extra fields
+// are allowed, so a newer runner still talks to this website; a test runs the real runner through
+// these. ----------
 
 const name = z.string().min(1).max(64);
 const message = z.string().max(4000);
+const phase = z.enum(['script', 'render', 'all']);
 const base = {
   seq: z.int().positive().max(1_000_000_000),
   at: z.string().max(40),
-  phase: z.enum(['script', 'render', 'all']),
+  phase,
 };
 
+/**
+ * The runner says hello before it has its instructions, so it names no phase (`null`). It names
+ * the contract version, both commits it runs and its adapter, which `applyHello` checks.
+ */
 export const helloEvent = z.object({
   ...base,
+  phase: phase.nullable(),
   type: z.literal('runner.hello'),
+  contract: z.int().nonnegative().max(1000).optional(),
   commit: z.string().max(64),
   filmCommit: z.string().max(64),
+  adapter: z.string().max(16).optional(),
+  launch: z.int().nonnegative().max(1000).optional(),
   node: z.string().max(32),
   freeDiskGb: z.number().nonnegative().max(100_000),
   swapMb: z.number().nonnegative().max(1_000_000),
@@ -82,7 +93,8 @@ export const runnerEvent = z.discriminatedUnion('type', [
     type: z.literal('script_ready'),
     version: z.int().positive(),
     campaignFileId: z.string().max(40),
-    unconfirmedClaims: z.int().nonnegative().max(1000),
+    /** Claim ids nobody has confirmed, which the customer is asked about. */
+    unconfirmedClaims: z.array(z.string().max(64)).max(1000),
   }),
   z.object({
     ...base,
@@ -114,7 +126,8 @@ export const runnerEvent = z.discriminatedUnion('type', [
     type: z.literal('error'),
     code: name,
     message,
-    stage: name.optional(),
+    /** Null when the runner failed before any stage started. */
+    stage: name.nullable().optional(),
     agent: name.optional(),
     retryable: z.boolean(),
   }),
@@ -169,10 +182,24 @@ interface Feed {
   message: string;
 }
 
+/** States in which no runner of the run's current phase is at work yet, or any more. */
+const BETWEEN_PHASES: readonly string[] = ['awaiting_approval', 'render_queued', 'revise_queued'];
+
+/**
+ * An event from a launch that is over: the script runner's last batch arriving after the founder
+ * approved, or one a paused computer sends once it is resumed. It is stored for the record, but it
+ * moves nothing: a script-phase `runner.exit` must never end the render phase. Only its cost
+ * counts, since the website keeps the highest total it has seen.
+ */
+export function isStale(run: FilmRun, event: { phase: string | null }): boolean {
+  return BETWEEN_PHASES.includes(run.state) || event.phase !== run.phase;
+}
+
 /**
  * Applies a batch in order. Each event is stored once, by its runner seq, so a batch sent again
  * after a lost answer changes nothing. A `delivered` that comes before its files is refused with
- * 409, and the events before it in the batch stay applied.
+ * 409, and the events before it in the batch stay applied. Stale events (`isStale`) are stored
+ * and otherwise ignored.
  */
 export async function applyEvents(
   deps: RunnerDeps,
@@ -186,7 +213,8 @@ export async function applyEvents(
   for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
     lastSeq = Math.max(lastSeq, event.seq);
     if (event.type === 'runner.heartbeat' || event.type === 'runner.hello') continue;
-    if (event.type === 'delivered') await assertDelivered(deps, run, event);
+    const stale = isStale(run, event);
+    if (event.type === 'delivered' && !stale) await assertDelivered(deps, run, event);
 
     const stored = await deps.db.run(sql`
       insert or ignore into run_events (run_id, source, source_seq, film_id, at, type, data_json,
@@ -194,6 +222,11 @@ export async function applyEvents(
       values (${run.id}, 'runner', ${event.seq}, ${run.filmId}, ${eventTime(event.at, now)},
         ${event.type}, ${JSON.stringify(dataOf(event)).slice(0, 8192)}, ${now})`);
     if (stored.meta.changes !== 1) continue;
+    if (stale) {
+      await applyStale(deps, run, event);
+      run = (await getRun(deps.db, run.id)) ?? run;
+      continue;
+    }
 
     const feed = await applyOne(deps, run, event, secrets);
     run = (await getRun(deps.db, run.id)) ?? run;
@@ -207,7 +240,9 @@ export async function applyEvents(
         where run_id = ${run.id} and source = 'runner' and source_seq = ${event.seq}`);
     }
   }
-  run = (await patchRun(deps, run.id, { heartbeatAt: now })) ?? run;
+  if (!BETWEEN_PHASES.includes(run.state)) {
+    run = (await patchRun(deps, run.id, { heartbeatAt: now })) ?? run;
+  }
   // The cleanup `advance()` starts at once, so a failed run may already read `ended` here.
   const stop =
     run.state === 'stopping' ||
@@ -221,6 +256,24 @@ export async function applyEvents(
       : { stop: false },
     serverTime: Math.floor(now / 1000),
   };
+}
+
+/** What a stale event may still do: count its cost, and say that the last phase's runner exited. */
+async function applyStale(deps: RunnerDeps, run: FilmRun, event: RunnerEventInput): Promise<void> {
+  deps.log?.(
+    `runner: film ${run.filmId} sent a ${event.phase}-phase ${event.type} while ${run.state} (${run.phase}); kept, not applied`,
+  );
+  if (event.type === 'cost' && event.totalMicroUsd > run.costCrewMicroUsd) {
+    const updated = await patchRun(deps, run.id, { costCrewMicroUsd: event.totalMicroUsd });
+    if (
+      updated &&
+      updated.costCrewMicroUsd + updated.costComputeMicroUsd >= updated.costCapMicroUsd
+    )
+      await stopRun(deps, updated, 'cost_cap');
+  }
+  if (event.type === 'runner.exit' && BETWEEN_PHASES.includes(run.state) && run.exitedAt === null) {
+    await patchRun(deps, run.id, { exitedAt: deps.now().getTime() });
+  }
 }
 
 async function applyOne(
@@ -355,7 +408,7 @@ async function scriptReady(
     awaitingSince: deps.now().getTime(),
   });
   if (!ready) return null;
-  const open = event.unconfirmedClaims;
+  const open = event.unconfirmedClaims.length;
   return {
     agent: 'coordinator',
     kind: 'needs_you',
@@ -460,18 +513,26 @@ export async function applyHello(
   event: z.infer<typeof helloEvent>,
 ): Promise<FilmRun> {
   const now = deps.now().getTime();
-  if (event.phase !== run.phase) {
+  // The runner names no phase before its instructions; it learns the phase from the answer.
+  if (event.phase !== null && event.phase !== run.phase) {
     throw new ApiError(409, 'wrong_phase', `This run is in its ${run.phase} phase.`);
   }
   if (run.state !== 'launching') {
     return (await patchRun(deps, run.id, { heartbeatAt: now })) ?? run;
   }
-  const config = deps.config;
-  if (
-    (config.runnerCommit && !config.runnerCommit.startsWith(event.commit.slice(0, 12))) ||
-    (config.filmCommit && !config.filmCommit.startsWith(event.filmCommit.slice(0, 12)))
-  ) {
-    deps.log?.(`runner: film ${run.filmId} runs commits that differ from the configured ones`);
+  // A runner on another contract or other commits than this website was deployed with, or a
+  // stand-in where none may run, fails the film at once, with its own reason, instead of being
+  // launched again and again until the start times out.
+  const problem = runnerProblem(deps.config, event);
+  if (problem) {
+    await failRun(deps, run, problem.code);
+    deps.waitUntil(advance(deps, run.id));
+    throw new ApiError(409, 'runner_mismatch', problem.detail);
+  }
+  const adapter = event.adapter as (typeof ADAPTERS)[number];
+  const standIn = adapter !== 'film';
+  if (standIn) {
+    await deps.db.update(films).set({ standIn: true }).where(eq(films.id, run.filmId));
   }
   const stage: Stage =
     run.phase === 'render' ? 'art_direction' : run.reviseJson ? 'script' : asStage(run.stage);
@@ -483,6 +544,7 @@ export async function applyHello(
     phaseStartedAt: now,
     phaseDeadlineAt: now + PHASE_DEADLINE_MS[run.phase],
     runnerCommit: event.commit.slice(0, 64),
+    adapter,
   });
   if (!moved) return (await patchRun(deps, run.id, { heartbeatAt: now })) ?? run;
   const stored = await deps.db.run(sql`
@@ -490,10 +552,49 @@ export async function applyHello(
       kind, stage, status, message, data_json, received_at)
     select ${run.id}, 'runner', ${event.seq}, coalesce(max(feed_seq), 0) + 1, ${run.filmId}, ${now},
       'runner.hello', 'coordinator', 'started', ${moved.stage}, 'working',
-      ${run.phase === 'render' ? "The crew's computer is back. Animation starts now." : "The crew's computer is ready."},
-      ${JSON.stringify({ commit: event.commit, filmCommit: event.filmCommit, node: event.node, freeDiskGb: event.freeDiskGb, swapMb: event.swapMb })},
+      ${helloLine(run.phase, standIn)},
+      ${JSON.stringify({ commit: event.commit, filmCommit: event.filmCommit, adapter, contract: event.contract, launch: event.launch, node: event.node, freeDiskGb: event.freeDiskGb, swapMb: event.swapMb })},
       ${now}
     from run_events where run_id = ${run.id}`);
   if (stored.meta.changes !== 1) deps.log?.(`runner: film ${run.filmId} said hello twice`);
   return moved;
+}
+
+function helloLine(phase: string, standIn: boolean): string {
+  const line =
+    phase === 'render'
+      ? "The crew's computer is back. Animation starts now."
+      : "The crew's computer is ready.";
+  return standIn
+    ? `${line} It runs the stand-in, which makes a labelled test film, not a real one.`
+    : line;
+}
+
+/** Why a runner may not make this film, or null when it may. */
+export function runnerProblem(
+  config: RunnerDeps['config'],
+  event: z.infer<typeof helloEvent>,
+): { code: 'runner_outdated' | 'runner_standin'; detail: string } | null {
+  if (event.contract !== CONTRACT_VERSION) {
+    return {
+      code: 'runner_outdated',
+      detail: `This website speaks contract ${CONTRACT_VERSION}; the runner said ${event.contract ?? 'none'}.`,
+    };
+  }
+  const differs = (configured: string | null, reported: string) =>
+    configured !== null &&
+    (reported.length < 7 || !configured.startsWith(reported.slice(0, configured.length)));
+  if (differs(config.runnerCommit, event.commit) || differs(config.filmCommit, event.filmCommit)) {
+    return {
+      code: 'runner_outdated',
+      detail: 'The runner runs other commits than this website was deployed with.',
+    };
+  }
+  if (!(ADAPTERS as readonly string[]).includes(event.adapter ?? '')) {
+    return { code: 'runner_outdated', detail: 'The runner named no adapter this website knows.' };
+  }
+  if (event.adapter !== 'film' && !config.allowStandIn) {
+    return { code: 'runner_standin', detail: 'Only the real film command may make a film here.' };
+  }
+  return null;
 }

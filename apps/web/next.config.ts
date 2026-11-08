@@ -3,7 +3,7 @@ import type { NextConfig } from 'next';
 
 const nextConfig: NextConfig = {
   // Workspace packages export TypeScript source.
-  transpilePackages: ['@boiler-room/schema'],
+  transpilePackages: ['@boiler-room/schema', '@boiler-room/film-runner'],
   poweredByHeader: false,
   // `next dev` would otherwise write apps/web/AGENTS.md whenever an AI agent runs it, leaving the
   // tree dirty, and `pnpm web:deploy:*` deploys only a clean tree. The repo's own agent rules live

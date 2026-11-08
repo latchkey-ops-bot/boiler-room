@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { getDb } from '../src/db/client.ts';
 import { filmRuns, films, runnerControl } from '../src/db/schema.ts';
 import type { Principal } from '../src/server/api/context.ts';
-import { createFilm, listFilms } from '../src/server/api/films.ts';
+import { createFilm, listFilms, reviewScript } from '../src/server/api/films.ts';
 import { startWorkerEnv } from './helpers.ts';
 import { body, type Harness, runnerClient, runnerHarness } from './runner-helpers.ts';
 
@@ -39,6 +39,19 @@ async function expectRefused(promise: Promise<unknown>, status: number, code: st
   expect(error).toMatchObject({ status, code });
 }
 
+const approval = {
+  decision: 'approve' as const,
+  version: 1,
+  hookId: null,
+  ctaId: 'start-free',
+  formats: ['16:9' as const],
+  // The sample script's one claim nobody had confirmed.
+  confirmedClaimIds: ['pricing'],
+};
+
+const runOf = (harness: Harness, filmId: string) =>
+  harness.db.query.filmRuns.findFirst({ where: eq(filmRuns.filmId, filmId) });
+
 /** Takes a film through its script phase to the approval pause. */
 async function toApproval(harness: Harness, filmId: string) {
   const run = await harness.db.query.filmRuns.findFirst({ where: eq(filmRuns.filmId, filmId) });
@@ -51,7 +64,7 @@ async function toApproval(harness: Harness, filmId: string) {
   );
   const { fileId } = (await body(upload)) as { fileId: string };
   await runner.events('script', [
-    { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: 0 },
+    { type: 'script_ready', version: 1, campaignFileId: fileId, unconfirmedClaims: [] },
     { type: 'runner.exit', exitCode: 0, signal: null, durationMs: 1 },
   ]);
   await harness.flush();
@@ -106,9 +119,85 @@ describe('real-film caps', () => {
     expect(second.film.pipeline).toBe('naive');
     await harness.flush();
     await toApproval(harness, second.film.id);
-    // Two live films count at their full $2.50 cap: a third would pass $5.00 for the founder.
-    await expectRefused(createFilm(ctx, { url: 'three.com' }), 429, 'daily_cap');
-    expect(harness.naive.calls.filter((call) => call.op === 'create')).toHaveLength(2);
+    // Two scripts waiting count at what they spent, not their caps: a third film still fits.
+    const third = await createFilm(ctx, { url: 'three.com' });
+    expect(third.film.pipeline).toBe('naive');
+    await harness.flush();
+    expect(harness.naive.calls.filter((call) => call.op === 'create')).toHaveLength(3);
+  });
+
+  it('checks the founder’s one film at work again when a waiting script is approved', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId] });
+    const ctx = await harness.context(user);
+    const waiting = await createFilm(ctx, { url: 'waiting.com' });
+    await harness.flush();
+    await toApproval(harness, waiting.film.id);
+    // While A waits, B starts, as the cap allows: A's computer is paused.
+    const working = await createFilm(ctx, { url: 'working.com' });
+    await harness.flush();
+    expect((await runOf(harness, working.film.id))?.state).toBe('launching');
+    // Approving A now would put two of the founder's films at work at once.
+    await expectRefused(reviewScript(ctx, waiting.film.id, approval), 429, 'too_many_films');
+    expect((await runOf(harness, waiting.film.id))?.state).toBe('awaiting_approval');
+    expect(harness.naive.calls.filter((call) => call.op === 'resume')).toHaveLength(0);
+    // Once B reaches its own script, A may go on.
+    await toApproval(harness, working.film.id);
+    await reviewScript(ctx, waiting.film.id, approval);
+    await harness.flush();
+    expect(await runOf(harness, waiting.film.id)).toMatchObject({
+      state: 'launching',
+      phase: 'render',
+    });
+  });
+
+  it('never lets scripts nobody approves block every new film for days', async () => {
+    const alice = newUser();
+    const bob = newUser();
+    const carol = newUser();
+    const harness = runnerHarness(proxy, {
+      realUsers: [alice.userId, bob.userId, carol.userId],
+    });
+    for (const [person, url] of [
+      [alice, 'alice.com'],
+      [bob, 'bob.com'],
+    ] as const) {
+      const film = await createFilm(await harness.context(person), { url });
+      await harness.flush();
+      await toApproval(harness, film.film.id);
+    }
+    // Both scripts wait. Counted at their full caps they would leave no room in staging's $5.25
+    // day for 72 hours; at what they spent, Carol's film starts.
+    harness.clock.advance(3600);
+    const carols = await createFilm(await harness.context(carol), { url: 'carol.com' });
+    expect(carols.film.pipeline).toBe('naive');
+  });
+
+  it('reserves the rest of a film’s cap when it is approved, and refuses one that does not fit', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId] });
+    const ctx = await harness.context(user);
+    const film = await createFilm(ctx, { url: 'late.com' });
+    await harness.flush();
+    await toApproval(harness, film.film.id);
+    // Meanwhile another film of the founder's ended having spent $3.00 of the $5.00 day.
+    const other = await createFilm(ctx, { url: 'other.com' });
+    await harness.db
+      .update(filmRuns)
+      .set({ state: 'ended', costCrewMicroUsd: 2_600_000, costComputeMicroUsd: 400_000 })
+      .where(eq(filmRuns.filmId, other.film.id));
+    await harness.db.update(films).set({ status: 'failed' }).where(eq(films.id, other.film.id));
+    // The rest of the waiting film's $2.50 does not fit what is left of the day.
+    await expectRefused(reviewScript(ctx, film.film.id, approval), 429, 'daily_cap');
+    expect((await runOf(harness, film.film.id))?.state).toBe('awaiting_approval');
+    // A day later it does.
+    harness.clock.advance(24 * 3600 + 60);
+    await reviewScript(await harness.context(user), film.film.id, approval);
+    await harness.flush();
+    expect(await runOf(harness, film.film.id)).toMatchObject({
+      state: 'launching',
+      phase: 'render',
+    });
   });
 
   it('lets one real film hold the crew’s Researcher at a time, across every founder', async () => {
@@ -139,9 +228,12 @@ describe('real-film caps', () => {
     expect(harness.naive.calls.filter((call) => call.op === 'create')).toHaveLength(1);
   });
 
-  it('counts what ended films really spent against the day', async () => {
+  it('counts what ended films really spent against the day, and films at work at their cap', async () => {
     const user = newUser();
-    const harness = runnerHarness(proxy, { realUsers: [user.userId] });
+    const harness = runnerHarness(proxy, {
+      realUsers: [user.userId],
+      vars: { MAX_REAL_PER_ACCOUNT: '5' },
+    });
     const ctx = await harness.context(user);
     const first = await createFilm(ctx, { url: 'spent.com' });
     // It ended having spent $4.00 of the founder's $5.00 day: $2.50 more does not fit.
@@ -156,13 +248,14 @@ describe('real-film caps', () => {
     const tomorrow = await createFilm(await harness.context(user), { url: 'tomorrow.com' });
     expect(tomorrow.film.pipeline).toBe('naive');
     await harness.flush();
-    await toApproval(harness, tomorrow.film.id);
-    // Still waiting for approval two days on, it counts at its full cap: $2.50 + $2.50 fits the
-    // $5.00 day, and a third would not.
+    const rendering = { state: 'render_running', phase: 'render' as const };
+    await harness.db.update(filmRuns).set(rendering).where(eq(filmRuns.filmId, tomorrow.film.id));
+    // A film at work counts at its full cap however long ago it started: two days on, $2.50 +
+    // $2.50 fits the $5.00 day, and a third would not.
     harness.clock.advance(2 * 24 * 3600);
     const next = await createFilm(await harness.context(user), { url: 'later.com' });
     await harness.flush();
-    await toApproval(harness, next.film.id);
+    await harness.db.update(filmRuns).set(rendering).where(eq(filmRuns.filmId, next.film.id));
     await expectRefused(
       createFilm(await harness.context(user), { url: 'third.com' }),
       429,

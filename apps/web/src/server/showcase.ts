@@ -38,6 +38,7 @@ export async function showcaseFilms(
     eq(films.showcaseOptIn, true),
     eq(films.status, 'done'),
     ne(films.pipeline, 'simulated'),
+    eq(films.standIn, false),
   );
   const house = houseAccountId
     ? await db
@@ -115,6 +116,7 @@ export async function showcaseVideo(
       eq(films.showcaseOptIn, true),
       eq(films.status, 'done'),
       ne(films.pipeline, 'simulated'),
+      eq(films.standIn, false),
     ),
   });
   if (!film) return missing();
@@ -196,7 +198,12 @@ export async function hasShowcaseFilms(db: Db): Promise<boolean> {
     .select({ id: films.id })
     .from(films)
     .where(
-      and(eq(films.showcaseOptIn, true), eq(films.status, 'done'), ne(films.pipeline, 'simulated')),
+      and(
+        eq(films.showcaseOptIn, true),
+        eq(films.status, 'done'),
+        ne(films.pipeline, 'simulated'),
+        eq(films.standIn, false),
+      ),
     )
     .limit(1);
   return row !== undefined;

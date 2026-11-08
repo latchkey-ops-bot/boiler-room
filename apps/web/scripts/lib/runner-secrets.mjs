@@ -8,10 +8,19 @@ export const RUNNER_SECRETS = [
   { name: 'RUNNER_SIGNING_SECRET', from: 'STAGING_RUNNER_SIGNING_SECRET', optional: false },
   // Empty until the founder has signed in once and his Clerk user id is known.
   { name: 'REAL_FILM_USERS', from: 'STAGING_REAL_FILM_USERS', optional: true },
+  // The film command's key, which the website sends with each launch. The stand-in needs none.
+  { name: 'NAIVE_RUNNER_KEY', from: 'STAGING_NAIVE_RUNNER_KEY', optional: true },
 ];
 
 /** The only scopes the website's Naive key may hold. */
 export const WEB_KEY_SCOPES = ['billing:read', 'computers:write'];
+
+/**
+ * The runner's key, sent to the film command with each launch. Sessions and agents only: no
+ * computers, so a film computer's key cannot make or reach another computer, and no
+ * `agents:write`, since the film command runs with `--no-sync`.
+ */
+export const RUNNER_KEY_SCOPES = ['agents:read', 'sessions:read', 'sessions:write'];
 
 /**
  * Which real-film secrets to set on `env`, and what is wrong. `problems` stop the sync; an empty
@@ -34,6 +43,13 @@ export function runnerSecretsFor(vars, env) {
   const admin = read('NAIVE_API_KEY');
   if (webKey && admin && webKey === admin) {
     problems.push('STAGING_NAIVE_WEB_KEY is the admin key. Mint a scoped key for the website.');
+  }
+  const runnerKey = found.find((secret) => secret.name === 'NAIVE_RUNNER_KEY')?.value;
+  if (runnerKey && admin && runnerKey === admin) {
+    problems.push('STAGING_NAIVE_RUNNER_KEY is the admin key. Mint a scoped key for the runner.');
+  }
+  if (runnerKey && webKey && runnerKey === webKey) {
+    problems.push('STAGING_NAIVE_RUNNER_KEY is the website key. The runner gets its own.');
   }
   const signing = found.find((secret) => secret.name === 'RUNNER_SIGNING_SECRET')?.value;
   if (signing && signing.length < 32) {
@@ -83,4 +99,54 @@ export async function checkWebKey(
     return `STAGING_NAIVE_WEB_KEY must hold exactly ${WEB_KEY_SCOPES.join(' and ')}.`;
   }
   return null;
+}
+
+/**
+ * Asks Naive what the runner's key may do. Null when it holds no scope beyond `RUNNER_KEY_SCOPES`,
+ * or the problem: a film computer holds this key, so it must not reach computers or billing.
+ */
+export async function checkRunnerKey(
+  key,
+  { fetch: get = fetch, baseUrl = 'https://api.vetta.sh' } = {},
+) {
+  let response;
+  try {
+    response = await get(`${baseUrl}/v1/me`, {
+      headers: {
+        authorization: `Bearer ${key}`,
+        'vetta-version': '2026-09-30',
+        accept: 'application/json',
+      },
+    });
+  } catch {
+    return 'Naive could not be reached to check STAGING_NAIVE_RUNNER_KEY.';
+  }
+  if (!response.ok) return `Naive refused STAGING_NAIVE_RUNNER_KEY (${response.status}).`;
+  const identity = await response.json().catch(() => null);
+  const extra = (identity?.scopes ?? ['?']).filter((scope) => !RUNNER_KEY_SCOPES.includes(scope));
+  return extra.length > 0
+    ? `STAGING_NAIVE_RUNNER_KEY holds ${extra.join(', ')}, beyond ${RUNNER_KEY_SCOPES.join(', ')}.`
+    : null;
+}
+
+/** The one contract file, relative to the repo. */
+export const CONTRACT_FILE = 'services/film-runner/src/contract.ts';
+
+/**
+ * Why a deploy would talk to runners it cannot understand, or null. The base snapshot runs the
+ * runner at `RUNNER_COMMIT`; the contract it was built with must be the one being deployed, byte
+ * for byte, or every real film fails at its hello. `show(commit, path)` reads a file at a commit.
+ */
+export function contractDrift(vars, workingContract, show) {
+  const commit = vars.RUNNER_COMMIT ?? '';
+  if (!vars.RUNNER_SNAPSHOT_ID) return null;
+  if (!/^[0-9a-f]{40}$/.test(commit)) {
+    return 'RUNNER_SNAPSHOT_ID is set but RUNNER_COMMIT is not a full commit.';
+  }
+  const built = show(commit, CONTRACT_FILE);
+  if (built === null) return `${commit.slice(0, 12)} is not here. Run git fetch origin.`;
+  // Byte for byte, but for the trailing newline `git show` output loses.
+  return built.trimEnd() === workingContract.trimEnd()
+    ? null
+    : `${CONTRACT_FILE} differs from the one the snapshot's runner (${commit.slice(0, 12)}) was built with. Rebuild the snapshot, or deploy that contract.`;
 }

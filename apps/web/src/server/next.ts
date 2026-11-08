@@ -1,6 +1,5 @@
 import { auth } from '@clerk/nextjs/server';
 import { getCloudflareContext } from '@opennextjs/cloudflare';
-import { getDb } from '../db/client.ts';
 import {
   type ApiContext,
   type Bindings,
@@ -8,11 +7,9 @@ import {
   type Principal,
   pipelineKindFor,
   type Runtime,
-  runnerDeps,
 } from './api/context.ts';
 import { makeRoute } from './api/route.ts';
 import { pipelineKindFrom } from './pipeline/index.ts';
-import type { RunnerDeps } from './runner/runs.ts';
 
 /** The Clerk caller, or null when signed out. */
 export async function currentPrincipal(): Promise<Principal | null> {
@@ -37,12 +34,6 @@ export const route = makeRoute({
   bindings: workerBindings,
   runtime: workerRuntime,
 });
-
-/** What the runner's signed routes run with. They have no Clerk caller. */
-export function workerRunnerDeps(): RunnerDeps {
-  const bindings = workerBindings();
-  return runnerDeps(bindings, getDb(bindings.DB), () => new Date(), workerRuntime());
-}
 
 /** Sends a signed-out visitor to sign in, and back here afterwards. */
 export async function requireSignedIn(): Promise<Principal> {

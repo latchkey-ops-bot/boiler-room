@@ -101,6 +101,10 @@ export const FAILURE_MESSAGES: Record<string, string> = {
   tripwire: 'Real films are paused while we check our spending, so this film stopped.',
   approval_expired: 'The script waited 3 days for you, so this film was closed.',
   invalid_campaign: "The Director's script did not pass its checks, so this film stopped.",
+  runner_outdated:
+    "The crew's computer runs another version of the crew than this website, so this film stopped. Start a new video to try again.",
+  runner_standin:
+    "The crew's computer runs a test stand-in instead of the crew, so this film stopped.",
   stopped: 'This film was stopped.',
 };
 

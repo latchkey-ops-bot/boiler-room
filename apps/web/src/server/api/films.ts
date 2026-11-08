@@ -75,7 +75,10 @@ export interface FilmView {
   status: Film['status'];
   stage: Film['stage'];
   pipeline: Film['pipeline'];
-  /** True for a film the SimulatedPipeline made. Every screen labels it. */
+  /**
+   * True for a film the SimulatedPipeline made, or a real film whose computer ran the stand-in film
+   * command instead of the crew. Every screen labels it, and it never goes on the showcase.
+   */
   simulated: boolean;
   scriptVersion: number;
   chosenHook: string | null;
@@ -155,7 +158,7 @@ export function filmView(film: Film): FilmView {
     status: film.status,
     stage: film.stage,
     pipeline: film.pipeline,
-    simulated: film.pipeline === 'simulated',
+    simulated: film.pipeline === 'simulated' || film.standIn,
     scriptVersion: film.scriptVersion,
     chosenHook: film.chosenHook,
     chosenCta: film.chosenCta,

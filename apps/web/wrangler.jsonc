@@ -21,7 +21,8 @@
   //
   // Real films (docs/deploy.md, "Real films on staging") need the RUNNER_ vars below plus three
   // secrets: NAIVE_WEB_KEY, RUNNER_SIGNING_SECRET and REAL_FILM_USERS. Missing any, every new film
-  // is simulated, or answers 503 where PIPELINE is naive.
+  // is simulated, or answers 503 where PIPELINE is naive. NAIVE_RUNNER_KEY, the film command's own
+  // key, is a fourth, needed only once the snapshot runs the real film command.
   "vars": {
     "APP_ENV": "development",
     "PIPELINE": "simulated",
@@ -61,7 +62,11 @@
         "GLOBAL_DAILY_CAP_USD": "5.25",
         "MAX_REAL_PER_ACCOUNT": "1",
         "MAX_REAL_GLOBAL": "1",
-        "RUNNER_REVISE_SUPPORTED": "false"
+        "RUNNER_REVISE_SUPPORTED": "false",
+        // The snapshot runs the stand-in until the film command on feat/crew-agents has --phase
+        // and --events. A stand-in film is labelled simulated everywhere. Set "false" once the
+        // snapshot is rebuilt with --adapter film.
+        "RUNNER_ALLOW_STANDIN": "true"
       },
       // The real-film watchdog: destroys stuck computers, enforces deadlines and caps.
       "triggers": { "crons": ["* * * * *"] },

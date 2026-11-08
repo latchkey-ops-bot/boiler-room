@@ -6,7 +6,8 @@
 //
 // Staging also gets the real-film secrets (scripts/lib/runner-secrets.mjs), each from its STAGING_
 // name only. The website's Naive key is checked with Naive first: it must hold exactly
-// computers:write and billing:read, and it must not be the admin key. Production gets none.
+// computers:write and billing:read, and it must not be the admin key. The runner's key, when there
+// is one, may hold nothing beyond sessions and agents:read. Production gets none.
 import {
   bin,
   ENV_FILE,
@@ -19,7 +20,7 @@ import {
   valueFor,
   WORKER_SECRETS,
 } from './lib/env.mjs';
-import { checkWebKey, runnerSecretsFor } from './lib/runner-secrets.mjs';
+import { checkRunnerKey, checkWebKey, runnerSecretsFor } from './lib/runner-secrets.mjs';
 
 const env = environmentArg();
 const vars = readEnvFile();
@@ -37,6 +38,11 @@ if (runner.problems.length > 0) fail(`Real-film secrets: ${runner.problems.join(
 const webKey = runner.values.find(([name]) => name === 'NAIVE_WEB_KEY')?.[1];
 if (webKey) {
   const problem = await checkWebKey(webKey);
+  if (problem) fail(problem);
+}
+const runnerKey = runner.values.find(([name]) => name === 'NAIVE_RUNNER_KEY')?.[1];
+if (runnerKey) {
+  const problem = await checkRunnerKey(runnerKey);
   if (problem) fail(problem);
 }
 if (env === 'staging' && runner.values.length === 0) {

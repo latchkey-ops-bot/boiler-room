@@ -54,13 +54,15 @@ export async function loadMyShowcase(): Promise<MyShowcase | null> {
   try {
     const ctx = await createContext(principal, workerBindings());
     const mine = await ctx.db
-      .select({ pipeline: films.pipeline, status: films.status })
+      .select({ pipeline: films.pipeline, status: films.status, standIn: films.standIn })
       .from(films)
       .where(and(eq(films.accountId, ctx.account.id), eq(films.showcaseOptIn, true)));
     if (mine.length === 0) return null;
     return {
-      shown: mine.filter((film) => film.pipeline !== 'simulated' && film.status === 'done').length,
-      simulated: mine.filter((film) => film.pipeline === 'simulated').length,
+      shown: mine.filter(
+        (film) => film.pipeline !== 'simulated' && !film.standIn && film.status === 'done',
+      ).length,
+      simulated: mine.filter((film) => film.pipeline === 'simulated' || film.standIn).length,
     };
   } catch (error) {
     console.error('Showcase: could not read your films', error);

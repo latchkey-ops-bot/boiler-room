@@ -17,10 +17,17 @@ import {
   signedHeaders,
   signParts,
   signWatchdog,
+  UPLOAD_KINDS,
   variantKey,
   verifyParts,
 } from '../src/server/runner/contract.ts';
-import { watchdogRoute } from '../src/server/runner/routes.ts';
+import { readAtMost, watchdogRoute } from '../src/server/runner/routes.ts';
+import {
+  boundAppRequest,
+  isRunnerPath,
+  MAX_APP_BODY_BYTES,
+  runnerFetch,
+} from '../src/server/runner/worker-routes.ts';
 import { startWorkerEnv } from './helpers.ts';
 import { body, type Harness, runnerClient, runnerHarness, SECRET } from './runner-helpers.ts';
 
@@ -94,12 +101,12 @@ describe('the signature contract', () => {
   });
 
   it('pins the per-run key and a signature, so the runner can check its copy against them', async () => {
-    const key = await deriveRunKey('master', parts.filmId, parts.runId);
+    const key = await deriveRunKey(SECRET, parts.filmId, parts.runId);
     expect(key).toMatch(/^[0-9a-f]{64}$/);
-    expect(await deriveRunKey('master', parts.filmId, parts.runId)).toBe(key);
-    expect(await deriveRunKey('master', parts.filmId, 'run_other0000000000000')).not.toBe(key);
-    expect(await deriveRunKey('master', 'flm_other0000000000000', parts.runId)).not.toBe(key);
-    expect(await deriveWatchdogKey('master')).not.toBe(key);
+    expect(await deriveRunKey(SECRET, parts.filmId, parts.runId)).toBe(key);
+    expect(await deriveRunKey(SECRET, parts.filmId, 'run_other0000000000000')).not.toBe(key);
+    expect(await deriveRunKey(SECRET, 'flm_other0000000000000', parts.runId)).not.toBe(key);
+    expect(await deriveWatchdogKey(SECRET)).not.toBe(key);
     const signature = await signParts(key, parts);
     expect(signature).toMatch(/^v1=[0-9a-f]{64}$/);
     expect(await verifyParts(key, parts, signature)).toBe(true);
@@ -456,7 +463,7 @@ describe('the watchdog route', () => {
     expect(await body(ok)).toHaveProperty('actions');
     const again = await route(new Request(url, { method: 'POST', headers, body: tick }));
     expect(again.status).toBe(409);
-    const wrong = await signWatchdog('another-secret', url, tick, now);
+    const wrong = await signWatchdog('another-secret-that-is-long-enough-to-use', url, tick, now);
     expect(
       (await route(new Request(url, { method: 'POST', headers: wrong, body: tick }))).status,
     ).toBe(401);
@@ -482,5 +489,119 @@ describe('the watchdog route', () => {
         )
       ).status,
     ).toBe(401);
+  });
+});
+
+describe('the runner routes in front of OpenNext', () => {
+  const env = () => ({ DB: proxy.env.DB, FILMS: proxy.env.FILMS });
+  const ctx = { waitUntil: () => undefined };
+
+  /** A body that fails the test if anything reads it. */
+  const unread = () =>
+    new ReadableStream<Uint8Array>({
+      pull() {
+        throw new Error('The body was read.');
+      },
+    });
+
+  it('answers an unsigned 90 MiB upload from its headers alone, without reading the body', async () => {
+    const harness = runnerHarness(proxy);
+    const request = new Request(
+      'https://staging.test/api/runner/v1/films/flm_aaaaaaaaaaaaaaaaaaaa/files?kind=mp4',
+      {
+        method: 'PUT',
+        headers: { 'content-length': String(90 * 1024 * 1024), 'content-type': 'video/mp4' },
+        body: unread(),
+        duplex: 'half',
+      } as RequestInit,
+    );
+    const response = await runnerFetch(request, env(), ctx, harness.deps);
+    expect(response.status).toBe(400);
+    expect(await body(response)).toMatchObject({ error: { code: 'bad_signature_headers' } });
+  });
+
+  it('routes only the runner’s own calls, each with its one method', async () => {
+    const harness = runnerHarness(proxy);
+    const call = (method: string, path: string) =>
+      runnerFetch(new Request(`https://staging.test${path}`, { method }), env(), ctx, harness.deps);
+    expect(isRunnerPath('/api/runner/v1/films/x/hello')).toBe(true);
+    expect(isRunnerPath('/api/runnerish')).toBe(false);
+    expect((await call('GET', '/api/runner/v1/films/flm_aaaaaaaaaaaaaaaaaaaa/hello')).status).toBe(
+      405,
+    );
+    expect((await call('GET', '/api/runner/v1/watchdog')).status).toBe(405);
+    expect((await call('POST', '/api/runner/v1/films/flm_x/elsewhere')).status).toBe(404);
+  });
+
+  it('refuses a JSON body over its limit as it reads, with or without a length', async () => {
+    const big = new Uint8Array(300 * 1024);
+    const chunked = new Request('https://staging.test/x', {
+      method: 'POST',
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(big);
+          controller.close();
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit);
+    await expect(readAtMost(chunked, 256 * 1024)).rejects.toMatchObject({ status: 413 });
+    const small = new Request('https://staging.test/x', { method: 'POST', body: '{"a":1}' });
+    expect(new TextDecoder().decode(await readAtMost(small, 256 * 1024))).toBe('{"a":1}');
+  });
+
+  it('turns away a body over 1 MiB for any other route before OpenNext reads it', async () => {
+    const declared = new Request('https://staging.test/api/films', {
+      method: 'POST',
+      headers: { 'content-length': String(MAX_APP_BODY_BYTES + 1) },
+      body: unread(),
+      duplex: 'half',
+    } as RequestInit);
+    const refused = boundAppRequest(declared);
+    expect(refused).toBeInstanceOf(Response);
+    expect((refused as Response).status).toBe(413);
+    const fine = new Request('https://staging.test/api/films', {
+      method: 'POST',
+      headers: { 'content-length': '2' },
+      body: '{}',
+    });
+    expect(boundAppRequest(fine)).toBe(fine);
+    const endless = new Request('https://staging.test/api/films', {
+      method: 'POST',
+      body: new ReadableStream({
+        pull(controller) {
+          controller.enqueue(new Uint8Array(64 * 1024));
+        },
+      }),
+      duplex: 'half',
+    } as RequestInit);
+    const bounded = boundAppRequest(endless) as Request;
+    await expect(bounded.arrayBuffer()).rejects.toThrow(/too large/);
+  });
+
+  it('caps an MP4 at 60 MiB, the one limit both ends read', () => {
+    expect(UPLOAD_KINDS.mp4.maxBytes).toBe(60 * 1024 * 1024);
+  });
+});
+
+describe('a runner the website will not take', () => {
+  it('fails the film at once when the runner speaks another contract', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { run, runner } = await realFilm(harness, user);
+    const refused = await runner.hello(null, { contract: undefined });
+    expect(refused.status).toBe(409);
+    expect(await body(refused)).toMatchObject({ error: { code: 'runner_mismatch' } });
+    await harness.flush();
+    const failed = await harness.db.query.filmRuns.findFirst({ where: eq(filmRuns.id, run.id) });
+    expect(failed).toMatchObject({ failureCode: 'runner_outdated', launchAttempts: 1 });
+  });
+
+  it('keeps a hello that names its phase only when it is the run’s', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, { realUsers: [user.userId], vars: ROOMY });
+    const { runner } = await realFilm(harness, user);
+    expect((await runner.hello('render')).status).toBe(409);
+    expect((await runner.hello(null)).status).toBe(200);
   });
 });

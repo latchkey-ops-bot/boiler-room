@@ -5,8 +5,8 @@ import { clerkMiddleware } from '@clerk/nextjs/server';
  * resource, as Clerk 7 recommends instead of path matching here: the app layout and every app page
  * send a signed-out visitor to sign in (src/server/next.ts), and every API route answers 401
  * (src/server/api/route.ts). The runner's routes under `/api/runner/` are left out: a film's
- * computer has no Clerk session, and each call is checked against its HMAC signature instead
- * (src/server/runner/routes.ts).
+ * computer has no Clerk session, and each call is checked against its HMAC signature instead.
+ * `worker.ts` serves them before Next ever sees the request (src/server/runner/worker-routes.ts).
  *
  * This is `middleware.ts`, not Next 16's `proxy.ts`, on purpose: proxy always runs on the Node.js
  * runtime, and the OpenNext Cloudflare adapter supports only Edge middleware. Keep it until the

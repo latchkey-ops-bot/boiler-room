@@ -43,11 +43,26 @@ export const TERMINAL_STATES = ['done', 'failed', 'ended'] as const;
 
 export const isTerminal = (state: string) => (TERMINAL_STATES as readonly string[]).includes(state);
 
-/** Which runner calls each state accepts. Anything else is `409 wrong_state`. */
+/**
+ * Which runner calls each state accepts. Anything else is `409 wrong_state`. Events are taken
+ * between phases and while a launch waits for its hello too, but only a past launch's (`isStale`
+ * in events.ts), which are kept and change nothing: the script runner's last batch can arrive
+ * after the founder has approved.
+ */
 export const ACCEPTS: Record<'hello' | 'instructions' | 'events', readonly RunState[]> = {
   hello: ['launching', 'script_running', 'render_running'],
   instructions: ['launching', 'script_running', 'render_running', 'stopping'],
-  events: ['script_running', 'render_running', 'script_ready', 'delivering', 'stopping'],
+  events: [
+    'launching',
+    'script_running',
+    'render_running',
+    'script_ready',
+    'awaiting_approval',
+    'render_queued',
+    'revise_queued',
+    'delivering',
+    'stopping',
+  ],
 };
 
 /** How long each phase may run, from the runner's hello. */
