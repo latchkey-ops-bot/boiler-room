@@ -8,6 +8,7 @@ import { proofBars } from './proof-bars.tsx';
 import { siteHero } from './site-hero.tsx';
 import { siteScroll } from './site-scroll.tsx';
 import { statCounter } from './stat-counter.tsx';
+import { tileWall } from './tile-wall.tsx';
 import { typeCard } from './type-card.tsx';
 import { wordSlam } from './word-slam.tsx';
 
@@ -26,6 +27,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'proof-bars': proofBars,
   'stat-counter': statCounter,
   'feature-card': featureCard,
+  'tile-wall': tileWall,
   'colour-event': colourEventScene,
   'end-card': endCard,
 };
