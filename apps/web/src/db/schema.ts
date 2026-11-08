@@ -144,8 +144,40 @@ export const deliverables = sqliteTable(
     bytes: integer('bytes'),
     durationSeconds: integer('duration_seconds'),
     createdAt: timestamp('created_at').notNull(),
+    /**
+     * The script version the file was cut from. A revision delivers a new set, and the earlier
+     * files stay. 0 on files delivered before versions were recorded.
+     */
+    scriptVersion: integer('script_version').notNull().default(0),
   },
-  (t) => [uniqueIndex('deliverables_film_variant_unique').on(t.filmId, t.variantKey)],
+  (t) => [
+    uniqueIndex('deliverables_film_version_variant_unique').on(
+      t.filmId,
+      t.scriptVersion,
+      t.variantKey,
+    ),
+  ],
+);
+
+/**
+ * The customer asked for changes to a delivered film. One per delivered version: the Account
+ * Manager takes the note to the crew, and the next version comes back for approval.
+ */
+export const revisions = sqliteTable(
+  'revisions',
+  {
+    id: text('id').primaryKey(),
+    filmId: text('film_id')
+      .notNull()
+      .references(() => films.id, { onDelete: 'cascade' }),
+    /** The delivered version the customer wants changed. */
+    scriptVersion: integer('script_version').notNull(),
+    note: text('note').notNull(),
+    /** The Clerk user who asked. */
+    requestedBy: text('requested_by').notNull(),
+    requestedAt: timestamp('requested_at').notNull(),
+  },
+  (t) => [uniqueIndex('revisions_film_version_unique').on(t.filmId, t.scriptVersion)],
 );
 
 export type Account = typeof accounts.$inferSelect;
@@ -153,3 +185,4 @@ export type Film = typeof films.$inferSelect;
 export type FilmEvent = typeof filmEvents.$inferSelect;
 export type Approval = typeof approvals.$inferSelect;
 export type Deliverable = typeof deliverables.$inferSelect;
+export type Revision = typeof revisions.$inferSelect;

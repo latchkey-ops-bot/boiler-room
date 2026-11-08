@@ -29,6 +29,12 @@ export interface PipelineClient {
   sendBackScript(runId: string, input: { version: number; note: string }): Promise<void>;
   /** The finished files. Empty until the film is delivered. */
   deliverables(runId: string): Promise<PipelineDeliverable[]>;
+  /**
+   * The customer asked for changes to delivered version `version`. The Account Manager takes the
+   * note to the crew, and the run goes back to the script: the customer approves the next version
+   * before anything renders again.
+   */
+  requestRevision(runId: string, input: { version: number; note: string }): Promise<void>;
 }
 
 export interface ScriptApproval {
@@ -76,6 +82,8 @@ export interface PipelineDeliverable {
   r2Key: string | null;
   bytes: number | null;
   durationSeconds: number | null;
+  /** The script version this file was cut from. A revision delivers a new set of files. */
+  scriptVersion: number;
 }
 
 /** The pipeline refused a step because the run is not where the caller thought. */

@@ -41,6 +41,10 @@ export class NaivePipeline implements PipelineClient {
   async deliverables(_runId: string): Promise<PipelineDeliverable[]> {
     throw notWired();
   }
+
+  async requestRevision(_runId: string, _input: { version: number; note: string }): Promise<void> {
+    throw notWired();
+  }
 }
 
 function notWired(): PipelineUnavailableError {
