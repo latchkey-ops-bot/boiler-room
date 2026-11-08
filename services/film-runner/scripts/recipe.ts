@@ -14,7 +14,9 @@
 
 /**
  * Remotion's Chrome libraries for Ubuntu 24.04 and the fallback fonts, as the render service
- * installs them (`services/render/src/naive/base.ts`), plus what the runner itself uses.
+ * installs them (`services/render/src/naive/base.ts`), plus what the runner itself uses, plus
+ * `ffmpeg` (which brings `ffprobe`): Quality Check reads the rendered film's frames and audio with
+ * them, and without them it fails with `spawn ffmpeg ENOENT` and never reviews the film.
  */
 export const APT_PACKAGES = [
   'libnss3',
@@ -38,6 +40,7 @@ export const APT_PACKAGES = [
   'util-linux',
   'procps',
   'ca-certificates',
+  'ffmpeg',
 ];
 
 export const PNPM_VERSION = '10.30.3';
@@ -140,8 +143,8 @@ echo "setup: done"
 const SWAPON = '$(PATH=/usr/sbin:/sbin:/usr/bin:/bin command -v swapon)';
 
 /**
- * The ready check, one exec on the builder and again on a fork: swap is there, the renderer loads
- * and its browser launches, and the runner's self-test passes. With the `film` adapter, the film
+ * The ready check, one exec on the builder and again on a fork: swap is there, `ffmpeg` and
+ * `ffprobe` run (Quality Check needs both), the renderer loads and its browser launches, and the runner's self-test passes. With the `film` adapter, the film
  * command itself answers `--help` with the runner's contract (`--phase`), run as the runner runs
  * it. On a fork (`sudoLocked`) it also checks that `sudo` grants nothing but `swapon <swapfile>`.
  * Prints `READY` last when all pass.
@@ -164,7 +167,10 @@ echo "sudo: swapon only"
 sudo -n swapon ${SWAPFILE} 2>/dev/null || true
 swapon --show=NAME --noheadings | grep -qx '${SWAPFILE}'
 echo "swap: on"
-${sudoCheck}cd "$HOME/boiler-room/services/render"
+${sudoCheck}ffmpeg -hide_banner -version > /dev/null
+ffprobe -hide_banner -version > /dev/null
+echo "ffmpeg: runs"
+cd "$HOME/boiler-room/services/render"
 node -e "import('@remotion/renderer').then(async (r) => { await r.ensureBrowser(); const b = await r.openBrowser('chrome'); await b.close({ silent: true }); console.log('browser: launches') })"
 cd "$HOME/film-runner"
 node src/main.ts --self-test${allowRunDir ? ' --allow-run-dir' : ''}
