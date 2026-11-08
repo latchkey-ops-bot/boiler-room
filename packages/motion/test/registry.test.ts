@@ -10,7 +10,7 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw eleven of the scene types in the schema registry, under its names', () => {
+  it('draw twelve of the scene types in the schema registry, under its names', () => {
     expect(IMPLEMENTED_SCENE_TYPES).toEqual([
       'word-slam',
       'logo-reveal',
@@ -21,6 +21,7 @@ describe('scene templates', () => {
       'stat-counter',
       'feature-card',
       'tile-wall',
+      'status-relay',
       'colour-event',
       'end-card',
     ]);
@@ -134,6 +135,14 @@ describe('scene templates', () => {
         kind: 'product',
         ground: 'base plate',
         anchors: [{ id: 'wall', entry: undefined, exit: undefined }],
+      },
+      'status-relay': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [
+          { id: 'actor', entry: { axis: 'x', sign: 1, v: 46 }, exit: undefined },
+          { id: 'status', entry: { axis: 'x', sign: 1, v: 46 }, exit: undefined },
+        ],
       },
       'colour-event': {
         kind: 'type',

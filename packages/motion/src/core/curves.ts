@@ -68,13 +68,14 @@ export const typeDrift = (f: number): number => 1 + 0.0013 * f;
 /**
  * `spring.pop`, for a UI node and never for type: the spring from 0.46 to 1, shown from its third
  * frame, so the first visible frame is at 0.794 and the peak, 1.066, three frames later.
+ * `from` starts it elsewhere, as an absorb does from 0.92.
  */
-export const springPop = (f: number): number =>
+export const springPop = (f: number, from = 0.46): number =>
   spring({
     frame: f + 2,
     fps: SPEC_FPS,
     config: { mass: 1, damping: 26, stiffness: 550 },
-    from: 0.46,
+    from,
     to: 1,
   });
 
