@@ -544,12 +544,131 @@ call", $4.58 of $5 spent that day by earlier runs). Each was cancelled. Of the s
 half paused on the cap too and was cancelled, leaving its tiles to the code's ranking, and the
 other half was reviewed. No session was left waiting.
 
+## One command: `pnpm film`
+
+```sh
+pnpm film https://example.com --sample                       # an outreach sample: Short, 16:9
+pnpm film https://example.com --length standard --max-usd 6  # a customer order: Standard
+pnpm film https://example.com --length short --format 9:16   # a customer's social cut: Short
+```
+
+One URL in, one finished film out, with no step that waits for a person. `src/film/run.ts` holds
+the order of the work and its limits and talks to nothing; `src/film/crew.ts` is the live crew,
+each stage the same function its own command runs.
+
+1. **Researcher** into the film's `research/` folder (`research.json`, `pages.json`,
+   `report.json`, `files/`), so Quality Check can trace every claim to the stored page text.
+2. **Director** with its validate and repair loop. The brief follows the order: `--sample` is an
+   outreach sample and a customer `--length short` a social cut, both Short by rule 1 of §1;
+   `--length standard` (the default without `--sample`) is a customer order that asks for 45 s,
+   so Long cannot apply and rule 2 still makes it Short with fewer than 3 usable claims.
+   `--sample --length standard` is refused.
+3. **Art Director**, with its own review sessions and generated images.
+4. **The render gate**: `gateCampaign` from `@boiler-room/render`, which is `validateCampaign`
+   with motion's registry and `validateFilm` in the order's format. A refusal is recorded with
+   every issue, and nothing is rendered: no computer starts.
+5. **Render** on Naive computers with `renderCampaign`. The render service reads pictures only
+   from beside the campaign, and the crew names them as Naive files, so each `naive://files/<id>`
+   is copied first from the Researcher's `files/` or the Art Director's `assets/generated/` into
+   the round's `render/assets/` (downloaded only if it is in neither), and the render reads that
+   copy.
+6. **Quality Check** on the render folder: `film.mp4`, its manifest and `film.quality/`.
+
+**Route-back.** A failed review's issues are sorted by `routable()` (no minor issue and no
+expected placeholder failure ever sends a film back). The Director's go back to the Director,
+which revises the campaign the film was rendered from (`directorRevisionTask`: that campaign, the
+issues worded as its own, and the same checks and repair loop); the Art Director then runs again
+on the revised campaign. The Art Director's own go back to it: each review whose scene an issue
+names carries the issue, and the rendered pick is the default it keeps only if no candidate fixes
+it. The film is rendered again and checked again. No round starts when any routable issue is
+motion's (no agent can change a template, so a new render would fail the same way), after 2
+route-backs, when the cap cannot pay for the round, or when the route-back left the campaign as
+it was rendered. The last film rendered stays the film, with its verdict.
+
+**The cap.** `--max-usd` (default $5) counts sessions, render computers and generated media,
+route-backs and budget-pause retries included. It is hard at two levels:
+
+| Step          | Least it needs | Most it gets | Left for the stages after it |
+| ------------- | -------------- | ------------ | ---------------------------- |
+| Researcher    | $0.30          | $1.50        | $2.30                        |
+| Director      | $1.00          | $3.50        | $1.30                        |
+| Art Director  | $0 (as code)   | $2.10        | $1.30                        |
+| Render        | $0.30          | $2.00        | $1.00                        |
+| Quality Check | $1.00          | $1.50        | $0                           |
+
+A step whose least need does not fit in what the film has left is not started, and the film says
+so. Inside a step, the Naive client it is given (`src/film/cap.ts`) holds it to its ceiling:
+every `sessions.create` is clamped to the room left, with each running session counted at its
+whole budget and each stopped one at what it used; a `sessions.send` that would wake an idle
+session is refused unless that session's whole budget still fits; and an image is generated only
+while its estimate fits. Naive stops a session at its budget, so no session can carry the film
+past its cap, however many a stage runs at once. Under $1 the Art Director runs as code alone.
+The render gets the rest as its `maxCostUsd`, which it refuses or stops at. The Researcher's
+computer time is its agent spend minus its session; a render's is the larger of its computed and
+booked cost.
+
+**Budget pauses.** After every step, each session it started goes through `closeSession`: one
+still running is interrupted, and one parked on its budget is cancelled and recorded in the
+manifest and the decisions, so none is ever left waiting for the founder. A step that failed on a
+pause it did not retry itself is retried once, smaller (the Researcher with no repair rounds);
+the Director, Art Director and Quality Check retry their own pauses smaller, as above, and are
+never retried again.
+
+**Output**, all in `out/films/<host>/<run-id>/`:
+
+| File                  | Contents                                                                                                                                                                     |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `film.mp4`            | The film: the last one rendered                                                                                                                                              |
+| `campaign.json`       | The art-directed campaign it was rendered from                                                                                                                               |
+| `qc-report.json`      | Its Quality Check report                                                                                                                                                     |
+| `manifest.json`       | State, stage, verdict, round, spend by kind against the cap, and each step's round, attempt, time, ceiling, cost, sessions, computers, pauses cancelled, files and decisions |
+| `decisions.json`      | Who decided what, and why, in order                                                                                                                                          |
+| `film-ledger.json`    | Each step's spend, in the ledger the other commands read                                                                                                                     |
+| `research/`           | The Researcher's result, page text, report, files and events                                                                                                                 |
+| `round-<n>/director/` | That round's campaign, handoff, report, submissions and events                                                                                                               |
+| `round-<n>/art/`      | `campaign.art.json`, its report, events and generated images                                                                                                                 |
+| `round-<n>/render/`   | The render campaign and its `assets/`, `film.mp4`, `film.manifest.json`, `film.quality/` and `<id>.qc/`                                                                      |
+
+A decision has the web app's words (`apps/web/src/lib/film.ts`; a test keeps them equal): `agent`
+is a crew member or `coordinator` (the command itself), `kind` is `started`, `decision`,
+`sent_back`, `passed`, `needs_you`, `delivered` or `failed`, and `stage` and `status` are the
+tracker's, so each maps onto the app's `PipelineEvent` as it is. Each has `message` (what) and
+`why`, and `data` for the facts behind it. They come from the Researcher's report, the
+validator's rounds, the Director's handoff (template and why, substitutions, tier 4 scenes,
+issues left), the Art Director's report (family and colour changes, each pick the agent made and
+why, generated images, tiles sent back), the Quality Check report, and the command (the render
+gate, route-backs, budget pauses, the cap, the delivery).
+
+Exit codes: 0 the film passed Quality Check, 3 a film was made and did not pass, 1 no film, 2 a
+usage error. Ctrl-C or SIGTERM stops the render, which destroys its computers, closes every
+session the crew started, and marks the film.
+
+## FilmOrder
+
+`src/film/order.ts` is the interface GTM and the web app order films through, importable as
+`@boiler-room/agents/film-order`. It imports nothing, not even `node:*`, so a Worker or a browser
+bundle can use it. It is GTM's `FilmOrder` (`agents/src/gtm/ports.ts` on `feat/gtm-team`), with
+`decisions(orderId)` added and optional `sample`, `length` and `format` on an order (an outreach
+sample, Short and 16:9 by default):
+
+| Implementation    | What it does                                                                                                                                                                                                                                                                                                               |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DryRunFilmOrder` | Needs no network: `queued`, `working`, then `ready` over three status reads, always `simulated`, no file and no decisions. Unchanged from GTM's                                                                                                                                                                            |
+| `LocalFilmOrder`  | Runs `pnpm film` as its own detached process per order, with `--run-id`, so any process can poll it. Orders live in `out/films/orders.json` by idempotency key. One film at a time: the Researcher's one computer takes one run at a time, so a later order is `queued` until a status read finds the earlier one finished |
+
+`LocalFilmOrder.status` reads the film's manifest: its state, stage, verdict, spend so far and,
+once ready, its script (every on-screen and voiceover line). A film whose process has gone without
+finishing reads `failed`, or `ready` with the film it had. `file` is a `file://` link to the MP4,
+checked against its SHA-256. `decisions` is `decisions.json`. `share` throws: only the web app has
+film pages. `withdraw` stops a film still being made (SIGTERM) and deletes its MP4s; it is safe
+twice.
+
 ## The film ledger and route-back limits
 
-Nothing routes Quality Check failures back to their owners yet. Whatever does must be bounded,
-because every film fails Quality Check today on motion's placeholder scenes, so "retry until it
-passes" would only stop at the agents' day caps (about $1.70 a round, and image generation is
-under no agent cap). `src/pipeline/ledger.ts` holds the bounds, and the CLIs already use them:
+`pnpm film` routes Quality Check failures back to their owners under its own limits, above. The
+single-step commands keep the ledger's: `src/pipeline/ledger.ts` holds the bounds, because every
+film still fails Quality Check on some threshold, so "retry until it passes" would only stop at the
+agents' day caps (about $1.70 a round, and image generation is under no agent cap):
 
 - `pnpm direct`, `pnpm art` and `pnpm qc` append what they spent to `film-ledger.json` beside the
   film's `campaign.json`: the Director session, the Art Director's review sessions and its
