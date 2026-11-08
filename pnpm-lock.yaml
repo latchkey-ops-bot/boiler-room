@@ -186,6 +186,46 @@ importers:
         specifier: 5.1.0
         version: 5.1.0(@types/node@24.19.2)(vite@8.3.6(@types/node@24.19.2)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
+  packages/pitch:
+    dependencies:
+      '@remotion/fonts':
+        specifier: 4.0.541
+        version: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      react:
+        specifier: 19.2.3
+        version: 19.2.3
+      react-dom:
+        specifier: 19.2.3
+        version: 19.2.3(react@19.2.3)
+      remotion:
+        specifier: 4.0.541
+        version: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      '@remotion/bundler':
+        specifier: 4.0.541
+        version: 4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/cli':
+        specifier: 4.0.541
+        version: 4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@7.0.2)
+      '@remotion/renderer':
+        specifier: 4.0.541
+        version: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@types/node':
+        specifier: 24.19.2
+        version: 24.19.2
+      '@types/react':
+        specifier: 19.2.7
+        version: 19.2.7
+      '@types/react-dom':
+        specifier: 19.2.3
+        version: 19.2.3(@types/react@19.2.7)
+      typescript:
+        specifier: 7.0.2
+        version: 7.0.2
+
   packages/schema:
     dependencies:
       zod:
@@ -5681,6 +5721,41 @@ snapshots:
       - utf-8-validate
       - webpack-cli
 
+  '@remotion/bundler@4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)':
+    dependencies:
+      '@remotion/studio': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/studio-shared': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/timeline-utils': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@rspack/core': 2.3.0(@swc/helpers@0.5.23)
+      '@rspack/plugin-react-refresh': 2.0.2(@rspack/core@2.3.0(@swc/helpers@0.5.23))(react-refresh@0.18.0)
+      css-loader: 7.1.4(@rspack/core@2.3.0(@swc/helpers@0.5.23))(webpack@5.105.0(esbuild@0.28.1))
+      esbuild: 0.28.1
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
+      react-refresh: 0.18.0
+      remotion: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      style-loader: 4.0.0(webpack@5.105.0(esbuild@0.28.1))
+      webpack: 5.105.0(esbuild@0.28.1)
+    transitivePeerDependencies:
+      - '@minify-html/node'
+      - '@module-federation/runtime-tools'
+      - '@remotion/video-matting'
+      - '@remotion/whisper-webgpu'
+      - '@swc/core'
+      - '@swc/css'
+      - '@swc/helpers'
+      - '@swc/html'
+      - bufferutil
+      - clean-css
+      - cssnano
+      - csso
+      - html-minifier-terser
+      - lightningcss
+      - postcss
+      - uglify-js
+      - utf-8-validate
+      - webpack-cli
+
   '@remotion/bundler@4.0.541(@swc/helpers@0.5.23)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)':
     dependencies:
       '@remotion/studio': 4.0.541(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -5729,6 +5804,48 @@ snapshots:
       '@remotion/renderer': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remotion/studio': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remotion/studio-server': 4.0.541(@swc/helpers@0.5.23)(postcss@8.5.32)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@7.0.2)
+      '@remotion/studio-shared': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      dotenv: 17.3.1
+      mediabunny: 1.64.0
+      minimist: 1.2.6
+      prompts: 2.4.2
+      react: 19.2.3
+      react-dom: 19.2.3(react@19.2.3)
+      remotion: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      semver: 7.5.3
+    transitivePeerDependencies:
+      - '@minify-html/node'
+      - '@module-federation/runtime-tools'
+      - '@remotion/video-matting'
+      - '@remotion/whisper-webgpu'
+      - '@swc/core'
+      - '@swc/css'
+      - '@swc/helpers'
+      - '@swc/html'
+      - bufferutil
+      - clean-css
+      - cssnano
+      - csso
+      - html-minifier-terser
+      - lightningcss
+      - postcss
+      - supports-color
+      - typescript
+      - uglify-js
+      - utf-8-validate
+      - webpack-cli
+
+  '@remotion/cli@4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@7.0.2)':
+    dependencies:
+      '@babel/parser': 7.24.1
+      '@remotion/bundler': 4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/codemods': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/licensing': 4.0.541
+      '@remotion/media-utils': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/player': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/renderer': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/studio': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/studio-server': 4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@7.0.2)
       '@remotion/studio-shared': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       dotenv: 17.3.1
       mediabunny: 1.64.0
@@ -6005,6 +6122,48 @@ snapshots:
       '@babel/parser': 7.24.1
       '@babel/types': 7.24.0
       '@remotion/bundler': 4.0.541(@swc/helpers@0.5.23)(postcss@8.5.32)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/codemods': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/renderer': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@remotion/studio-protocol': 4.0.541
+      '@remotion/studio-shared': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      '@svgr/core': 8.1.0(typescript@7.0.2)
+      '@svgr/plugin-jsx': 8.1.0(@svgr/core@8.1.0(typescript@7.0.2))
+      kiwi-schema: 0.5.0
+      memfs: 3.4.3
+      open: 8.4.2
+      recast: 0.23.21
+      remotion: 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
+      semver: 7.5.3
+      zod: 4.6.7
+    transitivePeerDependencies:
+      - '@minify-html/node'
+      - '@module-federation/runtime-tools'
+      - '@remotion/video-matting'
+      - '@remotion/whisper-webgpu'
+      - '@swc/core'
+      - '@swc/css'
+      - '@swc/helpers'
+      - '@swc/html'
+      - bufferutil
+      - clean-css
+      - cssnano
+      - csso
+      - html-minifier-terser
+      - lightningcss
+      - postcss
+      - react
+      - react-dom
+      - supports-color
+      - typescript
+      - uglify-js
+      - utf-8-validate
+      - webpack-cli
+
+  '@remotion/studio-server@4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)(typescript@7.0.2)':
+    dependencies:
+      '@babel/parser': 7.24.1
+      '@babel/types': 7.24.0
+      '@remotion/bundler': 4.0.541(@swc/helpers@0.5.23)(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remotion/codemods': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remotion/renderer': 4.0.541(react-dom@19.2.3(react@19.2.3))(react@19.2.3)
       '@remotion/studio-protocol': 4.0.541

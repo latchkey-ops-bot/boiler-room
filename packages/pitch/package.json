@@ -1,0 +1,29 @@
+{
+  "name": "@boiler-room/pitch",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "stage": "node scripts/stage-assets.mjs",
+    "studio": "node scripts/stage-assets.mjs && remotion studio src/index.ts",
+    "render": "node scripts/render.mjs",
+    "stills": "node scripts/stills.mjs",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "@remotion/fonts": "4.0.541",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.541",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@remotion/bundler": "4.0.541",
+    "@remotion/cli": "4.0.541",
+    "@remotion/renderer": "4.0.541",
+    "@types/node": "24.19.2",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "7.0.2"
+  }
+}

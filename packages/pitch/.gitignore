@@ -1,0 +1,7 @@
+# Staged by scripts/stage-assets.mjs at render time; never committed.
+public/run
+public/films
+public/logo.svg
+public/manifest.json
+public/narration.mp3
+out
