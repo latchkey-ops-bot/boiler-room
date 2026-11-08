@@ -31,6 +31,7 @@ export interface RunnerBindings {
   FILM_COMPUTE_RESERVE_USD?: string;
   ACCOUNT_DAILY_CAP_USD?: string;
   GLOBAL_DAILY_CAP_USD?: string;
+  TRIPWIRE_DAILY_FALL_USD?: string;
   MAX_REAL_PER_ACCOUNT?: string;
   MAX_REAL_GLOBAL?: string;
   /** `true` once the film command can rewrite a script from a note (`--revise`). */
@@ -63,6 +64,12 @@ export interface RunnerConfig {
   computeReserveMicroUsd: number;
   accountDailyCapMicroUsd: number;
   globalDailyCapMicroUsd: number;
+  /**
+   * The balance tripwire: the whole Naive org balance down more than this in a day halts every
+   * real film. Kept apart from the film caps, because the company's agents spend from the same
+   * balance every day without making a film.
+   */
+  tripwireDailyFallMicroUsd: number;
   maxRealPerAccount: number;
   maxRealGlobal: number;
   reviseSupported: boolean;
@@ -124,6 +131,7 @@ export function runnerConfig(bindings: RunnerBindings): RunnerConfig {
     computeReserveMicroUsd: usd(bindings.FILM_COMPUTE_RESERVE_USD, 0.5),
     accountDailyCapMicroUsd: usd(bindings.ACCOUNT_DAILY_CAP_USD, 5),
     globalDailyCapMicroUsd: usd(bindings.GLOBAL_DAILY_CAP_USD, 5.25),
+    tripwireDailyFallMicroUsd: usd(bindings.TRIPWIRE_DAILY_FALL_USD, 80),
     maxRealPerAccount: count(bindings.MAX_REAL_PER_ACCOUNT, 1),
     maxRealGlobal: count(bindings.MAX_REAL_GLOBAL, 1),
     reviseSupported: bindings.RUNNER_REVISE_SUPPORTED === 'true',

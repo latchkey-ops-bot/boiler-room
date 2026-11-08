@@ -141,8 +141,10 @@ const SWAPON = '$(PATH=/usr/sbin:/sbin:/usr/bin:/bin command -v swapon)';
 
 /**
  * The ready check, one exec on the builder and again on a fork: swap is there, the renderer loads
- * and its browser launches, and the runner's self-test passes. On a fork (`sudoLocked`) it also
- * checks that `sudo` grants nothing but `swapon <swapfile>`. Prints `READY` last when all pass.
+ * and its browser launches, and the runner's self-test passes. With the `film` adapter, the film
+ * command itself answers `--help` with the runner's contract (`--phase`), run as the runner runs
+ * it. On a fork (`sudoLocked`) it also checks that `sudo` grants nothing but `swapon <swapfile>`.
+ * Prints `READY` last when all pass.
  */
 export function readyCheck({
   allowRunDir = false,
@@ -166,6 +168,12 @@ ${sudoCheck}cd "$HOME/boiler-room/services/render"
 node -e "import('@remotion/renderer').then(async (r) => { await r.ensureBrowser(); const b = await r.openBrowser('chrome'); await b.close({ silent: true }); console.log('browser: launches') })"
 cd "$HOME/film-runner"
 node src/main.ts --self-test${allowRunDir ? ' --allow-run-dir' : ''}
+if grep -q '"adapter": "film"' "$HOME/.film-runner.json"; then
+  cd "$HOME/boiler-room"
+  help="$(CI=1 pnpm run --silent film --help)"
+  grep -qF -- '--phase script|render|all' <<<"$help"
+  echo "film command: --help answers with --phase"
+fi
 echo READY
 `;
 }

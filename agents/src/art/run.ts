@@ -393,6 +393,8 @@ export async function artDirect(options: ArtOptions): Promise<number> {
       purpose: skip.need.purpose,
       reason: skip.reason,
     })),
+    // Naive refused the key image generation (403): the captured pictures and fallbacks stand.
+    generation_unavailable: generation.unavailable ?? null,
     sent_back: sentBack,
     flags: [
       ...style.flags,

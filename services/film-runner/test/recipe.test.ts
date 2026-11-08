@@ -40,6 +40,10 @@ describe('the base snapshot recipe', () => {
     expect(check).toContain("swapon --show=NAME --noheadings | grep -qx '/swapfile'");
     expect(check).toContain("r.openBrowser('chrome')");
     expect(check).toContain('node src/main.ts --self-test');
+    // A snapshot of the real film command checks it answers with the runner's contract.
+    expect(check).toContain(`grep -q '"adapter": "film"' "$HOME/.film-runner.json"`);
+    expect(check).toContain('help="$(CI=1 pnpm run --silent film --help)"');
+    expect(check).toContain("grep -qF -- '--phase script|render|all'");
     expect(check.trim().endsWith('echo READY')).toBe(true);
   });
 
