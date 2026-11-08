@@ -36,7 +36,8 @@ export type CapName = keyof typeof CAPS;
 /** One session's budget, and the most code may raise it to when Naive quotes a higher floor. */
 export const SESSION_BUDGETS: Readonly<Record<GtmAgentName, { default: number; max: number }>> = {
   [SCOUT]: { default: 150_000, max: 300_000 },
-  [GTM_LEAD]: { default: 1_000_000, max: 1_500_000 },
+  // At most the lead's $1.00 task maximum (GTM_ACTIVE_BUDGETS): Naive refuses a session above it.
+  [GTM_LEAD]: { default: 1_000_000, max: 1_000_000 },
   [SOCIAL_AGENT]: { default: 100_000, max: 200_000 },
   [INBOX_READER]: { default: 50_000, max: 100_000 },
 };
@@ -121,6 +122,19 @@ export const SCHEDULE = [
 ] as const;
 export type PhaseName = (typeof SCHEDULE)[number]['phase'] | 'removals';
 
+/**
+ * The founder's ruling for the hackathon: no real email goes out, whatever the store's flags say.
+ * While this is true the email lane is dry run on every run (`resolveLanes`), so `gtm:flags` cannot
+ * lift it. Lifting it is a reviewed change to this line, as `GTM_ACTIVE` is.
+ */
+export const EMAIL_FORCED_DRY_RUN = true;
+
+/**
+ * The X account the founder posts the day's pack from, by hand. X refused programmatic posts from
+ * it through Naive Social, so the pack (a `FOUNDER: gtm pack <date>` card) is how GTM reaches X.
+ */
+export const X_ACCOUNT = '@boilerroomstudi';
+
 /** The minutes between compose and execute in which a person may comment HOLD. */
 export const HOLD_WINDOW_MINUTES = 45;
 
@@ -157,6 +171,8 @@ export const FOUNDER_NEEDS = [
   'lockdown',
   'reply',
   'removal',
+  'pack',
+  'hand-removal',
 ] as const;
 export type FounderNeed = (typeof FOUNDER_NEEDS)[number];
 

@@ -20,6 +20,7 @@ import {
 import {
   CEO_TOOLS_MESSAGE,
   DEPLOY_KEYS_STEPS,
+  gtmAllowed,
   judgeCeoTools,
   judgeDeployKeys,
   judgeGtmStored,
@@ -41,7 +42,17 @@ import {
   RELEASE_RULE,
   UNKNOWN_CARD_RULE,
 } from '../src/definitions/company/common.ts';
-import { GTM_ACTIVE, GTM_ACTIVE_BUDGETS, NOT_MY_TRIGGER } from '../src/definitions/company/gtm.ts';
+import {
+  BRIEF_BOARD_RULE,
+  CARD_RULE,
+  GTM_ACTIVE,
+  GTM_ACTIVE_BUDGETS,
+  GTM_CARDS,
+  GTM_ON_BOARD,
+  NOT_MY_TRIGGER,
+  onBoard,
+  triggerRule,
+} from '../src/definitions/company/gtm.ts';
 import {
   CEO_ROSTER,
   CEO_SWEEP,
@@ -178,7 +189,8 @@ describe('every company toolset', () => {
         'view_image',
       ]),
     );
-    // The GTM agents read outside content, so each may use its skill and its spend, and nothing else.
+    // The GTM agents read outside content in their briefs, so each may use its skill and its
+    // spend, and nothing else: no board tool while GTM_ON_BOARD is empty.
     for (const agent of [gtmLead, scout, social, inboxReader]) {
       expect(allowedTools(agent.tools), agent.name).toEqual(['read_skill', 'session_spend']);
     }
@@ -205,14 +217,27 @@ describe('every company toolset', () => {
 });
 
 describe('GTM', () => {
-  it.each(GTM.map((agent) => [agent.name, agent] as const))(
-    '%s has a $0 budget and starts no session that could spend while GTM_ACTIVE is false',
-    (_name, agent) => {
-      expect(GTM_ACTIVE).toBe(false);
-      expect(agent.budget).toEqual({ cap_micro_usd: 0, max_task_micro_usd: 0, period: 'day' });
-      expect(agent.session.budget_micro_usd).toBe(0);
-    },
-  );
+  it('is active, with the budgets docs/company/roles/gtm.md sets', () => {
+    expect(GTM_ACTIVE).toBe(true);
+    const budgets = Object.fromEntries(
+      GTM.map((agent) => [
+        agent.name,
+        [agent.budget.cap_micro_usd, agent.budget.max_task_micro_usd],
+      ]),
+    );
+    expect(budgets).toEqual({
+      'br-gtm-lead': [4_000_000, 1_000_000],
+      'br-scout': [5_000_000, 1_000_000],
+      'br-social': [2_000_000, 1_000_000],
+      'br-inbox-reader': [1_000_000, 150_000],
+    });
+    for (const agent of GTM) {
+      expect(agent.session.budget_micro_usd, agent.name).toBeGreaterThan(0);
+      expect(agent.session.budget_micro_usd, agent.name).toBeLessThanOrEqual(
+        agent.budget.max_task_micro_usd,
+      );
+    }
+  });
 
   it.each(GTM.map((agent) => [agent.name, agent] as const))(
     '%s has its intended budget in code, behind the activation flag',
@@ -224,7 +249,7 @@ describe('GTM', () => {
   );
 
   it.each(GTM.map((agent) => [agent.name, agent] as const))(
-    '%s has no bash, write, edit, file fetch, web, social, data or app tool, and no board',
+    '%s has no bash, write, edit, file fetch, web, social, data or app tool',
     (_name, agent) => {
       for (const tool of [
         'bash',
@@ -235,8 +260,6 @@ describe('GTM', () => {
         'browser',
         'web_fetch',
         'web_search',
-        'board_read',
-        'board_write',
         'data_run',
         ...SOCIAL,
         ...APP_TOOLS.map(appTool),
@@ -250,13 +273,36 @@ describe('GTM', () => {
   );
 
   it.each(GTM.map((agent) => [agent.name, agent] as const))(
-    '%s refuses any first message that is not an executor brief',
+    '%s refuses any first message that is not an executor brief, and takes no card while off the board',
     (_name, agent) => {
+      const card = GTM_CARDS[agent.name as keyof typeof GTM_CARDS];
       expect(agent.system).toContain(NOT_MY_TRIGGER);
+      expect(agent.system).not.toContain(BRIEF_BOARD_RULE);
+      expect(agent.system).not.toContain(CARD_RULE);
+      if (card) {
+        expect(agent.system).not.toContain(triggerRule(agent.name as keyof typeof GTM_CARDS));
+        expect(agent.description).not.toContain(`${card.prefix} cards`);
+      }
       const skill = skillContent(agent.skills[0] as { slug: string; description: string });
-      expect(skill.split('\n').slice(0, 10).join('\n')).toContain('{"error":"not_my_trigger"}');
+      expect(skill.split('\n').slice(0, 12).join('\n')).toContain('{"error":"not_my_trigger"}');
+      if (card) {
+        // The skill's card section waits on the system prompt, which accepts no card today.
+        expect(skill).toContain(`${card.prefix}: <slug>`);
+        expect(skill).toContain('only if your system prompt says so');
+      }
     },
   );
+
+  it('keeps every GTM agent off the board: each reads outside text in its executor briefs', () => {
+    // Naive cannot narrow board_write by prefix, assignee or session, so an agent that reads a
+    // brief and holds board_write is bounded by its prompt alone. Turning any one on is a reviewed
+    // change to GTM_ON_BOARD, after the founder's ruling is confirmed, and to this test.
+    expect([...GTM_ON_BOARD]).toEqual([]);
+    for (const agent of GTM) {
+      expect(onBoard(agent.name), agent.name).toBe(false);
+      expect(gtmAllowed(agent.name), agent.name).toEqual(['read_skill', 'session_spend']);
+    }
+  });
 
   it('keeps the inbox reader off AgentMail: the executor fetches and fences the email', () => {
     expect(allowedTools(inboxReader.tools).filter((name) => name.startsWith('agentmail.'))).toEqual(
@@ -483,7 +529,18 @@ describe("the CEO's direction", () => {
     expect(ceo.system).not.toContain('FOUNDER: release');
     expect(CEO_SWEEP.input_template).toContain('create a RELEASE card for br-eng-lead');
     expect(CEO_SWEEP.input_template).not.toContain('FOUNDER: release');
-    expect(ceo.system).toMatch(/Never assign them a card/);
+    // GTM: while GTM_ON_BOARD is empty the GTM agents are not the CEO's team, and it creates no
+    // OUTREACH, LEADS or POST card; the skill's card rows wait on the system prompt.
+    expect(ceo.system).toContain(
+      'Not your team: br-gtm-lead, br-scout, br-social and br-inbox-reader are go-to-market agents',
+    );
+    expect(ceo.system).toContain('never create an OUTREACH:, LEADS: or POST: card');
+    expect(ceo.system).not.toContain('Give it OUTREACH: <slug> cards');
+    const skill = skillContent({ slug: 'ceo', description: '' });
+    expect(skill).toContain(
+      '| `OUTREACH: <slug>` | `br-gtm-lead` | You, only while your system prompt puts `br-gtm-lead` on your team |',
+    );
+    expect(skill).toContain("While\nGTM's board work is off it does not");
   });
 
   it('limits open slugs, not open DIR cards, since product closes DIR at the spec PR', () => {

@@ -118,7 +118,9 @@ export async function runAction(
     return { state: 'done', row };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (atMostOnce(row.kind)) {
+    // A provider that said it would not act (`PostRefused`) did not act: a clean failure.
+    const notSent = (error as { notSent?: unknown } | null)?.notSent === true;
+    if (atMostOnce(row.kind) && !notSent) {
       // The provider may have acted before the error reached us, so this is not a clean failure.
       row.planned_ticks = 0;
       row.detail = `${row.detail}; call errored: ${message.slice(0, 200)}`;

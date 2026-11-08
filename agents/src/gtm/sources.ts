@@ -1,5 +1,6 @@
 import { DISCOVERY, PRICES } from './config.ts';
 import { isWellKnown, registrableDomain } from './domain.ts';
+import { namesHost, phCoreName } from './extract.ts';
 import { safeFetch, type Transport } from './fetcher.ts';
 import { decodeEntities, parseHtml } from './html.ts';
 import type { DataRuns } from './ports.ts';
@@ -60,7 +61,9 @@ export function dataRunNote(result: Extract<DataRunResult, { ok: false }>): stri
   return `data run failed: ${result.detail.slice(0, 160)}`;
 }
 
-const NOT_A_SITE = /\.(?:pdf|png|jpe?g|gif|mp4|zip)$|\/(?:blog|posts?|articles?|papers?|news)\//i;
+/** A link to a file, a post, or a thread on a forum: not a startup's own site. */
+const NOT_A_SITE =
+  /\.(?:pdf|png|jpe?g|gif|mp4|zip)$|\/(?:blog|posts?|articles?|papers?|news|threads?|forums?|discussions?|comments?)\//i;
 
 /** Show HN in the last 72 hours with a URL, 5 points or more, and a startup's own site. */
 export async function hackerNews(
@@ -137,10 +140,17 @@ export function parseProductHuntFeed(xml: string): FeedEntry[] {
   return entries;
 }
 
+/** The brand a Product Hunt product page belongs to: `products/openai` gives `openai`. */
+const productSlugBrand = (link: string) =>
+  /\/products\/([a-z0-9]+)/i.exec(link)?.[1]?.toLowerCase() ?? null;
+
 /**
- * Product Hunt entries published in the last 72 hours, at most 10. The feed has no website and PH
- * answers scripts with 403, so one `Search Google` run per entry finds the site. Whether the site
- * really is that product is checked later against the tagline.
+ * Product Hunt entries published in the last 72 hours, at most 10, leaving out entries of a
+ * well-known company (`products/openai`, `products/instagram`), which would spend a slot and a run on
+ * a lead the scout rejects. The feed has no website and PH answers scripts with 403, so one
+ * `Search Google` run per entry finds the site: the first result whose host is the entry's name, or
+ * else the first that is not a platform. Whether the site really is that product is checked later
+ * against its name and tagline.
  */
 export async function productHunt(
   transport: Transport,
@@ -153,8 +163,15 @@ export async function productHunt(
     maxBytes: 1_000_000,
   });
   const since = now.getTime() - DISCOVERY.window_hours * 3_600_000;
-  const entries = parseProductHuntFeed(result.body)
-    .filter((entry) => new Date(entry.published).getTime() >= since)
+  const recent = parseProductHuntFeed(result.body).filter(
+    (entry) => new Date(entry.published).getTime() >= since,
+  );
+  const brandEntries = recent.filter((entry) => {
+    const brand = productSlugBrand(entry.link);
+    return brand !== null && isWellKnown(`${brand}.com`);
+  });
+  const entries = recent
+    .filter((entry) => !brandEntries.includes(entry))
     .slice(0, DISCOVERY.ph_max_entries);
   const report: SourceReport = {
     source: 'ph',
@@ -162,7 +179,9 @@ export async function productHunt(
     kept: 0,
     data_runs: 0,
     cost_micro_usd: 0,
-    note: null,
+    note: brandEntries.length
+      ? `${brandEntries.length} entr${brandEntries.length === 1 ? 'y' : 'ies'} of well-known companies left out`
+      : null,
   };
   if (!dataRun) {
     report.note = 'no data runs: Product Hunt sites not looked up';
@@ -184,17 +203,18 @@ export async function productHunt(
     report.data_runs += 1;
     report.cost_micro_usd += run.costMicroUsd;
     const results = (run.data as { organic_results?: { link?: string }[] })?.organic_results ?? [];
-    const site = results
+    const links = results
       .map((item) => item.link)
-      .find((link): link is string => {
+      .filter((link): link is string => {
         if (!link) return false;
         try {
-          const host = new URL(link).hostname;
-          return !isWellKnown(host);
+          return !isWellKnown(new URL(link).hostname);
         } catch {
           return false;
         }
       });
+    const name = phCoreName(entry.name);
+    const site = links.find((link) => namesHost(name, link)) ?? links[0];
     if (!site) continue;
     const root = new URL('/', site);
     candidates.push({
@@ -221,10 +241,17 @@ export function statusTime(statusId: string): Date | null {
 
 const STATUS = /^https:\/\/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,15})\/status\/(\d{6,25})/;
 
+/**
+ * Launch phrases a founder uses for a product, not for a broadcast: "we're live" alone found sports
+ * teams, TV shows and conference booths. A post that keeps its link for a reply has no site to read,
+ * so those are left out too.
+ */
+const NOT_A_LAUNCH =
+  '-stream -streaming -livestream -game -match -episode -podcast -"link in the reply" -"link in reply" -"link below"';
 export const X_QUERIES = [
-  'site:x.com ("launching today" OR "we\'re live" OR "we are live") (startup OR app OR SaaS OR AI)',
-  'site:x.com ("live on Product Hunt" OR "live on producthunt") (launch OR launching)',
-  'site:x.com ("just launched" OR "excited to launch" OR "today we launch") (startup OR product OR app)',
+  `site:x.com ("live on Product Hunt" OR "launching on Product Hunt" OR "launched on Product Hunt") ${NOT_A_LAUNCH}`,
+  `site:x.com ("today we're launching" OR "today I'm launching" OR "excited to launch" OR "just launched") (app OR SaaS OR tool OR "open source" OR AI) ${NOT_A_LAUNCH}`,
+  `site:x.com ("now in public beta" OR "is now live" OR "we just shipped" OR "we just launched") (app OR SaaS OR tool OR startup) ${NOT_A_LAUNCH}`,
 ];
 
 /**

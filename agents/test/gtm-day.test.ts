@@ -138,9 +138,10 @@ describe('a whole GTM day in dry run', () => {
     expect(h.files.get('report.txt')).toMatch(
       /^GTM 2026-11-08 · mode dry_run · x dry_run · email dry_run · films dry_run/,
     );
-    expect(result.needs).toEqual(
-      expect.arrayContaining(['executor-key', 'postal-address', 'cold-sender']),
-    );
+    expect(result.needs).toContain('executor-key');
+    // Email is dry run in code for the hackathon, so nobody is asked to set it up.
+    expect(result.needs).not.toContain('postal-address');
+    expect(result.needs).not.toContain('cold-sender');
   });
 
   it('keeps outside text off the board: no quotes, no site text, no email bodies', async () => {

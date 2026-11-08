@@ -13,11 +13,18 @@ import {
   founderBody,
   founderKey,
   founderTitle,
+  handRemovalBody,
+  type PackPost,
+  packBody,
+  packKey,
+  packReview,
+  packTitle,
 } from './cards.ts';
 import {
   AT_MOST_ONCE,
   BOT_USER_AGENT,
   DISCOVERY,
+  EMAIL_FORCED_DRY_RUN,
   type FounderNeed,
   type GtmAgentName,
   HOLD_WINDOW_MINUTES,
@@ -55,6 +62,7 @@ import {
   type RemovalPlan,
   type RemovalRequest,
   readCommands,
+  readPackPosts,
 } from './removal.ts';
 import { dayMetrics, reportText } from './report.ts';
 import { jsonSchema, pickOutputSchema, scoutOutputSchema, socialOutputSchema } from './schemas.ts';
@@ -62,6 +70,7 @@ import type { SiteRead } from './site.ts';
 import { dataRunNote, type GuardedDataRun } from './sources.ts';
 import {
   type ActionKind,
+  handPosted,
   type LeadRow,
   phaseOf,
   recordPhase,
@@ -97,6 +106,11 @@ export interface DayOptions {
   sessionWaitMs?: number;
   /** Waits, for the films' polls and the hold window. Tests pass one that moves their clock. */
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Only for tests of the email lane's own machinery: false lifts `EMAIL_FORCED_DRY_RUN`. The CLI
+   * never passes it, so the founder's no-email ruling holds on every real run.
+   */
+  emailForcedDryRun?: boolean;
 }
 
 const realSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -148,6 +162,16 @@ interface TakeDown {
   waiting: string[];
 }
 
+/**
+ * What a refused session start means when the agent's stored budget is $0: the stored GTM agents
+ * predate `GTM_ACTIVE`, because `company:sync` has not run since.
+ */
+export function unsyncedHint(message: string): string {
+  return /budget cap \(0 micro-USD\)/i.test(message)
+    ? '. The agent stored on Naive has a $0 budget: company:sync has not run since GTM_ACTIVE.'
+    : '';
+}
+
 /** A ledger outcome as a board comment's state. */
 function outcomeState(state: string, pack: boolean, done = 'live'): string {
   if (state === 'done') return done;
@@ -183,6 +207,8 @@ class Day {
   untampered: boolean | null = null;
   holdCards: string[] = [];
   socialReady = false;
+  /** Why an agent's session did not start, by agent, for the review and the phase's detail. */
+  readonly notStarted = new Map<GtmAgentName, string>();
 
   constructor(options: DayOptions) {
     this.o = options;
@@ -217,7 +243,67 @@ class Day {
       socialReady: this.socialReady,
       sender: this.ports.sender,
       replyInbox: this.ports.replyInbox,
+      ...(this.o.emailForcedDryRun === undefined
+        ? {}
+        : { emailForcedDryRun: this.o.emailForcedDryRun }),
     });
+  }
+
+  /**
+   * How an X pick would reach X today: posted by code in `standalone`, otherwise by the founder's
+   * hand from the pack, where a launch post to quote is welcome but not needed.
+   */
+  xHow(): 'post' | 'pack' {
+    return this.lanes.x === 'standalone' ? 'post' : 'pack';
+  }
+
+  /**
+   * Every waiting pack, read again on each run. A post counts as POSTED only once the founder's own
+   * `POSTED <lead id> <url>` comment for it is on the pack card (`readPackPosts`, through
+   * `commandAllowed` with `founder_user_id`); its startup then counts as posted for good (one X post
+   * per domain, ever). Who moved the card is not on the card, so its status is only a hint: once it
+   * is done the pack is `done`, and every post without such a comment stays NOT POSTED. The
+   * executor never writes a command on a pack card: each of its comments starts `commentHead`, which
+   * no command parses as, so one it wrote in an earlier run cannot count either.
+   */
+  async settlePacks() {
+    const founderId = this.store.flags.founder_user_id;
+    for (const pack of this.store.packs) {
+      if (pack.status !== 'waiting') continue;
+      // Listing the card first also lets the guard read the comments of a card an earlier run made.
+      const status = await this.ports.board.cardStatus(pack.card_id).catch(() => null);
+      const comments = await this.ports.board.comments(pack.card_id).catch(() => null);
+      if (!comments) continue;
+      pack.checked_at = this.iso();
+      const posted = readPackPosts(comments, founderId, this.ownComments);
+      const counted: string[] = [];
+      for (const entry of pack.entries) {
+        const url = posted.get(entry.lead_id);
+        if (!url || handPosted(entry)) continue;
+        entry.posted_at = this.iso();
+        entry.posted_url = url;
+        recordContact(this.store, {
+          domain: entry.domain,
+          channel: 'x_post',
+          at: this.iso(),
+          lead_id: entry.lead_id,
+        });
+        counted.push(entry.lead_id);
+      }
+      if (counted.length) {
+        await this.comment('PACK', pack.date, 'posted', [
+          `The founder posted ${counted.join(', ')} from ${packTitle(pack.date)} by hand.`,
+        ]);
+      }
+      if (status !== 'done') continue;
+      pack.status = 'done';
+      pack.done_at = this.iso();
+      const made = pack.entries.filter(handPosted).length;
+      await this.comment('PACK', pack.date, 'done', [
+        `${packTitle(pack.date)} is done: ${made} POSTED, ${pack.entries.length - made} NOT POSTED. Only a POSTED <lead id> <url> comment of the founder's counts a post.${founderId ? '' : ' founder_user_id is not set, so no comment could count.'}`,
+      ]);
+    }
+    await this.save();
   }
 
   /**
@@ -343,6 +429,7 @@ class Day {
       key: dayKey(this.date),
     });
     this.dayCard = card.id;
+    await this.settlePacks();
   }
 
   /** Once a day: what a person must do, each as one `FOUNDER: gtm <need>` card. */
@@ -351,8 +438,11 @@ class Day {
     if (!naive) await this.founder('executor-key');
     if (naive && this.untampered === false) await this.founder('tampered', this.date);
     if (naive && this.lockdownOk === false) await this.founder('lockdown');
-    if (!this.store.flags.postal_address) await this.founder('postal-address');
-    if (this.ports.sender.kind === 'dry-run') await this.founder('cold-sender');
+    // Email is dry run in code for the hackathon: asking for its address and sender is noise.
+    if (!(this.o.emailForcedDryRun ?? EMAIL_FORCED_DRY_RUN)) {
+      if (!this.store.flags.postal_address) await this.founder('postal-address');
+      if (this.ports.sender.kind === 'dry-run') await this.founder('cold-sender');
+    }
     const minted = this.store.flags.executor_key_minted_at;
     if (minted && daysSince(minted, this.now()) >= KEY_ROTATION_DAY)
       await this.founder('rotate-key', minted.slice(0, 10));
@@ -580,6 +670,11 @@ class Day {
         this.log(`removals  film withdraw failed: ${message}`);
       }
     }
+    // A pack post is the founder's own: only the founder can delete it, or not make it.
+    if (plan.hand.length && !(await this.handRemoval(plan)))
+      result.waiting.push(
+        `hand posts of ${plan.hand.map((entry) => entry.lead_id).join(', ')}: the founder's card could not be written`,
+      );
     for (const item of plan.leads) {
       this.picked.emails = this.picked.emails.filter((pick) => pick.lead_id !== item.id);
       if (this.picked.x === item.id) this.picked.x = null;
@@ -607,6 +702,11 @@ class Day {
     }
     await this.comment('REMOVAL', plan.id, complete ? 'done' : 'pending', [
       `${plan.request.kind === 'removal' ? 'Removal' : 'Opt-out'} by ${plan.request.channel} for ${plan.domain ?? 'an address'}: ${plan.suppressed} suppression row(s), ${result.deleted} of ${plan.posts.length} post(s) deleted, ${result.withdrawn} of ${plan.films.length} film(s) withdrawn.`,
+      ...(plan.hand.length
+        ? [
+            `Pack posts for the founder to delete or never make: ${plan.hand.map((entry) => `${entry.lead_id} (${packTitle(entry.pack_date)}${entry.posted ? ', POSTED' : ''})`).join(', ')}. See ${founderTitle('hand-removal')}.`,
+          ]
+        : []),
       ...(complete
         ? []
         : [
@@ -614,6 +714,52 @@ class Day {
           ]),
     ]);
     return result;
+  }
+
+  /**
+   * A removal that reached a startup in a pack. The executor cannot delete a post the founder made
+   * by hand, so it writes one `FOUNDER: gtm hand-removal` card naming each lead (posted or not), and
+   * tells each waiting pack's card never to post it. Each entry is marked so a later run does not
+   * raise it again. False when the founder's card could not be written: the removal then waits.
+   */
+  async handRemoval(plan: RemovalPlan): Promise<boolean> {
+    this.needs.add('hand-removal');
+    try {
+      await this.ports.board.ensureCard({
+        title: founderTitle('hand-removal'),
+        body: handRemovalBody(plan.hand),
+        status: 'blocked',
+        key: founderKey('hand-removal', stableId('rq', plan.request.key ?? plan.id)),
+      });
+    } catch (error) {
+      this.log(
+        `removals  hand-removal card failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return false;
+    }
+    for (const item of plan.hand) {
+      const pack = this.store.packs.find((row) => row.date === item.pack_date);
+      const entry = pack?.entries.find((row) => row.lead_id === item.lead_id);
+      if (!pack || !entry) continue;
+      entry.removed_at = this.iso();
+      if (pack.status !== 'waiting') continue;
+      try {
+        const comment = await this.ports.board.comment(
+          pack.card_id,
+          [
+            commentHead('REMOVAL', entry.lead_id, 'do not post'),
+            `A removal request came in for ${entry.lead_id}: never post it, and if you already did, delete that post. Its film page is withdrawn. See ${founderTitle('hand-removal')}.`,
+          ].join('\n'),
+        );
+        this.ownComments.add(comment.id);
+      } catch (error) {
+        this.log(
+          `removals  pack card comment failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    await this.save();
+    return true;
   }
 
   // -------------------------------------------------------------------------------------------
@@ -709,6 +855,7 @@ class Day {
     const { budget } = sessionBudget(agent);
     const check = canSpend(this.store, this.today, budget);
     if (!check.ok) {
+      this.notStarted.set(agent, `${agent} skipped: ${check.reason}`);
       this.log(`${purpose.padEnd(9)} ${agent} skipped: ${check.reason}`);
       return null;
     }
@@ -723,9 +870,9 @@ class Day {
       });
     } catch (error) {
       // One agent that cannot start (a $0 budget, a refused session) costs only its own step.
-      this.log(
-        `${purpose.padEnd(9)} ${agent} could not start: ${error instanceof Error ? error.message.slice(0, 160) : String(error)}`,
-      );
+      const message = error instanceof Error ? error.message.slice(0, 160) : String(error);
+      this.notStarted.set(agent, `${agent} could not start: ${message}${unsyncedHint(message)}`);
+      this.log(`${purpose.padEnd(9)} ${this.notStarted.get(agent)}`);
       return null;
     }
     const result = await runner.wait(id, this.o.sessionWaitMs ?? 8 * 60_000);
@@ -787,6 +934,20 @@ class Day {
           };
         }
       }
+    }
+    if (!sessions.length) {
+      // Nobody judged a candidate: say so, rather than report every one as not qualified.
+      const why = this.notStarted.get(SCOUT) ?? 'br-scout did not start';
+      this.review.push(
+        `## Scout verdicts\n\nThe scout did not run, so no candidate was judged and none is qualified: ${why}\n`,
+      );
+      await this.comment('LEADS', this.date, 'not judged', [
+        `${candidates.length} candidate(s) found; the scout did not run, so none was judged.`,
+      ]);
+      return {
+        status: 'skipped' as const,
+        detail: `${candidates.length} candidates not judged: ${why}`,
+      };
     }
     // At most 15 qualified a day, best fit first.
     const qualified = this.todayLeads().filter((lead) => lead.verdict?.verdict === 'qualified');
@@ -871,7 +1032,9 @@ class Day {
     const xOpen = new Set(
       this.lanes.x === 'off'
         ? []
-        : qualified.filter((lead) => !xBlocker(this.store, lead, now)).map((lead) => lead.id),
+        : qualified
+            .filter((lead) => !xBlocker(this.store, lead, now, this.xHow()))
+            .map((lead) => lead.id),
     );
     const emailOpen = new Set(
       this.lanes.email === 'off'
@@ -894,7 +1057,9 @@ class Day {
         category: lead.verdict?.category ?? 'other',
         fit: lead.verdict?.fit ?? 0,
         jurisdiction: lead.verdict?.jurisdiction ?? 'unknown',
-        x_allowed: xOpen.has(lead.id) ? 'allowed' : `closed (${xBlocker(this.store, lead, now)})`,
+        x_allowed: xOpen.has(lead.id)
+          ? 'allowed'
+          : `closed (${xBlocker(this.store, lead, now, this.xHow())})`,
         email_allowed: emailOpen.has(lead.id)
           ? 'allowed'
           : `closed (${emailBlocker(this.store, lead, now)})`,
@@ -912,7 +1077,7 @@ class Day {
     if (!result)
       return {
         status: 'skipped' as const,
-        detail: 'the GTM lead could not start (spend cap or a refused session; see the log)',
+        detail: this.notStarted.get(GTM_LEAD) ?? 'the GTM lead could not start; see the log',
       };
     sessions.push(result.sessionId);
     const leads = new Map(qualified.map((lead) => [lead.id, lead]));
@@ -1258,7 +1423,7 @@ class Day {
       const lead = this.store.leads.find((row) => row.id === this.picked.x) as LeadRow;
       const film = this.films.get(lead.id);
       const problems: string[] = [];
-      const blocker = xBlocker(this.store, lead, now);
+      const blocker = xBlocker(this.store, lead, now, this.xHow());
       if (blocker) problems.push(blocker);
       if (!film?.pageUrl) problems.push('no ready film');
       if (film && !film.usable) problems.push('the film is simulated or did not pass QC');
@@ -1280,8 +1445,8 @@ class Day {
         this.lanes.x === 'standalone'
           ? `Goes out after ${after} Pacific unless someone comments HOLD or HOLD ${lead.id}.`
           : this.lanes.x === 'pack'
-            ? 'Pack mode: the executor posts nothing; a person may quote-post from the review file.'
-            : 'Dry run: it does not go out.';
+            ? `Pack mode: the executor posts nothing; once checked it goes on ${packTitle(this.date)} for the founder to post by hand.`
+            : 'Dry run: the executor does not post it. With a real film it goes on the pack card.';
       await this.comment('POST', lead.id, this.lanes.x === 'standalone' ? 'draft' : 'dry run', [
         `Lane x: ${this.lanes.x}. ${when} Caption by br-social, template ${this.picked.caption.template_id}, ${this.picked.caption.caption.length} characters. Checks: ${problems.length ? problems.join('; ') : 'passed'}.`,
       ]);
@@ -1301,16 +1466,22 @@ class Day {
       }
       if (!isRoleAddressOn(address.address, lead.domain)) problems.push('bad_recipient');
       const { token, hash } = optOutToken();
-      try {
-        await this.ports.app.registerOptOutToken(hash, lead.id);
-        this.store.optout_tokens.push({
-          hash,
-          lead_id: lead.id,
-          domain: lead.domain,
-          created_at: this.iso(),
-        });
-      } catch {
-        problems.push('opt-out token not registered');
+      // The app registers a token only for an email that can go out. While the email lane is dry
+      // run (EMAIL_FORCED_DRY_RUN for the hackathon) the app is not asked, and the draft says why.
+      if (this.ports.app.kind === 'app' && this.lanes.email !== 'live') {
+        problems.push('opt-out token not registered: the email lane is dry run');
+      } else {
+        try {
+          await this.ports.app.registerOptOutToken(hash, lead.id);
+          this.store.optout_tokens.push({
+            hash,
+            lead_id: lead.id,
+            domain: lead.domain,
+            created_at: this.iso(),
+          });
+        } catch {
+          problems.push('opt-out token not registered');
+        }
       }
       const draft = composeEmail({
         lead,
@@ -1342,7 +1513,7 @@ class Day {
       `## Drafts\n\n${this.drafts
         .map(
           (draft) =>
-            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n${draft.pack ? `\nQuote pack, for a person posting by hand from the X app (pack mode): quote-post ${draft.pack.launchPost} with the film from ${draft.pack.filmPage ?? 'the film page, once ready'}, and paste the caption above. Then comment POSTED <url> on the day card.\n` : ''}`,
+            `### ${draft.lane} · ${draft.lead_id}${draft.usable ? '' : ` (not sendable: ${draft.problems.join('; ')})`}\n\n${draft.to ? `To: ${draft.to}\nSubject: ${draft.subject}\n\n` : ''}\`\`\`text\n${draft.text}\n\`\`\`\n${draft.pack ? `\nQuote pack, for a person posting by hand from the X app (pack mode): quote-post ${draft.pack.launchPost} with the film from ${draft.pack.filmPage ?? 'the film page, once ready'}, and paste the caption above. It is on ${packTitle(this.date)} when the film is real; once posted, comment POSTED ${draft.lead_id} <your post's address> on that card.\n` : ''}`,
         )
         .join('\n')}`,
     );
@@ -1389,16 +1560,43 @@ class Day {
     // Every cap counts what already went out today on the real clock, whatever the run's label.
     let posts = this.outToday('x-post');
     let emails = this.outToday('email');
+    const pack: PackPost[] = [];
+    // A hold or a halt stops everything going out today, by code or by the founder's hand.
+    const stopped =
+      this.holds.day ||
+      this.holdCards.length > 0 ||
+      this.ceoHalted !== false ||
+      this.store.flags.mode === 'halted';
     for (const draft of this.drafts) {
       const lead = this.store.leads.find((row) => row.id === draft.lead_id) as LeadRow;
       if (draft.lane === 'x') {
         const key = `x-post:${this.date}`;
         const reasons = [...draft.problems];
         if (this.holds.leads.has(lead.id)) reasons.push('held');
-        const blocker = xBlocker(this.store, lead, now);
+        const blocker = xBlocker(this.store, lead, now, this.xHow());
         if (blocker) reasons.push(blocker);
         if (posts >= cap(this.store, 'x_posts_day')) reasons.push('x_cap');
         if (!canSpend(this.store, this.today, PRICES.x_post).ok) reasons.push('spend');
+        const film = this.films.get(lead.id);
+        // What the founder needs to post it by hand: a real, QC-passed film with a page, and every
+        // check passed but those that only code posting needs (the file, the post's price).
+        const packable =
+          !stopped &&
+          Boolean(film?.usable && film.pageUrl) &&
+          reasons.every((reason) => reason === 'no film file' || reason === 'spend');
+        const toPack = (refused: boolean) => {
+          if (!packable || !film?.pageUrl) return false;
+          pack.push({
+            lead_id: lead.id,
+            product: lead.product_name ?? lead.domain,
+            domain: lead.domain,
+            film_page: film.pageUrl,
+            quote_post: lead.x_post?.verified ? lead.x_post.url : null,
+            caption: draft.text,
+            refused,
+          });
+          return true;
+        };
         const live = this.lanes.x === 'standalone' && reasons.length === 0;
         if (this.lanes.x === 'standalone' && reasons.length) {
           skipAction(this.store, {
@@ -1408,10 +1606,13 @@ class Day {
             reason: reasons.join('; '),
             at: this.iso(),
           });
-          await this.comment('POST', lead.id, 'skipped', [`Reason: ${reasons.join('; ')}.`]);
+          const packed = toPack(false);
+          await this.comment('POST', lead.id, packed ? 'pack' : 'skipped', [
+            `Reason: ${reasons.join('; ')}.${packed ? ` It goes on ${packTitle(this.date)} for the founder to post by hand.` : ''}`,
+          ]);
           continue;
         }
-        const film = this.films.get(lead.id);
+        let contact: ReturnType<typeof recordContact> | null = null;
         const outcome = await runAction(
           this.store,
           {
@@ -1422,7 +1623,7 @@ class Day {
             dryRun: !live,
             call: async () => {
               // Recorded before the call: a post whose answer is lost still counts as made.
-              recordContact(this.store, {
+              contact = recordContact(this.store, {
                 domain: lead.domain,
                 channel: 'x_post',
                 at: this.iso(),
@@ -1442,6 +1643,12 @@ class Day {
           this.iso,
         );
         if (outcome.state === 'unknown') await this.founder('unknown-send', key);
+        // A post the provider refused did not go out (only a refusal is `failed` for a post): it
+        // is not a contact, and it goes on the pack for the founder.
+        const refused = outcome.state === 'failed';
+        if (refused && contact)
+          this.store.contacts = this.store.contacts.filter((row) => row !== contact);
+        const packed = outcome.state === 'dry_run' ? toPack(false) : refused ? toPack(true) : false;
         if (outcome.state === 'done') {
           posts += 1;
           recordSpend(this.store, {
@@ -1460,13 +1667,13 @@ class Day {
             lead_id: lead.id,
           });
         }
-        await this.comment('POST', lead.id, outcomeState(outcome.state, this.lanes.x === 'pack'), [
+        await this.comment('POST', lead.id, packed ? 'pack' : outcomeState(outcome.state, false), [
           outcome.state === 'done'
             ? `Posted as ${outcome.row.provider_id}.`
             : outcome.state === 'pending' || outcome.state === 'unknown'
               ? 'The call errored, so the post may have gone out. It is never retried; the domain counts as posted, and a person is asked if no provider id turns up.'
-              : this.lanes.x === 'pack'
-                ? 'Pack mode: not posted by the executor. The quote pack is in the review file; comment POSTED <url> once a person has posted.'
+              : packed
+                ? `Not posted by the executor${refused ? ': the network refused it' : ''}. It goes on ${packTitle(this.date)} for the founder to post by hand; it counts as posted only once that card is done.`
                 : `Not posted: ${reasons.join('; ') || this.lanes.reasons.x.slice(0, 3).join('; ')}.`,
         ]);
         continue;
@@ -1548,10 +1755,61 @@ class Day {
             : `Not sent: ${reasons.join('; ') || this.lanes.reasons.email.slice(0, 3).join('; ')}.`,
       ]);
     }
+    if (pack.length) await this.writePack(pack);
     return {
       status: 'done' as const,
-      detail: `${posts} post(s), ${emails} email(s) out today; the rest dry run`,
+      detail: `${posts} post(s), ${emails} email(s) out today; ${pack.length} in the founder's pack; the rest dry run`,
     };
+  }
+
+  /**
+   * The day's pack: ONE `FOUNDER: gtm pack <date>` card with every post the executor did not make,
+   * for the founder to post by hand. The card carries lead ids and our film pages only; the startup,
+   * the X post to quote and the caption go in the review file. A post is never called posted until
+   * the founder's own POSTED comment for it is read.
+   */
+  async writePack(posts: PackPost[]) {
+    this.needs.add('pack');
+    let cardId: string;
+    try {
+      cardId = (
+        await this.ports.board.ensureCard({
+          title: packTitle(this.date),
+          body: packBody(this.date, posts),
+          status: 'blocked',
+          key: packKey(this.date),
+        })
+      ).id;
+    } catch (error) {
+      this.log(
+        `board     pack card failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return;
+    }
+    if (!this.store.packs.some((row) => row.date === this.date)) {
+      this.store.packs.push({
+        date: this.date,
+        card_id: cardId,
+        key: packKey(this.date),
+        entries: posts.map((post) => ({
+          lead_id: post.lead_id,
+          domain: post.domain,
+          film_page: post.film_page,
+          refused: post.refused,
+          posted_at: null,
+          posted_url: null,
+          removed_at: null,
+        })),
+        status: 'waiting',
+        done_at: null,
+        checked_at: null,
+      });
+    }
+    await this.comment('PACK', this.date, 'waiting', [
+      `${posts.length} post(s) on ${packTitle(this.date)}: ${posts.map((post) => post.lead_id).join(', ')}. The founder posts them by hand and comments POSTED <lead id> <url> on the card for each; until then none counts as posted.`,
+    ]);
+    this.review.push(packReview(this.date, posts));
+    await this.save();
   }
 
   reviewText(): string {

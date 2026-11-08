@@ -10,7 +10,11 @@ export const MINTED = {
   web: 'STAGING_NAIVE_WEB_KEY',
   signing: 'STAGING_RUNNER_SIGNING_SECRET',
   runner: 'STAGING_NAIVE_RUNNER_KEY',
+  gtm: 'STAGING_GTM_SERVICE_TOKEN',
 };
+
+/** Where the GTM executor reads its copy of the token (agents/src/gtm/wiring.ts). */
+export const GTM_EXECUTOR_TOKEN = 'GTM_SERVICE_TOKEN';
 
 /**
  * `text` with `name=value` set: the line replaced where it is, or appended. Other lines, comments

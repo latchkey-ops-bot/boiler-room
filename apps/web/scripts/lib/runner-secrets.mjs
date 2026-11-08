@@ -10,17 +10,38 @@ export const RUNNER_SECRETS = [
   { name: 'REAL_FILM_USERS', from: 'STAGING_REAL_FILM_USERS', optional: true },
   // The film command's key, which the website sends with each launch. The stand-in needs none.
   { name: 'NAIVE_RUNNER_KEY', from: 'STAGING_NAIVE_RUNNER_KEY', optional: true },
+  // The GTM executor's bearer token for /api/gtm/v1/. The executor holds the same value as
+  // GTM_SERVICE_TOKEN. Unset: the GTM routes answer 503 and no sample film can be ordered.
+  { name: 'GTM_SERVICE_TOKEN', from: 'STAGING_GTM_SERVICE_TOKEN', optional: true },
 ];
 
 /** The only scopes the website's Naive key may hold. */
 export const WEB_KEY_SCOPES = ['billing:read', 'computers:write'];
 
 /**
- * The runner's key, sent to the film command with each launch. Sessions and agents only: no
- * computers, so a film computer's key cannot make or reach another computer, and no
- * `agents:write`, since the film command runs with `--no-sync`.
+ * The runner's key, sent to the film command with each launch: exactly what the film command
+ * calls with `--phase script|render`, `--render local` and `--no-sync`, as Naive's 403s name each
+ * route's scope. Not `agents:write`: the command never changes an agent or pushes a skill, and
+ * Naive puts image generation (`POST /v1/media/images`) under it too, so the Art Director goes on
+ * with captured pictures. `computers:write` has no resource binding: it reaches every computer in
+ * the organization, so no other computer there may hold a secret.
  */
-export const RUNNER_KEY_SCOPES = ['agents:read', 'sessions:read', 'sessions:write'];
+export const RUNNER_KEY_SCOPES = [
+  // `agents.list` and `skills.listVersions`: the `--no-sync` check that the crew is this build's.
+  'agents:read',
+  // `sessions.list`, `get` and the event stream: who holds the Researcher, and each stage's turns.
+  'sessions:read',
+  // `sessions.create`, `send`, `interrupt` and `cancel`: the four crew agents' sessions.
+  'sessions:write',
+  // `files.list`, `get` and downloads: the capture tool, page evidence and captured pictures.
+  'files:read',
+  // `files.upload` and `delete`: the capture tool, and the frames Quality Check is shown.
+  'files:write',
+  // `computers.list`, `get`, `resume`, `exec` and `pause`: br-researcher's computer, paused after.
+  'computers:write',
+  // `credits.show` and `agents.spend`: each stage's balance before and after, and its spend.
+  'billing:read',
+];
 
 /**
  * Which real-film secrets to set on `env`, and what is wrong. `problems` stop the sync; an empty
@@ -55,6 +76,13 @@ export function runnerSecretsFor(vars, env) {
   if (signing && signing.length < 32) {
     problems.push('STAGING_RUNNER_SIGNING_SECRET is shorter than 32 characters.');
   }
+  const gtm = found.find((secret) => secret.name === 'GTM_SERVICE_TOKEN')?.value;
+  if (gtm && gtm.length < 32) {
+    problems.push('STAGING_GTM_SERVICE_TOKEN is shorter than 32 characters.');
+  }
+  if (gtm && [signing, webKey, runnerKey, admin].includes(gtm)) {
+    problems.push('STAGING_GTM_SERVICE_TOKEN reuses another secret. It is its own.');
+  }
   return {
     values: found
       .filter((secret) => secret.value !== null)
@@ -64,12 +92,13 @@ export function runnerSecretsFor(vars, env) {
   };
 }
 
-/** True when `scopes` is exactly the website key's scopes. */
-export function scopesMatch(scopes) {
+/** True when `scopes` is exactly `wanted` (the website key's scopes unless given). */
+export function scopesMatch(scopes, wanted = WEB_KEY_SCOPES) {
+  const sorted = [...wanted].sort();
   return (
     Array.isArray(scopes) &&
-    scopes.length === WEB_KEY_SCOPES.length &&
-    [...scopes].sort().every((scope, i) => scope === WEB_KEY_SCOPES[i])
+    scopes.length === sorted.length &&
+    [...scopes].sort().every((scope, i) => scope === sorted[i])
   );
 }
 
@@ -102,8 +131,9 @@ export async function checkWebKey(
 }
 
 /**
- * Asks Naive what the runner's key may do. Null when it holds no scope beyond `RUNNER_KEY_SCOPES`,
- * or the problem: a film computer holds this key, so it must not reach computers or billing.
+ * Asks Naive what the runner's key may do. Null when it holds exactly `RUNNER_KEY_SCOPES`, or the
+ * problem: one scope fewer stops a film part way, and one more is more than a film computer that
+ * reads customers' sites should hold.
  */
 export async function checkRunnerKey(
   key,
@@ -123,10 +153,11 @@ export async function checkRunnerKey(
   }
   if (!response.ok) return `Naive refused STAGING_NAIVE_RUNNER_KEY (${response.status}).`;
   const identity = await response.json().catch(() => null);
-  const extra = (identity?.scopes ?? ['?']).filter((scope) => !RUNNER_KEY_SCOPES.includes(scope));
-  return extra.length > 0
-    ? `STAGING_NAIVE_RUNNER_KEY holds ${extra.join(', ')}, beyond ${RUNNER_KEY_SCOPES.join(', ')}.`
-    : null;
+  const scopes = Array.isArray(identity?.scopes) ? identity.scopes : [];
+  if (scopesMatch(scopes, RUNNER_KEY_SCOPES)) return null;
+  const extra = scopes.filter((scope) => !RUNNER_KEY_SCOPES.includes(scope));
+  const missing = RUNNER_KEY_SCOPES.filter((scope) => !scopes.includes(scope));
+  return `STAGING_NAIVE_RUNNER_KEY must hold exactly ${RUNNER_KEY_SCOPES.join(', ')}${extra.length ? `; it also holds ${extra.join(', ')}` : ''}${missing.length ? `; it lacks ${missing.join(', ')}` : ''}.`;
 }
 
 /** The one contract file, relative to the repo. */

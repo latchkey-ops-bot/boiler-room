@@ -288,11 +288,11 @@ describe('the watchdog', () => {
     expect(left.map((row) => row.nonce)).not.toContain('f'.repeat(32));
   });
 
-  it('halts every real film when the Naive balance falls by more than the day’s cap', async () => {
+  it('halts every real film when the Naive balance falls by more than the tripwire', async () => {
     const user = newUser();
     const harness = runnerHarness(proxy, {
       realUsers: [user.userId],
-      vars: { ...ROOMY, GLOBAL_DAILY_CAP_USD: '5.25' },
+      vars: { ...ROOMY, TRIPWIRE_DAILY_FALL_USD: '5.25' },
       start: '2026-11-20T12:00:00.000Z',
     });
     const { run, runner } = await realFilm(harness, user);
@@ -311,6 +311,32 @@ describe('the watchdog', () => {
       where: eq(runnerControl.id, 'global'),
     });
     expect(control?.halted).toBe(true);
+    await harness.db.delete(runnerControl);
+  });
+
+  it('keeps real films running when the balance falls by more than the film caps but not the tripwire', async () => {
+    const user = newUser();
+    const harness = runnerHarness(proxy, {
+      realUsers: [user.userId],
+      vars: { ...ROOMY, GLOBAL_DAILY_CAP_USD: '5.25', TRIPWIRE_DAILY_FALL_USD: '80.00' },
+      start: '2026-11-20T12:00:00.000Z',
+    });
+    const { run, runner } = await realFilm(harness, user);
+    await runner?.hello('script');
+    await tick(harness);
+    harness.naive.balance -= 25_000_000;
+    harness.clock.advance(60);
+    await harness.db
+      .update(filmRuns)
+      .set({ heartbeatAt: harness.clock.now().getTime() })
+      .where(eq(filmRuns.id, run.id));
+    const report = await tick(harness);
+    expect(report.actions.join('\n')).not.toContain('tripwire');
+    expect((await runOf(harness, run.id))?.state).not.toBe('stopping');
+    const control = await harness.db.query.runnerControl.findFirst({
+      where: eq(runnerControl.id, 'global'),
+    });
+    expect(control?.halted).toBe(false);
     await harness.db.delete(runnerControl);
   });
 });

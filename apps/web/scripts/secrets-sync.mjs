@@ -8,7 +8,7 @@
 // Staging also gets the real-film secrets (scripts/lib/runner-secrets.mjs), each from its STAGING_
 // name only. The website's Naive key is checked with Naive first: it must hold exactly
 // computers:write and billing:read, and it must not be the admin key. The runner's key, when there
-// is one, may hold nothing beyond sessions and agents:read. Production gets none.
+// is one, must hold exactly the seven scopes of RUNNER_KEY_SCOPES. Production gets none.
 import {
   bin,
   ENV_FILE,

@@ -46,20 +46,41 @@ export function quoteProblem(
   if (/["“”<>]/.test(needle)) return 'has_quote_mark';
   const { verdict, page } = verifyQuote(read, pageId, needle);
   if (!page || verdict !== 'found') return `quote_${verdict}`;
-  for (const block of page.parsed.text.split('\n').map(normaliseWhitespace)) {
+  const blocks = page.parsed.text
+    .split('\n')
+    .map(normaliseWhitespace)
+    .filter((block) => block !== '');
+  for (const [number, block] of blocks.entries()) {
     let from = 0;
     for (;;) {
       const index = block.indexOf(needle, from);
       if (index < 0) break;
       const before = block.slice(0, index).trimEnd();
       const after = block.slice(index + needle.length);
-      const startOk = index === 0 || SENTENCE_END.test(before);
-      const endOk = after.trim() === '' || SENTENCE_END.test(needle) || /^[.!?]/.test(after);
+      // A line break inside a sentence is no boundary: "No account, and no video" cut from "No
+      // account, and no video / leaving your machine." says the opposite of the site.
+      const startOk =
+        index === 0 ? !continues(blocks[number - 1], needle) : SENTENCE_END.test(before);
+      const endOk =
+        after.trim() === ''
+          ? SENTENCE_END.test(needle) || !continues(needle, blocks[number + 1])
+          : SENTENCE_END.test(needle) || /^[.!?]/.test(after);
       if (startOk && endOk) return null;
       from = index + 1;
     }
   }
   return 'not_at_boundary';
+}
+
+/**
+ * Whether `next` reads as the rest of a sentence `previous` left open: no end mark, then a lower-case
+ * word. A first word with a capital inside it ("ivyNote", "iPhone") is a name that starts a sentence.
+ */
+function continues(previous: string | undefined, next: string | undefined): boolean {
+  if (!previous || !next) return false;
+  return (
+    !/[.!?:;]["'”’)]*$/.test(previous) && /^\p{Ll}/u.test(next) && !/^\p{Ll}+\p{Lu}/u.test(next)
+  );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -289,10 +310,13 @@ export function openerProblems(opener: string, context: LineContext): string[] {
 // ---------------------------------------------------------------------------------------------
 // What the source shows
 
-/** Only what the source shows: never "launched this week". */
+/**
+ * Only what the source shows, on the day it shows it: never "launched this week". A Product Hunt
+ * feed date is the day the entry was featured, and "this week" stops being true on Monday.
+ */
 export function sourcePhrase(source: Source, sourceAt: string): string {
   if (source === 'hn') return `posted a Show HN on ${weekdayOf(sourceAt)}`;
-  if (source === 'ph') return 'is on Product Hunt this week';
+  if (source === 'ph') return `was on Product Hunt on ${weekdayOf(sourceAt)}`;
   return `announced on X on ${weekdayOf(sourceAt)}`;
 }
 
@@ -419,7 +443,12 @@ export function buildCaption(input: CaptionInput): CaptionResult {
   }
   if (template.needsQuote && !input.quote) problems.push('template_needs_quote');
   const quote = template.needsQuote && input.quote ? normaliseWhitespace(input.quote.quote) : '';
-  const body = template.text
+  // A quote with no end mark, followed by more of the template, ends its sentence outside the
+  // quotation marks, so the quote stays verbatim and the caption does not run on.
+  const text = SENTENCE_END.test(quote)
+    ? template.text
+    : template.text.replace(/"\{quote\}"(?=\s+\S)/, '"{quote}".');
+  const body = text
     .replaceAll('{product}', product)
     .replaceAll('{source}', sourcePhrase(input.lead.source, input.lead.source_at))
     .replaceAll('{quote}', quote);

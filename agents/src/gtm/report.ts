@@ -1,7 +1,7 @@
 import { spentOn } from './caps.ts';
 import type { FounderNeed } from './config.ts';
 import type { LaneState } from './lanes.ts';
-import type { Source, StoreData } from './store.ts';
+import { handPosted, type Source, type StoreData } from './store.ts';
 
 /**
  * The day's metrics, computed from the store alone with no model, so the report the CEO's digest
@@ -10,10 +10,22 @@ import type { Source, StoreData } from './store.ts';
 
 export interface DayMetrics {
   date: string;
-  leads: { found: number; qualified: number; bySource: Record<Source, number> };
+  /** `judged`: leads the scout gave a verdict. Zero with leads found means the scout did not run. */
+  leads: { found: number; judged: number; qualified: number; bySource: Record<Source, number> };
   picks: { x: number; email: number };
   films: { ordered: number; dryRun: number; ready: number; failed: number; late: number };
   x: { posted: number; drafts: number; skipped: number };
+  /**
+   * The founder's hand posts, from `FOUNDER: gtm pack <date>` cards. A post counts as POSTED only
+   * once the founder's own `POSTED <lead id> <url>` comment for it was read; every other is NOT
+   * POSTED, whatever the card's status. `counting` is false while `founder_user_id` is not set, so
+   * no comment can count.
+   */
+  pack: {
+    today: { posts: number; posted: number; status: 'none' | 'waiting' | 'done' };
+    yesterday: { date: string; posted: number; notPosted: number } | null;
+    counting: boolean;
+  };
   email: { sent: number; drafts: number; skipped: Record<string, number> };
   replies: { in: number; answered: number; toPerson: number };
   optOuts: number;
@@ -49,6 +61,9 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
   const bySource: Record<Source, number> = { hn: 0, ph: 0, x: 0 };
   for (const lead of qualified) bySource[lead.source] += 1;
   const films = store.films.filter((row) => row.date === date);
+  const packToday = (store.packs ?? []).find((row) => row.date === date);
+  const yesterday = addDays(date, -1);
+  const packYesterday = (store.packs ?? []).find((row) => row.date === yesterday);
   const posts = actionsOn(store, date, 'x-post');
   const emails = actionsOn(store, date, 'email');
   const skipped: Record<string, number> = {};
@@ -76,7 +91,12 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
   }
   return {
     date,
-    leads: { found: leads.length, qualified: qualified.length, bySource },
+    leads: {
+      found: leads.length,
+      judged: leads.filter((lead) => lead.verdict).length,
+      qualified: qualified.length,
+      bySource,
+    },
     picks: {
       x: leads.filter((lead) => lead.picked.includes('x')).length,
       email: leads.filter((lead) => lead.picked.includes('email')).length,
@@ -92,6 +112,21 @@ export function dayMetrics(store: StoreData, date: string): DayMetrics {
       posted: posts.filter((row) => row.status === 'sent').length,
       drafts: posts.filter((row) => row.status === 'dry_run').length,
       skipped: posts.filter((row) => row.status === 'skipped').length,
+    },
+    pack: {
+      today: {
+        posts: packToday?.entries.length ?? 0,
+        posted: packToday?.entries.filter(handPosted).length ?? 0,
+        status: packToday ? (packToday.status === 'done' ? 'done' : 'waiting') : 'none',
+      },
+      yesterday: packYesterday
+        ? {
+            date: yesterday,
+            posted: packYesterday.entries.filter(handPosted).length,
+            notPosted: packYesterday.entries.filter((entry) => !handPosted(entry)).length,
+          }
+        : null,
+      counting: Boolean(store.flags.founder_user_id),
     },
     email: {
       sent: emails.filter((row) => row.status === 'sent').length,
@@ -139,11 +174,12 @@ export function reportText(
   const m = metrics;
   return [
     `GTM ${m.date} · mode ${input.mode} · x ${lanes.x} · email ${lanes.email} · films ${lanes.film} · replies ${lanes.reply}`,
-    `Leads: ${m.leads.found} found, ${m.leads.qualified} qualified (hn ${m.leads.bySource.hn}, ph ${m.leads.bySource.ph}, x ${m.leads.bySource.x})`,
+    `Leads: ${m.leads.found} found, ${m.leads.judged} judged by the scout, ${m.leads.qualified} qualified (hn ${m.leads.bySource.hn}, ph ${m.leads.bySource.ph}, x ${m.leads.bySource.x})${m.leads.found && !m.leads.judged ? '. The scout did not run: see the review file' : ''}`,
     `Spend: ${usd(m.spend.total)} (agents ${usd(m.spend.agents)}, data ${usd(m.spend.data)}, posts ${usd(m.spend.posts)}, email ${usd(m.spend.email)}, films ${usd(m.spend.films)})`,
     `Picks: x ${m.picks.x}, email ${m.picks.email}`,
     `Films: ${m.films.ordered} ordered, ${m.films.dryRun} dry run, ${m.films.ready} ready, ${m.films.failed} failed, ${m.films.late} late`,
     `X: ${m.x.posted} posted, ${m.x.drafts} draft, ${m.x.skipped} skipped`,
+    `X by hand: today's pack ${m.pack.today.status === 'none' ? 'none' : `${m.pack.today.posts} post(s), ${m.pack.today.posted} POSTED, ${m.pack.today.posts - m.pack.today.posted} NOT POSTED yet (the founder comments POSTED <lead id> <url> on the card)`}. Yesterday's pack: ${m.pack.yesterday ? `${m.pack.yesterday.posted} POSTED, ${m.pack.yesterday.notPosted} NOT POSTED` : 'none'}${m.pack.counting || (m.pack.today.status === 'none' && !m.pack.yesterday) ? '' : '. founder_user_id is not set, so no POSTED comment counts'}`,
     `Email: ${m.email.sent} sent, ${m.email.drafts} drafts, skipped: ${list(m.email.skipped)}`,
     `Replies: ${m.replies.in} in, ${m.replies.answered} answered, ${m.replies.toPerson} to a person. Opt-outs ${m.optOuts}. Removals ${m.removals} (${m.unmatchedRemovals} for domains we never touched). Bounces ${m.bounces}. Complaints ${m.complaints}.`,
     `Cost per qualified lead: ${m.costPerQualified === null ? 'n/a' : usd(m.costPerQualified)}. Last 7 days: ${m.week.qualified} qualified, ${usd(m.week.spend)}, ${m.week.costPerQualified === null ? 'n/a' : usd(m.week.costPerQualified)} per lead`,

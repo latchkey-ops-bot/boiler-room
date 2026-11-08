@@ -49,6 +49,9 @@ export function provenJurisdiction(
   return jurisdictionOverride(candidate.lead.domain, candidate.read) ?? proven;
 }
 
+/** The pages a scout's line may come from. */
+export const LINE_PAGES: readonly string[] = ['homepage', 'about page'];
+
 export function checkScout(
   output: unknown,
   batch: readonly Candidate[],
@@ -68,8 +71,13 @@ export function checkScout(
     }
     let line: LeadVerdict['line'] = null;
     if (verdict.line) {
-      const problem = quoteProblem(candidate.read, verdict.line.page, verdict.line.quote);
       const page = candidate.read.pages.find((item) => item.id === verdict.line?.page);
+      // Copy quotes what the product does, from its homepage or about page: never a privacy
+      // policy, terms, an imprint or a contact page ("Their website says: We never sell your data").
+      const problem =
+        page && !LINE_PAGES.includes(page.label)
+          ? `not_homepage_or_about: ${page.label}`
+          : quoteProblem(candidate.read, verdict.line.page, verdict.line.quote);
       if (problem || !page)
         corrections.push(`${candidate.candidate_id}: line refused (${problem ?? 'no page'})`);
       else line = { page: page.id, url: page.final_url, quote: verdict.line.quote.trim() };
@@ -135,15 +143,31 @@ export function chosenAddress(lead: LeadRow) {
 }
 
 /** Why the X lane is closed for a lead today, or null when it is open. */
-export function xBlocker(store: StoreData, lead: LeadRow, now: Date): string | null {
+export function xBlocker(
+  store: StoreData,
+  lead: LeadRow,
+  now: Date,
+  /**
+   * `post`: code posts it, so a verified X launch post is needed. `pack`: the founder posts it by
+   * hand and quotes the launch post only if there is one, so the social-proof floor alone holds.
+   */
+  how: 'post' | 'pack' = 'post',
+): string | null {
   if (lead.verdict?.verdict !== 'qualified') return 'not_qualified';
   if (!lead.product_name) return 'no_product_name';
-  if (!lead.x_post?.verified) return 'no_verified_x_post';
-  const proof = (lead.hn_points ?? 0) >= DISCOVERY.hn_min_points_x || lead.x_post.verified;
+  if (how === 'post' && !lead.x_post?.verified) return 'no_verified_x_post';
+  const proof =
+    (lead.hn_points ?? 0) >= DISCOVERY.hn_min_points_x || lead.x_post?.verified === true;
   if (!proof) return 'social_proof';
   if (lead.brand_flags.length) return 'brand_safety';
   if (suppressedBy(store, { domain: lead.domain })) return 'suppressed';
   if (contactedWithin(store, lead.domain, 'x_post', now)) return 'posted_before';
+  // A pack post counts as made only once the founder says so, so a startup already in a pack is
+  // never packed again: one the founder posted but did not report is never posted twice.
+  if (
+    (store.packs ?? []).some((pack) => pack.entries.some((entry) => entry.domain === lead.domain))
+  )
+    return 'packed_before';
   return null;
 }
 

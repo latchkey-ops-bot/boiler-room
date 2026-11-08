@@ -1,7 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { oklchLightness, toOklch } from '@boiler-room/schema';
+import { ApiError } from '@usenaive-sdk/managed-agents';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   colourWords,
@@ -11,7 +12,9 @@ import {
   generationNeeds,
   plateRamp,
 } from '../src/art/generate.ts';
+import { artDirect } from '../src/art/run.ts';
 import { decideStyle } from '../src/art/style.ts';
+import { artDecisions } from '../src/film/decisions.ts';
 import type { Naive } from '../src/naive/client.ts';
 import { artCampaign } from './art-fixtures.ts';
 
@@ -186,5 +189,105 @@ describe('generateImages', () => {
     const result = await generateImages(client, needs);
     expect(result.skipped[0]?.reason).toMatch(/model unavailable/);
     expect(result.generated).toHaveLength(1);
+    expect(result.unavailable).toBeUndefined();
+  });
+
+  it('asks once when Naive refuses the key image generation, and skips the rest as unavailable', async () => {
+    const { client, generate } = fakeClient();
+    generate.mockRejectedValue(forbidden());
+    const { needs } = needsFor('#222222');
+    expect(needs).toHaveLength(2);
+    const result = await generateImages(client, needs);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(result.generated).toEqual([]);
+    expect(result.spentMicroUsd).toBe(0);
+    expect(result.unavailable).toMatch(/^image generation unavailable: .*agents:write/);
+    expect(result.skipped.map((skip) => [skip.need.assetId, skip.reason])).toEqual([
+      ['event-field', result.unavailable],
+      ['hero-texture', result.unavailable],
+    ]);
+  });
+});
+
+/** What Naive answers `POST /v1/media/images` for a key without `agents:write`. */
+const forbidden = () =>
+  new ApiError(403, {
+    type: 'permission',
+    code: 'forbidden',
+    message: 'this API key is missing the `agents:write` scope',
+    request_id: 'req_test',
+  });
+
+describe('artDirect when image generation is unavailable', () => {
+  const dirs: string[] = [];
+  afterAll(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('writes the campaign with the captured pictures and says why nothing was generated', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'art-403-'));
+    dirs.push(dir);
+    const campaignPath = join(dir, 'campaign.json');
+    writeFileSync(campaignPath, JSON.stringify(artCampaign({ primary: '#222222' })));
+    const generate = vi.fn(async () => {
+      throw forbidden();
+    });
+    const sessionsCreate = vi.fn();
+    const client = {
+      credits: { show: async () => ({ balance_micro_usd: 1_000_000 }) },
+      files: { get: async (id: string) => ({ id, sha256: id }) },
+      media: { images: { generate } },
+      sessions: { create: sessionsCreate },
+    } as unknown as Naive;
+    const outPath = join(dir, 'campaign.art.json');
+    const code = await artDirect({
+      campaignPath,
+      outPath,
+      outRoot: dir,
+      agent: true,
+      maxReviews: 0,
+      client,
+    });
+    expect(code === 0 || code === 3).toBe(true);
+    expect(generate).toHaveBeenCalledTimes(1);
+    expect(sessionsCreate).not.toHaveBeenCalled();
+    const written = JSON.parse(readFileSync(outPath, 'utf8'));
+    expect(
+      Object.values(written.assets as Record<string, { provenance: string }>).some(
+        (asset) => asset.provenance === 'generated',
+      ),
+    ).toBe(false);
+    const report = JSON.parse(readFileSync(join(dir, 'campaign.art.report.json'), 'utf8'));
+    expect(report.generated).toEqual([]);
+    expect(report.generation_unavailable).toMatch(/^image generation unavailable/);
+    expect(report.not_generated.map((each: { asset_id: string }) => each.asset_id)).toEqual([
+      'event-field',
+      'hero-texture',
+    ]);
+    // What goes to decisions.json for the film.
+    const unavailable = artDecisions(report).find((each) =>
+      each.message.startsWith('Image generation unavailable'),
+    );
+    expect(unavailable).toMatchObject({
+      agent: 'art_director',
+      kind: 'decision',
+      stage: 'art_direction',
+      data: { notGenerated: ['event-field', 'hero-texture'] },
+    });
+    expect(unavailable?.why).toMatch(/^Image generation unavailable: .*agents:write/);
+  });
+
+  it('adds no such decision when generation worked or was not needed', () => {
+    const base = {
+      family: { name: 'Neutral Cut', background: '#ffffff', background_l: 1, ground: '#ffffff' },
+      colour_changes: [],
+      assets_per_scene: [],
+      generated: [],
+      sent_back: [],
+    };
+    for (const report of [base, { ...base, generation_unavailable: null, not_generated: [] }])
+      expect(artDecisions(report).map((each) => each.message)).not.toContainEqual(
+        expect.stringMatching(/unavailable/),
+      );
   });
 });

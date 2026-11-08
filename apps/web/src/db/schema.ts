@@ -88,6 +88,12 @@ export const films = sqliteTable(
      * labelled test film. Such a film is labelled simulated everywhere and never shown publicly.
      */
     standIn: integer('stand_in', { mode: 'boolean' }).notNull().default(false),
+    /**
+     * A free sample the GTM executor ordered for a startup's URL, under Boiler Room's own account
+     * (`BR_HOUSE_ACCOUNT_ID`). It runs with no approval step, is labelled a free sample on its film
+     * page, and never goes on the showcase. See src/server/gtm/.
+     */
+    sample: integer('sample', { mode: 'boolean' }).notNull().default(false),
     createdAt: timestamp('created_at').notNull(),
     updatedAt: timestamp('updated_at').notNull(),
   },
@@ -368,3 +374,56 @@ export const runnerControl = sqliteTable('runner_control', {
 export type FilmRun = typeof filmRuns.$inferSelect;
 export type RunEvent = typeof runEvents.$inferSelect;
 export type RunFile = typeof runFiles.$inferSelect;
+
+// ---------- GTM sample films ----------
+//
+// The GTM executor orders a free sample film of a startup's website through `/api/gtm/v1/`, with
+// its own service token (`GTM_SERVICE_TOKEN`). Each sample is an ordinary film of the house
+// account with `films.sample` set, plus one row here. Nobody but Boiler Room's own account and
+// whoever holds the film page link ever sees it.
+
+/** One GTM order. `film_id` is the film; the idempotency key makes a retried order the same film. */
+export const gtmOrders = sqliteTable(
+  'gtm_orders',
+  {
+    filmId: text('film_id')
+      .primaryKey()
+      .references(() => films.id, { onDelete: 'cascade' }),
+    idempotencyKey: text('idempotency_key').notNull(),
+    /** The executor's opaque lead id, such as `ld-7k2m9q`. Never a name or an address. */
+    leadRef: text('lead_ref').notNull(),
+    budgetMicroUsd: integer('budget_micro_usd').notNull(),
+    /** The film page's id, `/f/<share_id>`. Null until the executor shares a delivered film. */
+    shareId: text('share_id'),
+    sharedAt: integer('shared_at'),
+    /** Once set, the film page answers 410 and the files are gone. A tombstone: the row stays. */
+    withdrawnAt: integer('withdrawn_at'),
+    withdrawReason: text('withdraw_reason'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [
+    uniqueIndex('gtm_orders_idempotency_unique').on(t.idempotencyKey),
+    uniqueIndex('gtm_orders_share_unique').on(t.shareId),
+  ],
+);
+
+/**
+ * Removal requests made on a sample's film page, which the executor pulls with
+ * `GET /api/gtm/v1/requests` and turns into suppression. `seq` is the cursor.
+ */
+export const gtmRequests = sqliteTable(
+  'gtm_requests',
+  {
+    seq: integer('seq').primaryKey({ autoIncrement: true }),
+    kind: text('kind', { enum: ['removal', 'opt_out'] }).notNull(),
+    /** Where it came from: `film_page`. */
+    channel: text('channel').notNull(),
+    shareId: text('share_id'),
+    domain: text('domain'),
+    at: integer('at').notNull(),
+  },
+  (t) => [index('gtm_requests_share_idx').on(t.shareId)],
+);
+
+export type GtmOrder = typeof gtmOrders.$inferSelect;
+export type GtmRequest = typeof gtmRequests.$inferSelect;
