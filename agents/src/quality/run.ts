@@ -17,7 +17,7 @@ import {
 import { z } from 'zod';
 import type { AgentDefinition } from '../define.ts';
 import { qualityCheck } from '../definitions/quality-check.ts';
-import { naiveClient, scrub, usd } from '../naive/client.ts';
+import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { researchOutputSchema } from '../researcher/output.ts';
 import { PageIndex, pagesBundleSchema } from '../researcher/verify.ts';
 import {
@@ -59,6 +59,8 @@ export interface QcOptions {
   budgetUsd?: number;
   definition?: AgentDefinition;
   say?: (line: string) => void;
+  /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
+  client?: Naive;
 }
 
 const SEVERITY_ORDER = { blocker: 0, major: 1, minor: 2 } as const;
@@ -378,7 +380,7 @@ export async function qualityCheckRender(options: QcOptions): Promise<QcReport> 
     const budgetMicro = Math.round(
       (options.budgetUsd ?? definition.session.budget_micro_usd / 1e6) * 1e6,
     );
-    const client = naiveClient();
+    const client = options.client ?? naiveClient();
     run = await runReview({
       client,
       definition,

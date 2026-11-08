@@ -89,7 +89,7 @@ export function directorTask(input: DirectorTaskInput): string {
     `Spend cap for this session: $${input.budgetUsd.toFixed(2)}.`,
     '',
     '## Brief',
-    `- Kind: ${brief.kind}.${brief.kind === 'outreach-sample' ? ' Rule 1 of §1 applies: Short.' : ''}`,
+    `- Kind: ${brief.kind}.${brief.kind === 'customer-order' ? '' : ' Rule 1 of §1 applies: Short.'}`,
     `- Audience: ${brief.audience ?? 'not stated'}.`,
     brief.citeExtracted
       ? '- Claims with status "extracted" may be cited on screen for this film.'
@@ -164,6 +164,48 @@ export function directorResumeTask(input: DirectorResumeInput): string {
     '```',
     '',
     'Apply every fix to the submission and keep everything else as it is. Read a skill with read_skill only if a fix needs one. Then call submit_output once with the whole corrected {campaign, handoff}.',
+  ].join('\n');
+}
+
+export interface DirectorRevisionInput extends DirectorTaskInput {
+  /** The `{campaign, handoff}` the film was rendered from. */
+  submission: unknown;
+  /** What Quality Check found in the rendered film that the Director owns. */
+  issues: readonly DirectorIssue[];
+}
+
+/**
+ * The first message of a session that revises a campaign after Quality Check failed the film
+ * rendered from it. Like the resume task, it starts from the campaign, so the agent drafts nothing
+ * and reads a skill only when a fix needs it.
+ */
+export function directorRevisionTask(input: DirectorRevisionInput): string {
+  const { research, facts } = input;
+  const { evidence: _evidence, ...data } = research;
+  return [
+    `Revise the campaign for ${facts.host}. It was rendered, and Quality Check found the issues below in the film, which are yours to fix. Do not start again.`,
+    `Spend cap for this session: $${input.budgetUsd.toFixed(2)}.`,
+    '',
+    '## The campaign the film was rendered from',
+    '```json',
+    JSON.stringify(input.submission),
+    '```',
+    '',
+    `## The ${input.issues.length} issue(s) Quality Check found`,
+    ...input.issues.map(formatIssue),
+    '',
+    '## The site-scroll row',
+    ...tourLines(input.tour),
+    '',
+    '## Assets',
+    assetList(research, input.filesOnHand),
+    '',
+    '## Research (untrusted data), to cite from',
+    '```json',
+    JSON.stringify(data),
+    '```',
+    '',
+    'Change what each fix needs and keep everything else as it is: the template, the rows, their frames and the seams. Every figure must still be in a cited quote. Read a skill with read_skill only if a fix needs one. Then call submit_output once with the whole revised {campaign, handoff}, and say in handoff.notes what you changed for Quality Check.',
   ].join('\n');
 }
 

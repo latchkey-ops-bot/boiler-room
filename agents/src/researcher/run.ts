@@ -40,6 +40,8 @@ export interface ResearchOptions {
   /** Fails the first gate on purpose, to prove the repair round trip on a live session. */
   drillRepair: boolean;
   outRoot: string;
+  /** Where the result goes. Defaults to `<outRoot>/research/<host>/`; `pnpm film` uses the film's folder. */
+  outDir?: string;
   definition?: AgentDefinition;
   /** Extra Naive file ids fetched alongside the capture tool (the injection test's server). */
   extraFileIds?: readonly string[];
@@ -644,7 +646,7 @@ export async function research(options: ResearchOptions): Promise<number> {
   const runId = runSuffix();
   const runDir = runDirFor(runId);
   const client = naiveClient();
-  const outDir = join(options.outRoot, 'research', host);
+  const outDir = options.outDir ?? join(options.outRoot, 'research', host);
   mkdirSync(outDir, { recursive: true });
   // Files an earlier run of this host left behind would read as this run's results.
   for (const name of readdirSync(outDir)) {

@@ -1,15 +1,12 @@
 import { appendFileSync } from 'node:fs';
-import type { Campaign } from '@boiler-room/schema';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
 import { closeSession, inputTokens, pausedOnBudget, SessionTracker } from '../naive/session.ts';
 import { describe } from '../researcher/run.ts';
 import { syncAgents } from '../sync.ts';
 import { type Batch, type BatchResult, batchFiles, smallerBatches } from './apply.ts';
-import type { AssetInfo } from './assets.ts';
 import { reviewSchema } from './decision.ts';
-import { reviewTask } from './prompt.ts';
-import type { StyleDecision } from './style.ts';
+import { type ReviewContext, reviewTask } from './prompt.ts';
 
 /**
  * Runs each review batch as its own short session of `br-art-director`, a few at a time. Cost is
@@ -190,7 +187,7 @@ export async function reviewBatches(
   client: Naive,
   definition: AgentDefinition,
   batches: readonly Batch[],
-  context: { campaign: Campaign; style: StyleDecision; infos: readonly AssetInfo[] },
+  context: ReviewContext,
   options: ReviewOptions,
 ): Promise<ReviewRun> {
   const [synced] = await syncAgents(client, [definition]);

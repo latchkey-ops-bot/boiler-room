@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./film-order": "./src/film/order.ts"
   },
   "scripts": {
     "sync": "node src/cli/sync.ts",
@@ -13,11 +14,13 @@
     "injection": "node src/cli/injection.ts",
     "art": "node src/cli/art.ts",
     "qc": "node src/cli/qc.ts",
+    "film": "tsx src/cli/film.ts",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },
   "dependencies": {
     "@boiler-room/motion": "workspace:*",
+    "@boiler-room/render": "workspace:*",
     "@boiler-room/schema": "workspace:*",
     "@usenaive-sdk/managed-agents": "0.12.3",
     "esbuild": "0.28.2",

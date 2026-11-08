@@ -22,7 +22,7 @@ import {
 } from './checks.ts';
 import { type LoopClient, type LoopResult, runDirectorSession, type StreamEvent } from './loop.ts';
 import type { DirectorBrief } from './output.ts';
-import { directorResumeTask, directorTask } from './prompt.ts';
+import { directorResumeTask, directorRevisionTask, directorTask } from './prompt.ts';
 
 export const MODELS: Record<string, string> = {
   sonnet: 'anthropic/claude-sonnet-5.5',
@@ -42,6 +42,13 @@ export interface DirectOptions {
   definition?: AgentDefinition;
   /** Sends the first submission back on purpose, to prove the repair loop on a live session. */
   drillRepair?: boolean;
+  /**
+   * Revise an earlier campaign instead of writing one: its `{campaign, handoff}` and the Quality
+   * Check issues the Director owns. The checks and the repair loop are the same.
+   */
+  revise?: { submission: unknown; issues: readonly DirectorIssue[] };
+  /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
+  client?: Naive;
 }
 
 /** The issue a repair drill adds to the first submission. */
@@ -122,7 +129,7 @@ export async function direct(options: DirectOptions): Promise<number> {
   const eventsPath = join(outDir, 'director-events.jsonl');
   writeFileSync(eventsPath, '');
 
-  const client: Naive = naiveClient();
+  const client: Naive = options.client ?? naiveClient();
   const balanceBefore = (await client.credits.show()).balance_micro_usd;
   const report: Record<string, unknown> = {
     research: options.researchPath,
@@ -132,6 +139,9 @@ export async function direct(options: DirectOptions): Promise<number> {
     brief: options.brief,
     facts,
     budget_micro_usd: budgetMicro,
+    ...(options.revise
+      ? { revise: options.revise.issues.map((issue) => `${issue.code} at ${issue.path}`) }
+      : {}),
   };
   const verdicts: Verdict[] = [];
   let exitCode = 1;
@@ -211,8 +221,15 @@ export async function direct(options: DirectOptions): Promise<number> {
       });
     };
 
-    let result = await runSession(directorTask(taskInput), options.maxRepairs, 'first');
-    recordSession('first', result);
+    const firstLabel = options.revise ? 'revise' : 'first';
+    let result = await runSession(
+      options.revise
+        ? directorRevisionTask({ ...taskInput, ...options.revise })
+        : directorTask(taskInput),
+      options.maxRepairs,
+      firstLabel,
+    );
+    recordSession(firstLabel, result);
     // A session paused on its budget has been cancelled. It is retried once, smaller: a fresh
     // session that starts from the last submission and the issues it left, with no drafting and no
     // skills to read again. With no submission to start from, a retry would be the same task, so

@@ -17,6 +17,7 @@ import {
   generateImages,
   generationNeeds,
 } from './generate.ts';
+import type { ArtIssue } from './prompt.ts';
 import { type ReviewRun, reviewBatches } from './review.ts';
 import { decideStyle, type Lean } from './style.ts';
 
@@ -38,6 +39,10 @@ export interface ArtOptions {
   /** False runs the code alone: default picks, no session, and nothing generated. */
   agent: boolean;
   definition?: AgentDefinition;
+  /** Quality Check issues the Art Director owns, from an earlier render, after a route-back. */
+  issues?: readonly ArtIssue[];
+  /** The Naive client to use. `pnpm film` passes one that holds the film's spend cap. */
+  client?: Naive;
 }
 
 const MIN_TILES = 6;
@@ -136,7 +141,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
       : join(options.outRoot, 'research', host, 'research.json'),
   );
 
-  const client = naiveClient();
+  const client = options.client ?? naiveClient();
   const balanceBefore = (await client.credits.show()).balance_micro_usd;
   const digests = await fileDigests(client, campaign);
 
@@ -187,7 +192,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
         client,
         definition,
         batches,
-        { campaign: styled, style, infos },
+        { campaign: styled, style, infos, ...(options.issues ? { issues: options.issues } : {}) },
         {
           budgetMicroUsd: Math.round((options.budgetUsd ?? DEFAULT_REVIEW_BUDGET_USD) * 1e6),
           concurrency: options.concurrency ?? 2,
@@ -285,6 +290,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
   const report = {
     campaign: campaign.id,
     input: campaignPath,
+    quality_issues: options.issues ?? [],
     output: outPath,
     research: research.path ?? null,
     family: {

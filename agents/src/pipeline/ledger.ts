@@ -1,11 +1,12 @@
 /**
- * A film's spend ledger and the limits on sending it round again. Nothing routes Quality Check
- * failures back to the Director, the Art Director or motion yet; whatever does must stop at these
- * limits, because every film fails Quality Check today on motion's placeholder scenes, so a plain
- * "retry until it passes" loop would never end. `pnpm direct`, `pnpm art` and `pnpm qc` already
- * record what they spend here and refuse to start once the film is over its limits.
+ * A film's spend ledger and the limits on sending it round again. `pnpm film` routes Quality Check
+ * failures back to the Director or the Art Director, and stops at its own limits: 2 route-backs
+ * and the film's USD cap. `pnpm direct`, `pnpm art` and `pnpm qc` record what they spend here too,
+ * and refuse to start once the film is over these limits, because a plain "retry until it passes"
+ * loop would never end.
  *
- * The ledger lives beside the film's campaign.json, as `film-ledger.json`.
+ * The ledger lives beside the film's campaign.json, as `film-ledger.json`, or in the film's own
+ * folder for `pnpm film`.
  */
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +15,14 @@ import type { QcIssue, QcReport } from '../quality/output.ts';
 
 export const LEDGER_FILE = 'film-ledger.json';
 
-export const STEPS = ['director', 'art-director', 'art-images', 'quality-check'] as const;
+export const STEPS = [
+  'researcher',
+  'director',
+  'art-director',
+  'art-images',
+  'render',
+  'quality-check',
+] as const;
 export type Step = (typeof STEPS)[number];
 
 export interface FilmLimits {

@@ -14,8 +14,10 @@ const httpUrl = z.httpUrl();
 /** The Orchestrator's brief for one film. */
 export const directorBriefSchema = z.strictObject({
   kind: z
-    .enum(['outreach-sample', 'customer-order'])
-    .describe('An outreach sample is made unasked for a lead; a customer order is paid for.'),
+    .enum(['outreach-sample', 'social-cut', 'customer-order'])
+    .describe(
+      'An outreach sample is made unasked for a lead; a social cut is a customer order for a Short film; a customer order is paid for.',
+    ),
   audience: z.string().min(1).nullable(),
   citeExtracted: z
     .boolean()

@@ -30,12 +30,38 @@ const copyOf = (campaign: Campaign, sceneId: string) => {
   return scene?.text.map((item) => `${item.role}: ${item.value}`) ?? [];
 };
 
+/** What Quality Check found in a rendered film that the Art Director owns. */
+export interface ArtIssue {
+  check: string;
+  severity: string;
+  sceneId: string | null;
+  frame: number | null;
+  what: string;
+  fix: string;
+}
+
+export interface ReviewContext {
+  campaign: Campaign;
+  style: StyleDecision;
+  infos: readonly AssetInfo[];
+  /** Quality Check issues from an earlier render of this film, after a route-back. */
+  issues?: readonly ArtIssue[];
+}
+
+/** The issues a batch must weigh: those on its scene, or on the generated images' scenes. */
+export function issuesFor(batch: Batch, issues: readonly ArtIssue[]): ArtIssue[] {
+  const scenes = new Set(
+    batch.kind === 'generated'
+      ? batch.images.flatMap((image) => image.need.sceneIds)
+      : [batch.proposal.sceneId],
+  );
+  return issues.filter((issue) => issue.sceneId !== null && scenes.has(issue.sceneId));
+}
+
 /** The first message of one review session: the batch, as data. */
-export function reviewTask(
-  batch: Batch,
-  context: { campaign: Campaign; style: StyleDecision; infos: readonly AssetInfo[] },
-): string {
+export function reviewTask(batch: Batch, context: ReviewContext): string {
   const { campaign, style, infos } = context;
+  const found = issuesFor(batch, context.issues ?? []);
   const info = new Map(infos.map((item) => [item.id, item]));
   const files = batchFiles(batch, infos);
   const film = `${campaign.brand.name} (${campaign.sourceUrl}), a ${style.familyName} film`;
@@ -93,6 +119,20 @@ export function reviewTask(
     `File ids, in order: ${JSON.stringify(files)}. Call view_image once with exactly these.`,
     'The review, as JSON. The pictures are listed in the same order as the file ids.',
     JSON.stringify(review),
+    ...(found.length
+      ? [
+          'Quality Check rendered this film and found these issues here, which are yours. Weigh them: the default is what was rendered, so keep it only if no candidate fixes them.',
+          JSON.stringify(
+            found.map(({ check, severity, frame, what, fix }) => ({
+              check,
+              severity,
+              frame,
+              what,
+              fix,
+            })),
+          ),
+        ]
+      : []),
     `${answer} Then call submit_output once.`,
   ].join('\n\n');
 }

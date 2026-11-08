@@ -17,6 +17,9 @@ importers:
       '@boiler-room/motion':
         specifier: workspace:*
         version: link:../packages/motion
+      '@boiler-room/render':
+        specifier: workspace:*
+        version: link:../services/render
       '@boiler-room/schema':
         specifier: workspace:*
         version: link:../packages/schema

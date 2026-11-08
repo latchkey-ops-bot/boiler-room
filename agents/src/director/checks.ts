@@ -146,6 +146,7 @@ export function expectedTemplate(
 ): { label: 'Short' | 'Standard' | 'Long'; rule: string } {
   if (brief.kind === 'outreach-sample')
     return { label: 'Short', rule: 'rule 1: an outreach sample is Short' };
+  if (brief.kind === 'social-cut') return { label: 'Short', rule: 'rule 1: a social cut is Short' };
   if (Math.min(usable, facts.claims) < 3)
     return { label: 'Short', rule: 'rule 2: fewer than 3 usable claims' };
   const verifiedNumeric = facts.approvedClaimIds.filter((id) => facts.numericClaimIds.includes(id));
