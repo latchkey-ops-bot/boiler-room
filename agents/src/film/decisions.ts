@@ -283,7 +283,10 @@ export function artDecisions(report: Json): DecisionDraft[] {
         kind: 'decision',
         stage: 'art_direction',
         message: `Art Director review ${text(review.batch)} paused on its budget and was cancelled`,
-        why: 'A session parked on its budget waits for a person. Its pictures were offered again in smaller batches.',
+        why:
+          review.agent_cap_spent === true
+            ? "A session parked on its budget waits for a person. The agent's own budget cap had no room for its first call; its pictures were offered again in smaller batches if they could be split, and once one that could not be split met the cap too, no further review started, leaving the code's ranking."
+            : 'A session parked on its budget waits for a person. Its pictures were offered again in smaller batches.',
         data: { sessionId: review.session_id ?? null },
       });
     }

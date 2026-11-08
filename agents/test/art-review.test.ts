@@ -259,6 +259,83 @@ describe('art review sessions', () => {
     expect(raw.sessions.send).not.toHaveBeenCalled();
   });
 
+  it("starts no further review once the agent's own cap has no room", async () => {
+    const { client, log, raw } = fakeClient({
+      stream: () =>
+        (async function* () {
+          yield {
+            seq: 1,
+            type: 'budget.exceeded',
+            data: {
+              message: "the agent's budget cap has no room for this call",
+              code: 'budget_exceeded',
+              param: 'budget.cap_micro_usd',
+            },
+          };
+          yield { seq: 2, type: 'session.idle', data: { stop_reason: 'budget_paused' } };
+        })(),
+      get: () => ({ status: 'idle', stop_reason: 'budget_paused', consumed_micro_usd: 0 }),
+    });
+    const run = await reviewBatches(client, artDirector, batches, context, {
+      ...options(),
+      concurrency: 1,
+      budgetMicroUsd: 1_000_000,
+    });
+    // One session of a batch that cannot be split pauses at nothing spent; nothing else starts.
+    expect(raw.sessions.create).toHaveBeenCalledTimes(1);
+    expect(log.filter((line) => line.startsWith('cancel'))).toEqual(['cancel ses_1']);
+    expect(run.sessions[0]).toMatchObject({ budget_paused: true, agent_cap_spent: true });
+    expect(run.sessions[0]?.outcome).toBe(
+      "paused on its budget (the agent's own cap had no room) and cancelled; no smaller batch fits, so no further review starts",
+    );
+    expect(run.sessions.slice(1).map((each) => each.outcome)).toEqual(
+      batches
+        .slice(1)
+        .map(() => "not started: the agent's own budget cap has no room for a session"),
+    );
+    expect(run.results).toHaveLength(batches.length);
+  });
+
+  it("tries the smaller batches next after the agent's cap refused a call, then stops", async () => {
+    const two = (id: string) =>
+      ({
+        kind: 'generated',
+        id,
+        images: [1, 2].map((index) => ({
+          need: {
+            assetId: `${id}-${index}`,
+            purpose: 'event-field',
+            sceneIds: ['s'],
+            prompt: 'p',
+            aspectRatio: '16:9',
+          },
+          fileId: `fil_${id}_${index}`,
+        })),
+      }) as unknown as Batch;
+    const { client, raw } = fakeClient({
+      stream: () =>
+        (async function* () {
+          yield { seq: 1, type: 'budget.exceeded', data: { param: 'budget.cap_micro_usd' } };
+          yield { seq: 2, type: 'session.idle', data: { stop_reason: 'budget_paused' } };
+        })(),
+      get: () => ({ status: 'idle', stop_reason: 'budget_paused', consumed_micro_usd: 0 }),
+    });
+    const run = await reviewBatches(client, artDirector, [two('a'), two('b'), two('c')], context, {
+      ...options(),
+      concurrency: 1,
+      budgetMicroUsd: 1_000_000,
+    });
+    // a, then its first half as the probe, which cannot be split and meets the cap: stop.
+    expect(raw.sessions.create).toHaveBeenCalledTimes(2);
+    expect(run.sessions.map((each) => [each.batch, each.session_id !== null])).toEqual([
+      ['a', true],
+      ['a-a', true],
+      ['a-b', false],
+      ['b', false],
+      ['c', false],
+    ]);
+  });
+
   it('records a session that could not start', async () => {
     const { client, raw } = fakeClient({
       stream: () => (async function* () {})(),

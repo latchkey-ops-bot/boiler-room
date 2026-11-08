@@ -62,6 +62,8 @@ export interface StageOutcome<T> {
   sessionIds: string[];
   /** A session of the stage was paused on its budget. */
   budgetPaused?: boolean;
+  /** Sessions the stage itself found parked on their budget and cancelled. */
+  cancelled?: string[];
   /** The stage already retried smaller after a pause, so the film does not retry it again. */
   retriedSmaller?: boolean;
   /** The stage's ceiling stopped it. */
@@ -300,7 +302,7 @@ export interface StageRecord {
   sessionIds: string[];
   computerIds: string[];
   budgetPaused: boolean;
-  /** Sessions the film found parked and cancelled after the stage. */
+  /** Sessions parked on their budget and cancelled, by the stage itself or by the film after it. */
   cancelled: string[];
   files: Record<string, string>;
   /** What was decided in this stage, as in decisions.json. */
@@ -638,6 +640,8 @@ class FilmRun {
       if (closed?.budgetPaused) budgetPaused = true;
       if (closed?.cancelled) cancelled.push(id);
     }
+    // The stage's own cancellations are its decisions already; the film's are recorded below.
+    const byStage = (outcome.cancelled ?? []).filter((id) => !cancelled.includes(id));
     this.spend(
       step,
       outcome.cost,
@@ -675,7 +679,7 @@ class FilmRun {
       started,
       limit.ceiling,
       outcome,
-      { cancelled, budgetPaused },
+      { cancelled: [...byStage, ...cancelled], budgetPaused },
       entries,
     );
     this.write();

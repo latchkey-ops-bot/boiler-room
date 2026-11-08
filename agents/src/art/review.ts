@@ -1,7 +1,13 @@
 import { appendFileSync } from 'node:fs';
 import type { AgentDefinition } from '../define.ts';
 import { type Naive, type StreamRetry, scrub, sessionEvents, usd } from '../naive/client.ts';
-import { closeSession, inputTokens, pausedOnBudget, SessionTracker } from '../naive/session.ts';
+import {
+  AGENT_CAP,
+  closeSession,
+  inputTokens,
+  pausedOnBudget,
+  SessionTracker,
+} from '../naive/session.ts';
 import { describe } from '../researcher/run.ts';
 import { syncAgents } from '../sync.ts';
 import { type Batch, type BatchResult, batchFiles, smallerBatches } from './apply.ts';
@@ -14,7 +20,12 @@ import { type ReviewContext, reviewTask } from './prompt.ts';
  * its time is interrupted, and once the run has spent its budget no further batch starts. A batch
  * that ends without a valid review leaves the code's ranking for its scenes. The review is read
  * from the `session.idle` event that ends the turn, never from `sessions.get`. A session paused on
- * its budget is cancelled, recorded, and its batch retried once as smaller batches.
+ * its budget is cancelled, recorded, and its batch retried once as smaller batches. When it was the
+ * agent's own cap that had no room before the session spent anything, the smaller batches go next,
+ * as a probe: a smaller call can still fit what is left of the day's cap, as one did on 8 November.
+ * If a batch that cannot be made smaller meets the cap the same way, nothing fits, and no further
+ * batch starts in this run: on 8 November the cap was spent and 25 sessions paused one after
+ * another.
  */
 
 export interface ReviewOptions {
@@ -43,6 +54,8 @@ export interface SessionRecord {
   task_chars?: number;
   /** The session was paused on its budget, and has been cancelled. */
   budget_paused?: boolean;
+  /** It was paused by the agent's own cap, before it spent anything. */
+  agent_cap_spent?: boolean;
 }
 
 export interface ReviewRun {
@@ -167,11 +180,14 @@ async function runBatch(
   const final = await closeSession(client, session.id);
   record.consumed_micro_usd = final.consumedMicroUsd ?? 0;
 
-  if (final.budgetPaused || tracker.budgetPaused)
+  if (final.budgetPaused || tracker.budgetPaused) {
+    if (tracker.budgetExceeded === AGENT_CAP && record.consumed_micro_usd === 0)
+      record.agent_cap_spent = true;
     return fail(
-      `paused on its budget and ${final.cancelled ? 'cancelled' : 'could not be cancelled'}`,
+      `paused on its budget${record.agent_cap_spent ? " (the agent's own cap had no room)" : ''} and ${final.cancelled ? 'cancelled' : 'could not be cancelled'}`,
       true,
     );
+  }
   if (stopped) return fail(`interrupted: ${stopped}`);
   if (!tracker.submissions || tracker.output == null)
     return fail(`no review submitted (${final.status}/${final.stopReason})`);
@@ -202,14 +218,18 @@ export async function reviewBatches(
   // A batch paused on its budget is retried once, as smaller batches added to the end.
   const queue: Batch[] = [...batches];
   const retries = new Set<Batch>();
+  // Set once the agent's own cap has no room: every later session would pause the same way.
+  let capSpent = false;
 
   const worker = async () => {
     for (;;) {
       const batch = queue[next];
       next += 1;
       if (!batch) return;
-      if (spent >= options.budgetMicroUsd) {
-        const failure = `not started: the run's review budget of ${usd(options.budgetMicroUsd)} is spent`;
+      if (spent >= options.budgetMicroUsd || capSpent) {
+        const failure = capSpent
+          ? `not started: the agent's own budget cap has no room for a session`
+          : `not started: the run's review budget of ${usd(options.budgetMicroUsd)} is spent`;
         results.push({ batch, review: undefined, failure });
         sessions.push({
           batch: batch.id,
@@ -237,9 +257,15 @@ export async function reviewBatches(
         spent += record.consumed_micro_usd;
         sessions.push(record);
         const smaller = paused && !retries.has(batch) ? smallerBatches(batch) : [];
+        if (record.agent_cap_spent && smaller.length === 0) {
+          capSpent = true;
+          record.outcome += '; no smaller batch fits, so no further review starts';
+        }
         if (smaller.length > 0) {
           for (const each of smaller) retries.add(each);
-          queue.push(...smaller);
+          // After the agent's cap refused a call, the smaller batches go next, to learn if any fits.
+          if (record.agent_cap_spent) queue.splice(next, 0, ...smaller);
+          else queue.push(...smaller);
           record.outcome += `; retried as ${smaller.map((each) => each.id).join(' and ')}`;
         } else results.push(result);
         say(

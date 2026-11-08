@@ -42,6 +42,11 @@ function readJson(file: string): Json | undefined {
 }
 
 const num = (value: unknown) => (typeof value === 'number' && Number.isFinite(value) ? value : 0);
+/** The sessions a stage's report says paused on their budget, which the stage cancelled. */
+const pausedIds = (sessions: Json[]): string[] =>
+  sessions.flatMap((each) =>
+    each.budget_paused === true && typeof each.session_id === 'string' ? [each.session_id] : [],
+  );
 const message = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 const cost = (model: number, compute = 0, media = 0): StageCost => ({
   modelMicroUsd: Math.max(0, Math.round(model)),
@@ -303,6 +308,7 @@ export class NaiveCrew implements FilmCrew {
       ),
       sessionIds: this.sessionsOf(capped),
       budgetPaused: sessions.some((each) => each.budget_paused === true),
+      cancelled: pausedIds(sessions),
       // `direct` retries a budget pause itself, once, from its last submission.
       retriedSmaller: true,
       decisions: directorDecisions(report, ok ? readJson(handoffFile) : undefined),
@@ -369,6 +375,7 @@ export class NaiveCrew implements FilmCrew {
         : cost(await capped.committedMicroUsd()),
       sessionIds: this.sessionsOf(capped),
       budgetPaused: reviews.some((each) => each.budget_paused === true),
+      cancelled: pausedIds(reviews),
       // The review retries a paused batch itself, as smaller batches.
       retriedSmaller: true,
       decisions,
@@ -476,6 +483,7 @@ export class NaiveCrew implements FilmCrew {
         cost: cost(report.review?.costMicroUsd ?? (await capped.committedMicroUsd())),
         sessionIds: this.sessionsOf(capped),
         budgetPaused: report.review?.sessions?.some((each) => each.budget_paused) ?? false,
+        cancelled: pausedIds((report.review?.sessions ?? []) as unknown as Json[]),
         // A paused review is retried by the review itself, as two half sessions.
         retriedSmaller: true,
         decisions: qcDecisions(report as unknown as Json),

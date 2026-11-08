@@ -24,6 +24,12 @@ export const inputTokens = (usage: Partial<TokenUsage> | null | undefined): numb
 export const BUDGET_PAUSED = 'budget_paused';
 
 /**
+ * The budget a `budget.exceeded` event names when the agent's own cap, over its period, has no room
+ * for the call, rather than the session's budget. No smaller session of that agent fits either.
+ */
+export const AGENT_CAP = 'budget.cap_micro_usd';
+
+/**
  * Stop reasons that leave a session idle but waiting for a person: the dashboard shows it as
  * waiting for the founder. A loop never leaves one: it cancels it.
  */
@@ -51,6 +57,8 @@ export class SessionTracker {
   stopReason: string | undefined;
   /** True once the session was paused on its budget. */
   budgetPaused = false;
+  /** The budget the last `budget.exceeded` event named, such as `AGENT_CAP`. */
+  budgetExceeded: string | undefined;
   /** The latest `session.usage`: tokens and spend so far. */
   usage: TokenUsage | undefined;
   consumedMicroUsd = 0;
@@ -79,6 +87,7 @@ export class SessionTracker {
         return;
       case 'budget.exceeded':
         this.budgetPaused = true;
+        if (typeof data.param === 'string') this.budgetExceeded = data.param;
         return;
       case 'session.usage': {
         const usage = data.token_usage as TokenUsage | undefined;
