@@ -5,6 +5,7 @@ import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
 import { logoReveal } from './logo-reveal.tsx';
 import { proofBars } from './proof-bars.tsx';
+import { railWords } from './rail-words.tsx';
 import { siteHero } from './site-hero.tsx';
 import { siteScroll } from './site-scroll.tsx';
 import { statCounter } from './stat-counter.tsx';
@@ -30,6 +31,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'feature-card': featureCard,
   'tile-wall': tileWall,
   'status-relay': statusRelay,
+  'rail-words': railWords,
   'colour-event': colourEventScene,
   'end-card': endCard,
 };
