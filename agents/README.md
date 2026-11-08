@@ -919,12 +919,32 @@ each stage the same function its own command runs.
 6. **Quality Check** on the render folder: `film.mp4`, its manifest and `film.quality/`.
 
 **A scene motion refuses to draw.** Neither `validateCampaign` nor `validateFilm` measures type,
-so copy that does not fit its line at its cap height passes the gate and stops the render on the
-computers: a type card throws `TYPE_CARD_LAYOUT` and a stat-counter `LAYOUT_UNFIT` (the first
-live film of linear.app stopped on "Product development system" in its name card). The fix is
-shorter copy, so each such error becomes one blocker issue for the Director and routes back like
-a Quality Check failure, below. A failed render is counted at what its computers cost, which
-`renderCampaign` now attaches to its error.
+so copy that does not fit its line at its cap height passes the gate: a type card throws
+`TYPE_CARD_LAYOUT` and a stat-counter `LAYOUT_UNFIT` (the first live film of linear.app stopped
+on "Product development system" in its name card). Three layers now catch it:
+
+- The Director's own checks refuse a type-card line far too long for its format (`CARD_FIT`: 26
+  characters on one line at 16:9, 19 at 9:16, 18 at 1:1), in its repair loop, before any film
+  stage sees it.
+- `prepareFilm` in `@boiler-room/motion` measures every type card and stat-counter of the cut
+  with the brand fonts loaded (`copyFitIssues`), in the page where `calculateMetadata` runs. The
+  render selects the film there on this machine before any computer exists, so the refusal costs
+  nothing and names every scene at once. On 8 November it named both posthog.com scenes that two
+  renders on computers had found one at a time, and linear.app's value line.
+- On the computers, a chunk motion refuses is not rendered again on a new one (it would refuse
+  the same way), and the other chunks draw on so that their refusals join the same failure
+  (`MotionRefused` in `@boiler-room/render`). A chunk that fails on every try names each try's
+  error, not only the last.
+
+Each refusal becomes one blocker issue for the Director and routes back like a Quality Check
+failure, below. A failed render is counted at what its computers cost, which `renderCampaign`
+attaches to its error.
+
+**A finished chunk with no exit code.** Naive sometimes ends a command's stream with an exit frame
+whose `exit_code` is null. `runCommand` reports that as an unknown status, as it does a stream
+with no exit frame, so a chunk whose worker printed `done` is fetched and checked against the
+size and SHA-256 measured on the computer, rather than rendered again. On 8 November two
+posthog.com chunks were lost on both tries this way.
 
 **Route-back.** A failed review's issues are sorted by `routable()` (no minor issue and no
 expected placeholder failure ever sends a film back). The Director's go back to the Director,
