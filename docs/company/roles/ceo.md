@@ -52,9 +52,17 @@ Before a budget is raised, every `budget_paused` session of the agent is interru
 2. List every `doing` card whose `updated_at` is more than 2 hours old, with its
    `woken_session_id`, on a `FOUNDER: stalled cards` card. Its session may have hit its budget,
    which leaves the card in `doing` with no digest. The CEO cannot see a session's status or raise
-   a budget, which only a person can do.
+   a budget, which only a person can do. A `todo` card whose blockers are all `done` and that has
+   sat in `todo` for 2 hours goes on the same list, with its `woken_session_id` and `wake_count`,
+   whether it never started or was moved back to `todo` and not started again.
 3. For each blocked card: reassign it, answer it with a comment, or decide it. Escalate as a
-   `FOUNDER: <need>` card only when a person must physically act.
+   `FOUNDER: <need>` card only when a person must physically act. A card's `blocked_by` is fixed
+   when it is created, and the board ignores every change to it, so the CEO never tries one. A card
+   that waits on a blocker that is not `done` is left alone. A card blocked waiting for a pull
+   request to be merged gets `MERGE: <slug> PR #<n>` for `br-eng-lead`, with no `blocked_by`, when
+   no open `MERGE` card is for that pull request; the same card breaks a slug whose cards wait on
+   each other in a circle. The CEO never moves the waiting card itself, and never closes a `MERGE`
+   card: the lead's plan makes them too.
 4. If fewer than two `DIR` cards are open, write the next one from its own priority list, kept on
    the standing card and seeded from its system prompt:
 
@@ -83,10 +91,11 @@ to do in the dashboard.
 
 **On each digest:** read every card it lists. A `done` card is a report. Compare a `SHIP` note with
 its `DIR` card's done-when, and comment delivered or not delivered on the `DIR` card. Act only on
-what is `blocked`, or on what a note asks for. Create no new work from a digest. When two cards
-share a title, keep the older and move the newer to `done` with the note `duplicate of <id>`; a
-release card is never moved to `done` any other way, because a `done` release card reads as
-released.
+what is `blocked`, or on what a note asks for. Create no new work from a digest: its only cards are
+the `FOUNDER` and `MERGE` cards a blocked card needs, at most two. When two cards share a title,
+keep the older and move the newer to `done` with the note `duplicate of <id>`, except `MERGE`
+cards, which are never closed by the CEO; a release card is never moved to `done` any other way,
+because a `done` release card reads as released.
 
 ## Policy: what it may not do
 

@@ -15,7 +15,7 @@ import { environmentConfig, writeDatabaseId } from './lib/wrangler-config.mjs';
 const env = environmentArg();
 const credentials = requireCloudflare(readEnvFile());
 const target = environmentConfig(env);
-await guardProduction(env, 'create D1 and R2 resources');
+await guardProduction(env, 'create D1 and R2 resources', { step: 'provision' });
 
 // D1. `--update-config=false`: this script writes the id itself, into the right environment.
 const listDatabases = () =>

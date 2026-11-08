@@ -1,4 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
   CONTROL_PLANE,
@@ -19,10 +22,13 @@ import {
 } from '../src/company/tools.ts';
 import {
   CEO_TOOLS_MESSAGE,
+  DEPLOY_KEYS_STEPS,
   gtmAllowed,
   judgeCeoTools,
+  judgeDeployKeys,
   judgeGtmStored,
   judgeVerify,
+  verifyMessage,
   verifySchema,
   verifySteps,
 } from '../src/company/verify.ts';
@@ -30,9 +36,11 @@ import { BOARD_OFF } from '../src/define.ts';
 import {
   CARD_CONTROL_RULE,
   CEO_METADATA,
+  MERGE_RULE,
   SWEEP_HOLD_RULE,
 } from '../src/definitions/company/ceo.ts';
 import {
+  CARD_PREFIXES,
   MEMBER_RULES,
   RELEASE_RULE,
   UNKNOWN_CARD_RULE,
@@ -199,10 +207,14 @@ describe('every company toolset', () => {
     }
   });
 
-  it('gives the CEO no computer and no deploy, and only the lead the apps tool', () => {
+  it('gives the CEO no computer and no deploy, and nobody the apps tool: the web app is on Cloudflare', () => {
     for (const tool of SANDBOX) expect(ceo.tools.configs[tool], tool).toEqual(OFF);
-    for (const agent of company.filter((item) => item !== engineeringLead)) {
+    for (const agent of company) {
       expect(agent.tools.configs.apps, agent.name).toMatchObject(OFF);
+    }
+    for (const agent of [engineeringLead, engineer]) {
+      expect(agent.tools.configs.apps?.config, agent.name).toEqual({ allowed_apps: [] });
+      for (const tool of APP_TOOLS) expect(agent.tools.configs[appTool(tool)], tool).toEqual(OFF);
     }
   });
 });
@@ -605,6 +617,207 @@ describe("the CEO's own cards", () => {
   });
 });
 
+describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it('are a card type the lead owns', () => {
+    expect(CARD_PREFIXES).toContain('MERGE');
+    const ceoSkill = flat('ceo');
+    expect(ceoSkill).toContain('| `MERGE: <slug> <n>` | `br-eng-lead` | The engineering lead |');
+    expect(ceoSkill).toContain('| `MERGE: <slug> PR #<n>` | `br-eng-lead` | You,');
+    expect(engineeringLead.description).toContain('ENG and MERGE cards');
+  });
+
+  it('chain dependent ENG cards in the plan, and the lead checks the plan for a wait on itself', () => {
+    const lead = flat('eng-lead');
+    expect(lead).toContain(
+      'For each `ENG` card n, create `MERGE: <slug> <n>` assigned to yourself and `blocked_by` that `ENG` card only',
+    );
+    expect(lead).toContain(
+      '`ENG` card n+1 is `blocked_by` `MERGE: <slug> <n>`, never by `ENG` card n',
+    );
+    expect(lead).toContain(
+      '`SHIP: <slug>` assigned to yourself and `blocked_by` the last `MERGE` card only',
+    );
+    expect(lead).toContain('the board ignores every later change to it');
+    expect(lead).toContain(
+      'no card is blocked, directly or through a chain, by a card that waits for it',
+    );
+    expect(lead).toContain('Check the plan before you create it');
+  });
+
+  it('merge one pull request with a merge commit, on the same checks as SHIP, then wake the card that waits', () => {
+    const lead = flat('eng-lead');
+    expect(lead).toContain('## On a `MERGE: <slug> <n>` or `MERGE: <slug> PR #<n>` card');
+    expect(lead).toContain('`{"merge_method":"merge"}`');
+    expect(lead).toContain('`MERGE` and `SHIP` cards check a pull request this way');
+    expect(lead).toContain('**The base already fails it.**');
+    expect(lead).toContain('If no `ENG` card of the slug names it, it is not yours to merge');
+    expect(lead).toContain('its `wake_count` is below 3');
+    expect(lead).toContain(
+      'the board starts a card at most three times, and that is the only limit',
+    );
+    expect(lead).toContain('**It cannot be woken** when its `wake_count` is 3 or more');
+    expect(lead).toContain('Then move this card to `blocked`, not `done`');
+  });
+
+  it('are made by the CEO for a card blocked waiting for a pull request, never by editing blocked_by', () => {
+    expect(ceo.system).toContain(MERGE_RULE);
+    expect(MERGE_RULE).toContain('create MERGE: <slug> PR #<n> for br-eng-lead with no blocked_by');
+    expect(MERGE_RULE).toContain('The board ignores any change to blocked_by, so never try one');
+    expect(MERGE_RULE).toContain('a note saying one was made is wrong');
+    const skill = flat('ceo');
+    expect(skill).toContain('the board ignores every later change to it, so never try one');
+    expect(skill).toContain(
+      'create `MERGE: <slug> PR #<n>` assigned to `br-eng-lead` with no `blocked_by`',
+    );
+    expect(skill).toContain('Do not move the waiting card yourself');
+    expect(skill).toContain('**A circle.**');
+    expect(skill).toContain('or a `MERGE: <slug> PR #<n>` that a blocked card needs');
+    expect(skill).toContain(
+      'Create no other card than the `FOUNDER` and `MERGE` cards step 4 needs',
+    );
+  });
+
+  it('are never closed by a rule meant for forged or duplicate cards', () => {
+    const skill = flat('ceo');
+    expect(skill).toContain('That rule is for `RELEASE` cards only.');
+    expect(skill).toContain('you never close one, whoever created it');
+    expect(skill).toContain('`MERGE` cards are the exception: leave both');
+    expect(MERGE_RULE).toContain('Never close a MERGE card.');
+    for (const slug of ['product', 'design', 'engineer']) {
+      expect(flat(slug), slug).not.toMatch(/MERGE/);
+    }
+  });
+
+  it('give the engineer a fixed note to block on, which the CEO looks for', () => {
+    expect(flat('engineer')).toContain('`waiting for PR #<n> to be merged into dev`');
+    expect(flat('engineer')).toContain('never build on its unmerged branch');
+  });
+});
+
+describe("the lead's checks run apart from the keys", () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+  /** The lead's `~/check.sh`, as the skill writes it. */
+  const leadScript = () => {
+    const raw = skillContent({ slug: 'eng-lead', description: '' });
+    const match = /cat > ~\/check\.sh <<'SH'\n([\s\S]*?)\n\s*SH\n/.exec(raw);
+    if (!match?.[1]) throw new Error('eng-lead has no check script');
+    return `${match[1]
+      .split('\n')
+      .map((line) => line.replace(/^ {3}/, ''))
+      .join('\n')}\n`;
+  };
+
+  it("run the pull request's code as br-check, with no variable of the lead's and no install script", () => {
+    const script = leadScript();
+    expect(script).toContain('sudo -n -u br-check env -i PATH="$PATH" HOME=/home/br-check CI=1');
+    expect(script).toContain(
+      'pnpm install --frozen-lockfile --ignore-scripts --ignore-pnpmfile && lint "$@" && pnpm typecheck && pnpm test',
+    );
+    // Everything after the user switch is fed to br-check's shell: nothing runs pnpm before it.
+    const before = script.slice(0, script.indexOf('sudo -n -u br-check env -i'));
+    expect(before).not.toMatch(/\bpnpm\b(?! version)/);
+    expect(before).not.toContain('~/boiler-room');
+    const lead = flat('eng-lead');
+    expect(lead).toContain(
+      "Never run a pull request's install, lint, typecheck, tests or build as yourself or in `~/boiler-room`",
+    );
+    expect(lead).toContain('`checks cannot run apart from the keys`');
+    const deploy = skillContent({ slug: 'engineering-deploy', description: '', root: 'repo' });
+    expect(deploy.replace(/\s+/g, ' ')).toContain('`bash ~/check.sh dev` in the background');
+  });
+
+  /** Runs the script with a stand-in `sudo` that runs the command as this user, and `id`. */
+  const runScript = (options: { readable: boolean; sudoWorks: boolean }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'br-check-sh-'));
+    try {
+      const bin = join(dir, 'bin');
+      const home = join(dir, 'home');
+      mkdirSync(bin);
+      mkdirSync(home);
+      writeFileSync(join(dir, 'check.sh'), leadScript());
+      writeFileSync(join(bin, 'id'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      writeFileSync(
+        join(bin, 'sudo'),
+        options.sudoWorks
+          ? '#!/bin/bash\nwhile [ "$1" = -n ] || [ "$1" = -u ]; do [ "$1" = -u ] && shift; shift; done\nexec "$@"\n'
+          : '#!/bin/sh\necho "sudo: a password is required" >&2\nexit 1\n',
+        { mode: 0o755 },
+      );
+      if (options.readable) writeFileSync(join(home, '.boiler-room.env'), '# fake\n');
+      const result = spawnSync('bash', [join(dir, 'check.sh'), 'dev', '7'], {
+        env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home },
+        encoding: 'utf8',
+        timeout: 20_000,
+      });
+      return `${result.stdout}${result.stderr}`;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it('stop with CHECK_EXIT exposed when br-check can read a key file, before any clone', () => {
+    const out = runScript({ readable: true, sudoWorks: true });
+    expect(out.trim().split('\n').at(-1)).toBe('CHECK_EXIT exposed');
+    expect(out).not.toMatch(/Cloning|clone/);
+  });
+
+  it('stop with CHECK_EXIT setup when the lead cannot act as br-check', () => {
+    const out = runScript({ readable: false, sudoWorks: false });
+    expect(out).toContain('CHECK_EXIT setup');
+    expect(out).not.toContain('CHECK_EXIT exposed');
+  });
+});
+
+describe('a fix card and a todo card the board did not start again', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it('never waits for the pull request it fixes', () => {
+    const engineer = flat('engineer');
+    expect(engineer).toContain(
+      'A fix card (`ENG: <slug> fix <n>`) never waits for the pull request its body names',
+    );
+    expect(engineer).toContain('Never block a fix card because that pull request is not merged');
+  });
+
+  it('is listed as stalled whatever its woken_session_id says', () => {
+    const skill = flat('ceo');
+    expect(skill).toContain(
+      'List too every `todo` card whose `blocked_by` cards are all `done` (or that has none) and whose `updated_at` is more than 2 hours old, with its `woken_session_id` and `wake_count`, whatever they say',
+    );
+    expect(skill).not.toContain('that has never started (`woken_session_id` is null)');
+  });
+});
+
+describe('pnpm on agent computers', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it("never downloads the pinned pnpm, which left a broken copy on the engineer's computer", () => {
+    const workspace = readFileSync(new URL('../../pnpm-workspace.yaml', import.meta.url), 'utf8');
+    expect(workspace).toMatch(/^managePackageManagerVersions: false$/m);
+    for (const slug of ['engineer', 'eng-lead']) {
+      const skill = flat(slug);
+      expect(skill, slug).toContain(
+        'rm -rf ~/.local/share/pnpm/.tools/pnpm; npm_config_manage_package_manager_versions=false pnpm --version',
+      );
+      expect(skill, slug).toContain('It must print a version that starts with `10.`');
+      // Every check script starts with the variable, for branches cut before the workspace setting.
+      const raw = skillContent({ slug, description: '' });
+      const scripts = [...raw.matchAll(/cat > ~\/check\.sh <<'SH'\n([\s\S]*?)\n\s*SH\n/g)];
+      expect(scripts.length, slug).toBeGreaterThan(0);
+      for (const script of scripts) {
+        expect(script[1]?.trim().split('\n')[0]?.trim(), slug).toMatch(
+          /^(# .*|export npm_config_manage_package_manager_versions=false)$/,
+        );
+        expect(script[1], slug).toContain(
+          'export npm_config_manage_package_manager_versions=false',
+        );
+      }
+    }
+  });
+});
+
 describe('main and production', () => {
   // The GTM agents are started only by the executor, never by a card, so they have no card rules.
   const gtmNames = new Set(GTM.map((agent) => agent.name));
@@ -668,9 +881,28 @@ describe('skills', () => {
 
   it('keeps each prompt short, with the procedure in the skill', () => {
     for (const agent of company) {
-      expect(agent.skills.length, agent.name).toBe(1);
-      expect(agent.system, agent.name).toContain(`"${agent.skills[0]?.slug}"`);
+      expect(agent.skills.length, agent.name).toBe(agent === engineeringLead ? 2 : 1);
+      for (const skill of agent.skills) {
+        expect(agent.system, `${agent.name} ${skill.slug}`).toContain(`"${skill.slug}"`);
+      }
       expect(agent.system.length, agent.name).toBeLessThan(4500);
+    }
+  });
+
+  it('gives the engineering lead, and only the lead, the deploy skill from the repo root', () => {
+    expect(engineeringLead.skills.map((skill) => [skill.slug, skill.root ?? 'agents'])).toEqual([
+      ['eng-lead', 'agents'],
+      ['engineering-deploy', 'repo'],
+    ]);
+    for (const agent of company.filter((item) => item !== engineeringLead)) {
+      expect(agent.skills.map((skill) => skill.slug)).not.toContain('engineering-deploy');
+    }
+  });
+
+  it('describes each skill on Naive as its own front matter does', () => {
+    for (const skill of company.flatMap((agent) => agent.skills)) {
+      const front = /^---\nname: [^\n]+\ndescription: ([^\n]+)\n/.exec(skillContent(skill));
+      expect(front?.[1], skill.slug).toBe(skill.description);
     }
   });
 });
@@ -698,11 +930,15 @@ describe('secrets', () => {
   it.runIf(existsSync(ENV_FILE))(
     'no definition or skill contains a value from the env file',
     () => {
+      // Public by design: the staging Worker's URL, which skills/engineering-deploy and
+      // docs/deploy.md name. It was added to the env file on 2026-11-08 for the GTM app.
+      const PUBLIC = new Set(['GTM_APP_URL']);
       const values = readFileSync(ENV_FILE, 'utf8')
         .split('\n')
         .map((line) => /^(?:export\s+)?([A-Z0-9_]+)=["']?([^"'\s]+)/.exec(line))
         .filter(
-          (match): match is RegExpExecArray => match !== null && (match[2]?.length ?? 0) >= 12,
+          (match): match is RegExpExecArray =>
+            match !== null && (match[2]?.length ?? 0) >= 12 && !PUBLIC.has(match[1] ?? ''),
         );
       // Only names are reported, so a failure never prints a secret.
       const leaked = values.filter((match) => everything.includes(match[2] ?? '')).map((m) => m[1]);
@@ -739,7 +975,7 @@ describe('GitHub credentials', () => {
     expect(verifySteps('boiler-room', 'boiler-room-design')[1]).toContain('git ls-remote');
   });
 
-  it('checks that each token is refused by the other repo, not only accepted by its own', () => {
+  it('checks each token against the other repo too, not only its own', () => {
     const steps = verifySteps('boiler-room', 'boiler-room-design');
     const own = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room `;
     const other = `git push --dry-run https://github.com/${GITHUB_OWNER}/boiler-room-design `;
@@ -762,18 +998,37 @@ describe('judging a verification', () => {
   };
 
   it('passes a token that pushes to its own repo and is refused by the other', () => {
-    expect(judgeVerify(pass)).toEqual({ ok: true, failures: [] });
+    expect(judgeVerify(pass)).toEqual({ ok: true, failures: [], accepted: [] });
   });
 
-  it('fails a token that the other repo accepts', () => {
+  it('reports a token the other repo accepts as the accepted risk, not a failure', () => {
     const verdict = judgeVerify({ ...pass, other_push_dry_run: pass.push_dry_run });
+    expect(verdict.ok).toBe(true);
+    expect(verdict.failures).toEqual([]);
+    expect(verdict.accepted?.join()).toMatch(/reaches both repos, an accepted risk/);
+  });
+
+  it('records the other repo either way while the risk is accepted', () => {
+    expect(judgeVerify({ ...pass, other_push_dry_run: '' }).ok).toBe(true);
+    expect(judgeVerify({ ...pass, other_push_dry_run: undefined }).ok).toBe(true);
+  });
+
+  it('fails a token the other repo accepts, or an unclear answer, once the risk is no longer accepted', () => {
+    const verdict = judgeVerify({ ...pass, other_push_dry_run: pass.push_dry_run }, false);
     expect(verdict.ok).toBe(false);
     expect(verdict.failures.join()).toMatch(/reaches both repos/);
+    expect(judgeVerify({ ...pass, other_push_dry_run: '' }, false).ok).toBe(false);
   });
 
-  it('fails when the negative step is missing or unclear', () => {
-    expect(judgeVerify({ ...pass, other_push_dry_run: '' }).ok).toBe(false);
-    expect(judgeVerify({ ...pass, other_push_dry_run: undefined }).ok).toBe(false);
+  it('tells the verifying agent that either answer from the other repo is correct', () => {
+    const steps = verifySteps('boiler-room', 'boiler-room-design');
+    expect(steps).toHaveLength(5);
+    expect(verifyMessage('boiler-room', 'boiler-room-design')).toMatch(
+      /Step 5 may be accepted or refused, and either is a correct result to record/,
+    );
+    expect(verifyMessage('boiler-room', 'boiler-room-design')).not.toMatch(
+      /expected to be refused/,
+    );
   });
 
   it('fails a refused own push, a failed auth, a missing file and no output', () => {
@@ -864,5 +1119,66 @@ describe('the sweep deployment', () => {
     const patch = resumed.deployments.update.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(patch).not.toHaveProperty('enabled');
     expect(patch.budget_micro_usd).toBe(CEO_SWEEP.budget_micro_usd);
+  });
+});
+
+describe('judging the Cloudflare keys on a computer', () => {
+  const names = 'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ';
+  const expected = [
+    'CLOUDFLARE_API_TOKEN',
+    'CLOUDFLARE_ACCOUNT_ID',
+    'NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY',
+  ];
+
+  it('passes the lead with mode 600 and exactly the keys sync writes', () => {
+    expect(judgeDeployKeys(true, 'mode 600 size 211', names, expected)).toEqual({
+      ok: true,
+      failures: [],
+    });
+  });
+
+  it('fails the lead with no file, a loose mode, other keys, or a missing one', () => {
+    expect(judgeDeployKeys(true, 'absent', '', expected).failures).toEqual([
+      '~/.boiler-room.env is missing',
+    ]);
+    expect(judgeDeployKeys(true, 'mode 644 size 211', names, expected).failures).toEqual([
+      '~/.boiler-room.env is not mode 600',
+    ]);
+    expect(
+      judgeDeployKeys(
+        true,
+        'mode 600 size 300',
+        `${names}CLERK_SECRET_KEY`,
+        expected,
+      ).failures.join(),
+    ).toMatch(
+      /not exactly CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_API_TOKEN, NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY$/,
+    );
+    expect(judgeDeployKeys(true, 'mode 600 size 40', 'CLOUDFLARE_API_TOKEN', expected).ok).toBe(
+      false,
+    );
+    expect(
+      judgeDeployKeys(
+        true,
+        'mode 600 size 150',
+        'CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_TOKEN',
+        expected,
+      ).ok,
+    ).toBe(false);
+  });
+
+  it('passes any other computer only without the file', () => {
+    expect(judgeDeployKeys(false, 'absent', '', expected)).toEqual({ ok: true, failures: [] });
+    expect(judgeDeployKeys(false, 'mode 600 size 211', names, expected).failures).toEqual([
+      '~/.boiler-room.env is there, and only br-eng-lead may hold it',
+    ]);
+  });
+
+  it('reads with commands that print the mode and the key names, never a value', () => {
+    for (const command of DEPLOY_KEYS_STEPS) {
+      expect(command).not.toMatch(/\bcat\b|\bsource\b|\becho \$|printenv|(^|\s)env\b/);
+      expect(command).toContain('~/.boiler-room.env');
+    }
+    expect(DEPLOY_KEYS_STEPS[1]).toContain('cut -d= -f1');
   });
 });

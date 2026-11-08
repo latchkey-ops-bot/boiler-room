@@ -22,16 +22,19 @@ export const INBOX_READER = 'br-inbox-reader';
 export const CEO = 'br-ceo';
 
 /**
- * Card title prefixes. A fixed prefix and a slug make the board read as a log. `GTM`, `REMOVE` and
- * `FOUNDER: gtm ...` cards are written by the GTM executor, which is code; `GTM-HOLD` is anyone's,
- * and stops every GTM lane while it is open. `OUTREACH` is br-ceo's card for br-gtm-lead, and
- * `LEADS` and `POST` are the GTM lead's for br-scout and br-social.
+ * Card title prefixes. A fixed prefix and a slug make the board read as a log. `MERGE` cards are the
+ * engineering lead's: its plan makes one per `ENG` card that later work builds on, and the CEO makes
+ * one for a card it finds blocked waiting for a pull request. `GTM`, `REMOVE` and `FOUNDER: gtm ...`
+ * cards are written by the GTM executor, which is code; `GTM-HOLD` is anyone's, and stops every GTM
+ * lane while it is open. `OUTREACH` is br-ceo's card for br-gtm-lead, and `LEADS` and `POST` are the
+ * GTM lead's for br-scout and br-social.
  */
 export const CARD_PREFIXES = [
   'DIR',
   'DESIGN',
   'BUILD',
   'ENG',
+  'MERGE',
   'SHIP',
   'RELEASE',
   'FOUNDER',

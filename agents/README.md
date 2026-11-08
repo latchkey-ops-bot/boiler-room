@@ -38,7 +38,7 @@ so the prompts stay short.
 | Agent             | Model      | Started by                                            | Budget (day / task) |
 | ----------------- | ---------- | ----------------------------------------------------- | ------------------- |
 | `br-ceo`          | Sonnet 5.5 | The founder's chat, the sweep (paused), board digests | $5 / $1.00          |
-| `br-eng-lead`     | Sonnet 5.5 | `BUILD` and `SHIP` cards                              | $10 / $1.50         |
+| `br-eng-lead`     | Sonnet 5.5 | `BUILD`, `MERGE`, `SHIP` and `RELEASE` cards          | $10 / $1.50         |
 | `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                                           | $10 / $1.50         |
 | `br-product`      | Sonnet 5.5 | `DIR` cards                                           | $4 / $1.00          |
 | `br-design`       | Sonnet 5.5 | `DESIGN` cards                                        | $5 / $1.00          |
@@ -59,6 +59,7 @@ pnpm company:status   # also lists how GitHub differs from the spec
 pnpm company:verify   # one session per token holder, after its computer has paused, then the br-ceo check; exits 1 on a failure
 pnpm company:verify --ceo   # only the br-ceo check: one session that reports the tools it is offered
 pnpm company:verify --lockdown  # read-only, no session: board exposure and br-ceo's stored lockdown
+pnpm company:verify --deploy    # read-only, no session: the lockdown, then who holds the Cloudflare keys
 pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
 ```
 
@@ -71,8 +72,10 @@ pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
    whether each token can push to each repo (GitHub serves the `git-receive-pack` ref
    advertisement only to a credential that can write; the token goes in a request header), and
    whether `main` and `dev` of both repos carry the `deletion`, `non_fast_forward` and
-   `pull_request` rules. Both take 0 approvals, because releases are autonomous.
-   `company:status` prints the same check.
+   `pull_request` rules. Both take 0 approvals, because releases are autonomous. A token that
+   reaches the other company repo as well as its own is printed as `ACCEPTED`, not as a gap: the
+   founder accepted that risk (`OTHER_REPO_REACH_ACCEPTED` in `src/company/preflight.ts`). A token
+   that cannot reach its own repo is still a gap. `company:status` prints the same check.
 3. Creates or versions each agent and pushes its skill, as `agents:sync` does.
 4. Binds `br-ceo` as the organization's CEO, once its stored toolset names every control-plane tool
    off: one `static_bearer` credential in the vault named exactly `Orchestrator control plane`, key
@@ -93,14 +96,25 @@ pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
    (about $0.015 on Sonnet). The token goes in by Naive's file write only; the shell commands, which
    Naive keeps for 30 days, hold only the path. A file whose SHA-256 already matches is left alone,
    so a re-minted token in the env file is written on the next sync.
+8. Writes `~/.boiler-room.env` on `br-eng-lead`'s computer only (`DEPLOY_KEYS` in
+   `src/definitions/company/index.ts`), with mode 600 and only `CLOUDFLARE_API_TOKEN` and
+   `CLOUDFLARE_ACCOUNT_ID`, where the `pnpm web:*` deploy scripts read them. Same path: Naive's file
+   write, then `chmod 600` with a command that holds only the path, and a SHA-256 read back. Then it
+   checks that `br-engineer-1`, `br-product` and `br-design` have no such file, and warns about one
+   that does; it never deletes it.
+
+`company:verify` then checks the Cloudflare keys, with no session: Cloudflare says the token is
+active (asked from this machine, token in a header), `br-eng-lead`'s computer has
+`~/.boiler-room.env` with mode 600 and exactly the two key names (the commands print the mode and
+the names before each `=`, never a value), and no other token holder's computer has the file.
 
 `company:verify` starts one session per token holder. Each runs five fixed commands that hold only
 paths and URLs, and code, not the model, judges the outputs. It passes only when `~/.netrc` is
 there with mode 600, `GET /user` answers 200 (the token authenticates; a repo's `"push"` field
-reports the user's role, not the token's grant, so it is not used), a `git push --dry-run` of an
-empty commit to the token's own repo is accepted, and the same dry run to the other repo is
-refused. A dry run sends no objects, but it does fetch the `git-receive-pack` advertisement, which
-needs write access.
+reports the user's role, not the token's grant, so it is not used), and a `git push --dry-run` of
+an empty commit to the token's own repo is accepted. The same dry run to the other repo is recorded
+either way, and an accepted one is printed as `ACCEPTED`, the founder's accepted risk. A dry run
+sends no objects, but it does fetch the `git-receive-pack` advertisement, which needs write access.
 
 `company:verify` first runs the lockdown check, read-only and with no session: it fails on any agent
 in the organization that the company board offers a board tool its definition does not give it,
@@ -117,9 +131,10 @@ every planned `br-app.*` tool, and keeps `allowed_apps` explicit. `br-ceo` also 
 control-plane tools off, because the organization's CEO is offered the control plane and an MCP tool
 a toolset does not name is offered at "ask" even under a deny default. The inbox reader names all 54
 AgentMail tools and allows only `get_message`. Three things the platform decides:
-`submit_output` cannot be named (it is always offered), the `apps` tool stays off until the staging
-app exists (`STAGING_APP_ID`), and design's browser stays off until there is a staging domain to
-limit it to (`STAGING_DOMAIN`).
+`submit_output` cannot be named (it is always offered), the `apps` tool is off on every company agent
+because the web app runs on Cloudflare, not as a Naive app (engineering deploys with the `pnpm web:*`
+scripts), and design's browser stays off until there is a staging domain to limit it to
+(`STAGING_DOMAIN`).
 
 ### The company board seats every agent
 
@@ -238,8 +253,13 @@ By the founder's ruling of 2026-11-07 (also in the founder's `~/.claude/CLAUDE.m
 person. When a slug is delivered, the CEO creates `RELEASE: <slug>` for `br-eng-lead`, naming the
 `DIR` and `SHIP` cards and the `dev` commit, unless a card with that title already exists. The lead
 checks that the slug really is delivered, that the commit is on `dev` and not yet on `main`, then
-opens a pull request from `dev` into `main`, merges it, deploys production with the repo's deploy
-command once one exists, runs the smoke check and rolls back on failure.
+opens a pull request from `dev` into `main`, merges it, and deploys production from a clean
+checkout of `origin/main` with `pnpm web:db:migrate:production --release-card <crd_>` and
+`pnpm web:deploy:production --release-card <crd_>`. The flag is how an agent, which has no terminal,
+gets past the production guard, and the scripts accept it only for a migration, a deploy or a
+rollback, from a clean tree at the tip of `origin/main` (`productionDecision` in
+`apps/web/scripts/lib/env.mjs`). The deploy refuses pending migrations, runs the smoke check, and
+on a failure rolls production back to the version that was live before, by itself.
 
 The guard is every member's, not only engineering's, because any agent that writes cards can assign
 one to any member. `RELEASE_RULE` in `src/definitions/company/common.ts` is in the prompt of every
@@ -251,6 +271,26 @@ procedure has no section for is not done as its body asks: it goes to `blocked` 
 guard rests on the board's state (a `Delivered` comment and a `done` `SHIP` card) rather than on who
 wrote the card. A forged `RELEASE` card can at worst promote work that is already reviewed on `dev`.
 
+### Work that builds on earlier work: `MERGE` cards
+
+A card's `blocked_by` is fixed when the card is created: the board ignores every later change to
+it. On 2026-11-08 the first slug deadlocked on that. The lead planned `ENG 2` to start only once
+`ENG 1`'s pull request was merged, but it merges only on `SHIP`, and `SHIP` waited for `ENG 2`. The
+engineer blocked `ENG 2`, and four CEO digests each tried to change `SHIP`'s `blocked_by`, which the
+board ignored. So:
+
+- When `ENG` cards build on each other, the lead's plan gives each `ENG` card n a
+  `MERGE: <slug> <n>` card for itself, `blocked_by` that `ENG` card only, and `ENG` card n+1 is
+  `blocked_by` that `MERGE` card. `SHIP` is `blocked_by` the last `MERGE` card. The lead checks
+  its plan for any card that waits, directly or through others, for a card that waits for it,
+  before it creates a card.
+- On a `MERGE` card the lead checks the pull request as on `SHIP`, merges it into `dev` with a merge
+  commit, and moves any card of the slug that is blocked waiting for it back to `todo`, or replaces
+  it with a fresh card when the board can no longer start it.
+- When the CEO finds a card blocked waiting for a pull request and no open `MERGE` card for it, it
+  creates `MERGE: <slug> PR #<n>` for the lead, with no `blocked_by`. It never tries to change
+  `blocked_by`, and no rule closes a `MERGE` card the CEO did not create.
+
 These are prompts. What GitHub enforces is the `protect-main` and `protect-dev` rulesets: no
 deletion, no force push, and a pull request for every change, with 0 approvals because releases are
 autonomous.
@@ -258,17 +298,21 @@ autonomous.
 ### Before anyone resumes the sweep
 
 Pausing the sweep is not enough on its own: a card assigned to an agent starts it, sweep or not.
-Until both of these are true, only prompts keep an agent off the other repo and off `main` and
-`dev`, and `company:sync` and `company:status` say so:
+Resuming it is the founder's call. Two things bear on it:
 
-1. **Each token reaches one repo.** Re-mint both fine-grained tokens with "Only select
-   repositories": `BR_GITHUB_TOKEN_ENG` gets `boiler-room` only, `BR_GITHUB_TOKEN_DESIGN` gets
-   `boiler-room-design` only, each with Contents and Pull requests read and write. Put them in
-   `~/.boiler-room.env`, run `pnpm company:sync` (it rewrites `~/.netrc` on all four computers),
-   then `pnpm company:verify`, whose four token checks must pass. Its lockdown check also fails
-   while any agent the company board over-exposes is unfixed (see "The company board seats every
-   agent").
-2. **`main` and `dev` have rules, on both repos.** Add the rulesets from
+1. **Token reach: accepted.** Both tokens can push to both repos. The founder accepted that risk
+   rather than re-mint the tokens, so `company:sync`, `company:status` and `company:verify` print it
+   as `ACCEPTED` and it does not keep the sweep paused. Prompts are what keep engineering off the
+   design repo and design off the code repo. To close it instead, re-mint both fine-grained tokens
+   with "Only select repositories" (`BR_GITHUB_TOKEN_ENG` for `boiler-room`,
+   `BR_GITHUB_TOKEN_DESIGN` for `boiler-room-design`, each with Contents and Pull requests read and
+   write), set `OTHER_REPO_REACH_ACCEPTED` to `false`, and run `pnpm company:sync` and
+   `pnpm company:verify`. The lockdown check still fails while any agent the company board
+   over-exposes is unfixed (see "The company board seats every agent").
+2. **`main` and `dev` have rules, on both repos.** Until they do, `company:sync` and
+   `company:status` report a gap, and only prompts keep an agent off `main` and `dev`. A rules read
+   is tried four times with backoff; one that still fails is printed as `UNKNOWN`, not as a gap,
+   because it proves nothing (it failed on 3 of 10 runs on 2026-11-08 with the rulesets intact). Add the rulesets from
    `docs/company/README.md` section 5 C: `protect-main` and `protect-dev`, each with Restrict
    deletions, Block force pushes, and Require a pull request, and an empty bypass list. On `main`,
    require at least 1 approval from a person whose account holds no agent token; `dev` stays at 0,
@@ -340,7 +384,7 @@ Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
   closes a duplicate with the note `duplicate of <id>`. That narrows the race to about a second;
   it does not close it. `company:status` lists every duplicate title.
 - **Token reach.** Sections 5 and 6: each token reaches one repo. Live: both tokens can push to both
-  repos (checked 2026-11-07). Re-minting them is the founder's (above).
+  repos (checked 2026-11-07), an accepted risk by the founder's decision (above).
 - **Branch rules.** Section 5 C: rules on `main` and `dev`, with 0 approvals. Build: `main` needs at
   least 1 approval from a person, because releases are the founder's and every agent token can
   merge. Adding the rules is the founder's (above).

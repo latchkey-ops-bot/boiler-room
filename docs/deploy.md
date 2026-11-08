@@ -58,26 +58,52 @@ go to wrangler through its environment or stdin, never on a command line, and ar
 
 Any of them can be set per environment with a prefix: `STAGING_CLERK_SECRET_KEY` wins over
 `CLERK_SECRET_KEY` for staging. Production reads only `PRODUCTION_CLERK_SECRET_KEY` and
-`PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, never the unscoped keys, and the build and secret
-sync stop if either is a development key (`sk_test_` or `pk_test_`). Today staging uses Clerk's
-development instance.
+`PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, never the unscoped keys. The build and secret sync
+stop if either is a development key (`sk_test_` or `pk_test_`), unless `env.production.vars` in
+`apps/web/wrangler.jsonc` sets `CLERK_INSTANCE` to `"development"`.
+
+It does, by the founder's decision of 2026-11-08 ("development is fine for clerk"). A Clerk
+production instance needs a custom domain, which the company does not have, and production stays at
+`boiler-room-web-production` on workers.dev. So staging and production both sign in with Clerk's
+development instance, which caps sign-ups at 100 users and shows a Development banner. Production
+gets its own `PRODUCTION_` copies of the development keys. Moving to a production instance later is
+a domain, the instance's keys under the same two names, and a pull request that removes
+`CLERK_INSTANCE`, after which development keys are refused again.
 
 The token in the env file today could create the staging D1 database and R2 bucket, apply
 migrations, set secrets, deploy, list versions and tail logs. A Cloudflare token reaches the whole
-account, not one Worker, so it could deploy production too. What stops an agent today is the
-production guard: every production script waits for a person to type `production` at a terminal,
-and an agent has no terminal. Releases are the engineering lead's (see "How a change reaches
-customers"), so until the founder removes that guard, the lead's release stops at the merge into
-`main`.
+account, not one Worker, so it could deploy production too. What stands between an agent and
+production is the production guard (`guardProduction` in `scripts/lib/env.mjs`): every production
+script waits for a person to type `production` at a terminal. The release agent, `br-eng-lead`, has
+no terminal, so it passes `--release-card <crd_ id>`, naming the `RELEASE` card it is working.
+The scripts allow that only for a migration, a deploy or a rollback, and for the first two only
+from a clean tree at the tip of `origin/main`; a deploy also refuses pending migrations, and rolls
+back by itself when its smoke check fails. Provisioning and secrets never take a card: they are the
+founder's, at a terminal. No environment variable skips the guard.
 
-**For the engineering lead's computer (founder action, not done yet):** the lead needs the same
-file with `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` and the two Clerk keys, written by the
-provisioning script with mode 600, like the GitHub token in `~/.netrc`. Without it, the lead moves a
-`SHIP` card to `blocked` with `credential missing`.
+**On the engineering lead's computer:** `pnpm company:sync` writes `~/.boiler-room.env` with mode
+600 through Naive's file write, like the GitHub token in `~/.netrc`. It holds the Cloudflare keys
+and the Clerk publishable keys the build inlines, which are public by design, and nothing else
+(`deployEnvEntries` in `agents/src/company/cloudflare.ts`):
+
+- `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`;
+- `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, for staging: the founder's
+  `STAGING_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` when it is set, else `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`,
+  the value the scripts take for staging. Sync stops if neither is set;
+- `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, only when the founder's file has it. Until then
+  the lead's production build stops, and its `RELEASE` card goes to `blocked` with
+  `production not provisioned`. Run `pnpm company:sync` after setting it (step 1 of "First
+  production release") to place it.
+
+No Clerk secret key is placed there: the Worker's secrets are the founder's, through
+`pnpm web:secrets:sync:<env>`. No other agent's computer gets the file. `pnpm company:verify`
+checks that only the lead has it, and that it holds exactly the keys sync would write from the
+founder's file now, so a key added to the founder's file and not yet synced shows as a failure.
 
 ## Working on it locally
 
-Requires Node 24 and pnpm 10.
+Requires Node 24 and pnpm 10. Any pnpm 10 runs as it is: `pnpm-workspace.yaml` turns off pnpm's
+download of the version `packageManager` pins, which failed on an agent computer on 2026-11-08.
 
 ```sh
 pnpm install
@@ -114,6 +140,8 @@ chromium`.
 | `pnpm web:logs:<env> [tail flags]`     | Streams the live Worker's logs, for example `--status error`                                        |
 
 `<env>` is `staging` or `production`. Every production command stops for you to type `production`.
+The release agent passes `--release-card <crd_ id>` to `web:db:migrate:production`,
+`web:deploy:production` and `web:rollback:production` instead (see "Credentials").
 
 ## How a change reaches customers
 
@@ -128,27 +156,44 @@ chromium`.
    # 1. Open a pull request from dev into main, and merge it with a merge commit.
    git fetch origin && git checkout --detach origin/main   # a clean tree
    pnpm install --frozen-lockfile
-   pnpm web:db:migrate:production    # only if the release has migrations
-   pnpm web:deploy:production        # builds, deploys, smoke-checks
+   pnpm web:db:migrate:production --release-card crd_...   # only if the release has migrations
+   pnpm web:deploy:production --release-card crd_...       # builds, deploys, smoke-checks, rolls back on failure
    ```
+
+   A person running these at a terminal leaves out `--release-card` and types `production` when
+   asked.
 
 A **bug fix** takes the same road: a `HOTFIX` card, a pull request into `dev` with a test that
 failed before the fix, staging, then a release.
 
 ## First production release
 
-Once, before the first `pnpm web:deploy:production`:
+Production is `boiler-room-web-production` on workers.dev, signing in with Clerk's development
+instance (see "Credentials"). No custom domain and no Clerk production instance are needed.
 
-1. **Clerk production instance.** Create it in the Clerk dashboard. It needs a custom domain, so
-   pick the domain for production first. Add its keys to the env file as
-   `PRODUCTION_CLERK_SECRET_KEY` and `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`.
-2. **Domain.** Add the domain to Cloudflare and route it to `boiler-room-web-production` (a
-   `routes` entry in `env.production` of `wrangler.jsonc`, by pull request).
-3. `pnpm web:provision:production`, then commit the database id it writes into `wrangler.jsonc` by
-   pull request into `dev`, and release it.
-4. `pnpm web:secrets:sync:production`
-5. `pnpm web:db:migrate:production`
-6. `pnpm web:deploy:production`
+Once, the founder or the main session runs these three at a terminal, typing `production` when
+asked. None of them takes `--release-card`:
+
+1. **Keys.** In `~/.boiler-room.env`, set `PRODUCTION_CLERK_SECRET_KEY` and
+   `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` to the development instance's keys, the same
+   values as the unscoped ones. Production reads only the `PRODUCTION_` names. Then run
+   `pnpm company:sync`, which places the publishable one on the lead's computer.
+2. `pnpm web:provision:production` creates D1 `boiler-room-production` and R2
+   `boiler-room-films-production` and writes the database id into `wrangler.jsonc`, which goes to
+   `dev` by pull request. Done on 2026-11-08 by the main session (pull request #33).
+3. `pnpm web:secrets:sync:production` sets the Worker's Clerk secrets. It takes the development
+   keys only because `env.production.vars.CLERK_INSTANCE` is `"development"`.
+4. `pnpm web:db:migrate:production` applies every migration to the empty production D1, from a
+   clean checkout of `origin/dev`.
+
+After that, releases are `br-eng-lead`'s, on the CEO's `RELEASE` cards, and nobody runs a
+production command by hand. The first `RELEASE` card merges `dev` into `main`, applies any
+migration added since step 4 with `--release-card`, and deploys production with
+`pnpm web:deploy:production --release-card <crd_ id>`, which smoke-checks the live URL and rolls
+back by itself on a failure. Its build needs `PRODUCTION_NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` on the
+lead's computer, which `company:sync` places from step 1 (see "Credentials"); without it the card
+goes to `blocked` with
+`production not provisioned`, and the merge into `main` stands.
 
 ## Rolling back
 

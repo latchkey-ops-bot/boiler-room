@@ -27,6 +27,7 @@
     "gtm:halt": "pnpm --filter @boiler-room/agents gtm:halt",
     "gtm:schedule": "pnpm --filter @boiler-room/agents gtm:schedule",
     "gtm:flags": "pnpm --filter @boiler-room/agents gtm:flags",
+    "evals": "pnpm --filter @boiler-room/agents evals",
     "web:dev": "pnpm --filter @boiler-room/web dev",
     "web:preview": "pnpm --filter @boiler-room/web preview",
     "web:build": "pnpm --filter @boiler-room/web build:worker",

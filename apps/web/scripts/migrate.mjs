@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // pnpm web:db:migrate:<env> — applies the SQL files in drizzle/ that the environment's D1 has not
 // run yet. Run it BEFORE deploying the code that needs them; every migration must still work with
-// the code that is live now (skills/engineering-deploy/SKILL.md, "D1 migrations").
+// the code that is live now (skills/engineering-deploy/SKILL.md, "D1 migrations"). In production the
+// release agent passes `--release-card crd_...`, which runs only from a clean tree at origin/main.
 import {
   bin,
   environmentArg,
@@ -19,7 +20,7 @@ if (!target.provisioned) fail(`env.${env} has no D1 database yet. Run pnpm web:p
 
 console.log(`D1 ${target.databaseName} (${env}): migrations not yet applied`);
 bin('wrangler', ['d1', 'migrations', 'list', 'DB', '--remote', '--env', env], { env: credentials });
-await guardProduction(env, 'apply D1 migrations');
+await guardProduction(env, 'apply D1 migrations', { step: 'migrate' });
 bin('wrangler', ['d1', 'migrations', 'apply', 'DB', '--remote', '--env', env], {
   env: { ...credentials, CI: '1' },
 });
