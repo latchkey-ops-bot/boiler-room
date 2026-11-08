@@ -1,4 +1,5 @@
 import { type SceneRegistry, sceneRegistry } from '@boiler-room/schema';
+import { colourEventScene } from './colour-event.tsx';
 import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
@@ -25,6 +26,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'proof-bars': proofBars,
   'stat-counter': statCounter,
   'feature-card': featureCard,
+  'colour-event': colourEventScene,
   'end-card': endCard,
 };
 
