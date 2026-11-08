@@ -255,6 +255,21 @@ export async function artDirect(options: ArtOptions): Promise<number> {
         `site-hero page "${info.id}" is ${info.asset.width} px wide; the spec asks for device scale 2 (2880 px or more). It will look soft when pushed in.`,
     );
 
+  // Batches are reviewed apart, so a picture can land on two scenes in a row. Say so; QC decides.
+  const repeats: string[] = [];
+  const order = proposals.filter((proposal) => proposal.type !== 'tile-wall');
+  for (const [index, proposal] of order.entries()) {
+    const previous = order[index - 1];
+    const ids = gate.picks.get(proposal.sceneId)?.assetIds ?? [];
+    const before = previous ? (gate.picks.get(previous.sceneId)?.assetIds ?? []) : [];
+    const shared = ids.filter((id) => before.includes(id));
+    if (previous && shared.length > 0) {
+      repeats.push(
+        `${previous.sceneId} and ${proposal.sceneId} both show ${shared.join(', ')}. Push into a different region of it in each, or choose another picture for one.`,
+      );
+    }
+  }
+
   const duplicates = infos
     .filter((info) => info.sameAs.length > 0)
     .map((info) => `${info.id} (also ${info.sameAs.join(', ')})`);
@@ -331,6 +346,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
       ...blocking,
       ...smallCaptures,
       ...duplicateFlag,
+      ...repeats,
       ...gate.flags,
     ],
     dropped_tiles: Object.fromEntries(gate.dropped),
