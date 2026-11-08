@@ -99,7 +99,8 @@ still cannot back when repair rounds run out is cut back to its quotes or droppe
 - `pricing`: `summary` and `claim_ids` for the pricing as a whole, and each plan with its name
   and price exactly as a cited quote states them; `null` only when the site publishes no price
   (the verifier refuses null when a claim quotes a price, such as a product page's "$100"). Quote
-  the plan's name with its price (consecutive lines of its card), so the claim backs both. Never
+  the plan's name with its price (consecutive lines of its card), so one claim backs both: the
+  verifier refuses a plan whose name and price come from different claims. Never
   say a price is not shown when a page shows it: quote it. If no visible text states a plan's
   price, leave the price out of the summary rather than guessing. When the page's text file lists
   a billing control that is on, such as `switch "Billed yearly": on`, its prices are the prices

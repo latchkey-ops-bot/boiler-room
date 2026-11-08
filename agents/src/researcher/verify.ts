@@ -66,6 +66,7 @@ export const FAILURE_CODES = [
   'CLAIM_TEXT_UNBACKED',
   'PRICING_BILLING',
   'PRICING_MISSING',
+  'PLAN_STITCHED',
   'CTA_NOT_FOUND',
   'ASSET_UNKNOWN',
   'NEED_DUPLICATE',
@@ -443,6 +444,41 @@ function verifyBrief(output: ResearchOutput, pages: PageIndex): Failure[] {
       });
     }
   }
+
+  // A plan's name and price come from one quote, as a pricing card shows them together. A name
+  // from one place and a figure from another can pair a plan with another product's price.
+  const pricing = output.brief.pricing;
+  pricing?.plans.forEach((plan, index) => {
+    const path = `brief.pricing.plans[${index}]`;
+    const ids = [...new Set([...plan.claim_ids, ...pricing.claim_ids])].filter((id) =>
+      quotes.has(id),
+    );
+    const text = `${plan.name} ${plan.price}`;
+    const alone = (id: string) =>
+      unbackedNumbers(text, [quotes.get(id) ?? ''], { brandName }).length === 0 &&
+      unbackedWords(text, [...(backing.get(id) ?? []), ...labels], {
+        names,
+        allowed: RELATION_WORDS,
+      }).length === 0;
+    const together = [...ids.flatMap((id) => backing.get(id) ?? []), ...labels];
+    const backedTogether =
+      unbackedNumbers(
+        text,
+        ids.map((id) => quotes.get(id) ?? ''),
+        { brandName },
+      ).length === 0 &&
+      unbackedWords(text, together, { names, allowed: RELATION_WORDS }).length === 0;
+    // Only a plan its claims back together, but no one claim backs, is stitched; one they do not
+    // back at all already fails above.
+    if (!backedTogether || ids.some(alone)) return;
+    failures.push({
+      code: 'PLAN_STITCHED',
+      path,
+      message: `${path} takes its name and its price "${plan.name} ${plan.price}" from different claims (${ids.join(', ')}): no one quote states both, so the price may belong to something else.`,
+      fix: `Cite in ${path} one claim whose quote states the plan's name and its price together, such as the name and price lines of its pricing card, or remove the plan.`,
+      briefPath: path,
+    });
+  });
 
   output.brief.ctas.forEach((cta, index) => {
     const path = `brief.ctas[${index}]`;

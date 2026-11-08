@@ -469,6 +469,25 @@ describe('verifyResearch', () => {
     expect(codes(raised).filter((code) => code === 'PRICING_MISSING')).toEqual([]);
   });
 
+  // posthog.com: "Pay-as-you-go" came from one quote and "$0.00005/event", one product's price
+  // after its free tier, from another, so the plan read as costing that.
+  it('refuses a plan whose name and price come from different claims', () => {
+    const out = output();
+    const pricing = must(out.brief.pricing);
+    pricing.plans.push({
+      name: 'Small teams',
+      price: '$24 per month',
+      claim_ids: ['small-teams', 'team-price'],
+    });
+    const failures = verifyResearch(out, bundle());
+    expect(failures.map((failure) => [failure.code, failure.path])).toEqual([
+      ['PLAN_STITCHED', 'brief.pricing.plans[2]'],
+    ]);
+    // One quote with both, the plan's card, passes.
+    must(pricing.plans[2]).name = 'Team';
+    expect(codes(out)).toEqual([]);
+  });
+
   it('requires calls to action to be verbatim on their page', () => {
     const out = output();
     out.brief.ctas.push({

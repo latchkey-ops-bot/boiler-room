@@ -177,7 +177,9 @@ the campaign schema cannot cite (a bare IP or `localhost`) is refused before any
   switches, tabs and radios and their state) must be called yearly in the pricing
   (`PRICING_BILLING`); the control's label backs that word. Pricing may be null only when no claim
   quotes a price (`PRICING_MISSING`: an amount alone, or per month, year, user or seat). A plan is
-  backed by its own claims and the pricing block's. Calls to action must be verbatim in the visible text of their page. Each
+  backed by its own claims and the pricing block's, and its name and price by one quote together
+  (`PLAN_STITCHED`), as its pricing card shows them: a name from one place and a figure from
+  another can pair the plan with another product's price. Calls to action must be verbatim in the visible text of their page. Each
   non-claim's figures must be on the page it cites, and each listed page must be captured, under
   its stored title.
 - When repair rounds run out, the gate settles what it can itself: it drops claims and non-claims
