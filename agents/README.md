@@ -48,6 +48,7 @@ pnpm company:sync     # idempotent: run it again and everything reads "unchanged
 pnpm company:status   # also lists how GitHub differs from the spec
 pnpm company:verify   # one session per token holder, after its computer has paused, then the br-ceo check; exits 1 on a failure
 pnpm company:verify --ceo   # only the br-ceo check: one session that reports the tools it is offered
+pnpm company:halt --dry-run # the kill switch, below; --dry-run changes nothing
 ```
 
 `company:sync`:
@@ -226,11 +227,37 @@ several. An `awaiting_approval` session holds a tool call that runs if anyone ap
 
 1. Run `pnpm company:status`. It lists every company agent's sessions that are `budget_paused` or
    `awaiting_approval`, and every title that more than one card on the board carries.
-2. Interrupt each listed session of that agent first.
+2. Interrupt each listed session of that agent first. `pnpm company:halt --held` interrupts all of
+   them and changes nothing else.
 3. Then raise the budget, or approve.
 
 The `ceo` skill also holds a sweep to its standing card: it reads the card first and before every
 write, and stops writing the moment the card is not `doing`.
+
+### The kill switch
+
+Removing the binding does not unbind `br-ceo`: deleting the `Orchestrator control plane` credential
+and its vault leaves `ceo_agent_id` set (verified on a probe), and `PATCH /v1/organizations` takes
+only `name`, `timezone`, `logo_svg` and `brand` (docs: api/organizations), so nothing sets it back
+to `null`. Only deleting the agent clears it. So the kill switch acts on `br-ceo` itself:
+
+```sh
+pnpm company:halt --dry-run          # what it would do; changes nothing
+pnpm company:halt                    # $0 budget, sweep paused, every live br-ceo session interrupted
+pnpm company:halt --unbind=<agt id>  # all that, then delete br-ceo: clears ceo_agent_id
+pnpm company:sync --unhalt           # restores a halted br-ceo
+```
+
+`company:halt` gives `br-ceo` a $0 budget first, so no turn can run anywhere, then pauses the sweep,
+then interrupts every `br-ceo` session that is running, queued, or idle waiting for someone
+(`budget_paused`, `awaiting_approval` and the rest), twice, to catch one started in between. It
+stores `halted` in place of the definition hash, and `company:sync` refuses to touch a halted
+`br-ceo` until `--unhalt`, which first interrupts every held `br-ceo` session, because restoring the
+budget would resume them. Sync never resumes the sweep.
+
+`--unbind` needs `br-ceo`'s own id. Deleting it also deletes its sweep and leaves its open cards
+unassigned (docs: api/agents), and the next `company:sync` creates a new `br-ceo` with a new id and
+binds that one. Both changes to `br-ceo` need an `admin` key, as every change to a bound CEO does.
 
 ### Where the build differs from the spec
 

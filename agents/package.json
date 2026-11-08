@@ -13,7 +13,8 @@
     "typecheck": "tsc -p .",
     "company:sync": "node src/cli/company-sync.ts",
     "company:status": "node src/cli/company-status.ts",
-    "company:verify": "node src/cli/company-verify.ts"
+    "company:verify": "node src/cli/company-verify.ts",
+    "company:halt": "node src/cli/company-halt.ts"
   },
   "dependencies": {
     "@boiler-room/schema": "workspace:*",

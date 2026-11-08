@@ -12,6 +12,7 @@ import {
   liveCatalogue,
 } from './control-plane.ts';
 import { netrc, TOKENS, type TokenName } from './github.ts';
+import { interruptHeld, isHalted } from './halt.ts';
 import { type GithubReport, githubPreflight } from './preflight.ts';
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -191,7 +192,8 @@ export async function placeNetrc(
  * nothing there.
  *
  * br-ceo is bound only after its new version names every control-plane tool off, and sync stops
- * before changing anything while the control plane serves a tool that br-ceo does not name.
+ * before changing anything while the control plane serves a tool that br-ceo does not name. A
+ * br-ceo that `company:halt` stopped is left alone unless `unhalt` is set.
  */
 export async function syncCompany(
   client: Naive,
@@ -199,8 +201,28 @@ export async function syncCompany(
   {
     preflight = () => githubPreflight(),
     catalogue = () => liveCatalogue(),
-  }: { preflight?: () => Promise<GithubReport>; catalogue?: () => Promise<string[]> } = {},
+    unhalt = false,
+  }: {
+    preflight?: () => Promise<GithubReport>;
+    catalogue?: () => Promise<string[]>;
+    /** Restores a br-ceo that `company:halt` stopped. Without it, sync refuses to touch one. */
+    unhalt?: boolean;
+  } = {},
 ): Promise<CompanyReport> {
+  const live = (await listAll((query) => client.agents.list(query))).filter(
+    (agent) => agent.name === 'br-ceo',
+  );
+  const halted = live.length === 1 && isHalted(live[0]);
+  if (halted && !unhalt) {
+    throw new Error(
+      `br-ceo (${live[0]?.id}) was halted by company:halt, so nothing was changed. Run pnpm company:sync --unhalt to restore it.`,
+    );
+  }
+  if (halted) {
+    // Restoring the budget resumes every budget_paused session from its old context, so none is left.
+    const held = await interruptHeld(client, (line) => log(line), { only: ['br-ceo'] });
+    log(`unhalt    interrupted ${held.length} held br-ceo session(s) before restoring its budget`);
+  }
   const served = compareCatalogue(await catalogue());
   if (served.unnamed.length) {
     throw new Error(

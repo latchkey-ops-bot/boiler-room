@@ -16,7 +16,8 @@
     "research": "pnpm --filter @boiler-room/agents research",
     "company:sync": "pnpm --filter @boiler-room/agents company:sync",
     "company:status": "pnpm --filter @boiler-room/agents company:status",
-    "company:verify": "pnpm --filter @boiler-room/agents company:verify"
+    "company:verify": "pnpm --filter @boiler-room/agents company:verify",
+    "company:halt": "pnpm --filter @boiler-room/agents company:halt"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"
