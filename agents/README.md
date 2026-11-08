@@ -29,7 +29,7 @@ so the prompts stay short.
 | Agent             | Model      | Started by                        | Budget (day / task) |
 | ----------------- | ---------- | --------------------------------- | ------------------- |
 | `br-ceo`          | Sonnet 5.5 | The sweep (paused), board digests | $5 / $1.00          |
-| `br-eng-lead`     | Sonnet 5.5 | `BUILD`, `SHIP`, `RELEASE` cards  | $10 / $1.50         |
+| `br-eng-lead`     | Sonnet 5.5 | `BUILD` and `SHIP` cards          | $10 / $1.50         |
 | `br-engineer-1`   | Sonnet 5.5 | `ENG` cards                       | $10 / $1.50         |
 | `br-product`      | Sonnet 5.5 | `DIR` cards                       | $4 / $1.00          |
 | `br-design`       | Sonnet 5.5 | `DESIGN` cards                    | $5 / $1.00          |
@@ -44,23 +44,37 @@ version also re-versions the CEO. Nobody delegates: leads create cards and assig
 
 ```sh
 pnpm company:sync     # idempotent: run it again and everything reads "unchanged"
-pnpm company:status
-pnpm company:verify   # one session per token holder, after its computer has paused
+pnpm company:status   # also lists how GitHub differs from the spec
+pnpm company:verify   # one session per token holder, after its computer has paused; exits 1 on a failure
 ```
 
 `company:sync`:
 
-1. Creates or versions each agent and pushes its skill, as `agents:sync` does.
-2. Ensures `br-ceo`'s board.
-3. Creates the sweep, cron `0 */2 * * *` in `America/New_York` at $1.00 a fire, with
+1. Checks GitHub from this machine, and warns about each gap without changing anything there:
+   whether each token can push to each repo (GitHub serves the `git-receive-pack` ref
+   advertisement only to a credential that can write; the token goes in a request header), and
+   whether `main` and `dev` of both repos carry the `deletion`, `non_fast_forward` and
+   `pull_request` rules. `company:status` prints the same check.
+2. Creates or versions each agent and pushes its skill, as `agents:sync` does.
+3. Ensures `br-ceo`'s board.
+4. Creates the sweep, cron `0 */2 * * *` in `America/New_York` at $1.00 a fire, with
    `enabled: false`, so it is paused until someone resumes it (`naive deploy resume <id>`). It never
    resumes or pauses an existing sweep.
-4. Writes `~/.netrc` (both `github.com` and `api.github.com`) on the computers of `br-eng-lead` and
+5. Writes `~/.netrc` (both `github.com` and `api.github.com`) on the computers of `br-eng-lead` and
    `br-engineer-1` with `BR_GITHUB_TOKEN_ENG`, and of `br-product` and `br-design` with
    `BR_GITHUB_TOKEN_DESIGN`. An agent's computer exists only once a session has needed a
    filesystem, so an agent without one first gets a boot session that runs `echo computer-ready`
    (about $0.015 on Sonnet). The token goes in by Naive's file write only; the shell commands, which
-   Naive keeps for 30 days, hold only the path. A file whose SHA-256 already matches is left alone.
+   Naive keeps for 30 days, hold only the path. A file whose SHA-256 already matches is left alone,
+   so a re-minted token in the env file is written on the next sync.
+
+`company:verify` starts one session per token holder. Each runs five fixed commands that hold only
+paths and URLs, and code, not the model, judges the outputs. It passes only when `~/.netrc` is
+there with mode 600, `GET /user` answers 200 (the token authenticates; a repo's `"push"` field
+reports the user's role, not the token's grant, so it is not used), a `git push --dry-run` of an
+empty commit to the token's own repo is accepted, and the same dry run to the other repo is
+refused. A dry run sends no objects, but it does fetch the `git-receive-pack` advertisement, which
+needs write access.
 
 Toolsets deny by default and name every allowed tool. Every agent also names as off the invoker
 (`vetta.tools_search`, `vetta.tools_execute`), the teammate tools, the company settings tools, and
@@ -76,12 +90,23 @@ inbox reader's AgentMail vault credential. The activation checklist is in `docs/
 Verified on 2026-11-07, on the real company:
 
 - A second sync changed nothing: nine agents `unchanged`, the board `existing`, the sweep
-  `unchanged` and paused, every `~/.netrc` `unchanged`.
+  `unchanged` and paused, every `~/.netrc` `unchanged`. After the release and verify changes, one
+  sync moved `br-ceo`, `br-eng-lead`, `br-engineer-1`, `br-product` and `br-design` to v2 and
+  updated the sweep's input (still paused), and the sync after it changed nothing.
 - `~/.netrc` survives into a later session. `company:verify` waited until each computer was
   `paused`, then a new session on the same computer found the file (mode 600), ran `git ls-remote`,
-  got `"push": true` from the REST API with `curl --netrc`, and an authenticated `git push --dry-run`.
-  No token appeared in any session's events or in the computers' command history. Whether the file
-  survives Naive replacing the machine is untested; the engineer's first step checks for it.
+  authenticated to the REST API with `curl --netrc`, and an authenticated `git push --dry-run` to
+  its own repo was accepted. That run had no negative step: its `"push": true` came from the repo's
+  view of the user, which proves only that the token authenticated. No token appeared in any
+  session's events or in the computers' command history. Whether the file survives Naive replacing
+  the machine is untested; the engineer's first step checks for it.
+- The negative step catches the cross-repo reach. With the new `company:verify --no-wait`, all four
+  sessions (`br-eng-lead` `ses_c9qvzy4fks90d1fd0w6r3whcr6`, `br-engineer-1`
+  `ses_qye1nv6e8ztkv74jy9jat8v9ka`, `br-product` `ses_2esz3sfds5jasx8kb7e07qxq90`, `br-design`
+  `ses_kp7mvq9387gzv903amrvny7tpt`, $0.18 in all) got `auth 200` and an accepted dry run on their
+  own repo, and an accepted dry run on the other repo too, so each failed with "the token reaches
+  both repos" and the command exited 1. The preflight from this machine agrees: both tokens get the
+  `git-receive-pack` advertisement on both repos.
 - The board: `br-ceo` created a card assigned to `br-product`, `br-product` was started on it about
   4 s later, moved it to `doing` and `done` with a note, and the board started a `br-ceo` digest
   session about 48 s after `done`, which read the card and created nothing.
@@ -91,6 +116,52 @@ In the Naive dashboard (from its route table, not an API): each agent has a page
 its roster as team members. The `/board` page shows only the board of the company's platform CEO
 (`ceo_agent_id`), which this company does not use, so read the board with `pnpm company:status` or
 `naive board show <br-ceo's agt_ id>`.
+
+### Releases are the founder's
+
+The company's work stops at `dev` and staging. When a slug is delivered, the CEO creates
+`FOUNDER: release <slug>`, unassigned and `blocked`, naming the `DIR` and `SHIP` cards and the `dev`
+commit. The founder promotes `dev` to `main` and deploys production. No agent merges into `main` or
+deploys production, and the lead moves any `RELEASE` card to `blocked` with the note
+`releases are the founder's`.
+
+### Before anyone resumes the sweep
+
+Pausing the sweep is not enough on its own: a card assigned to an agent starts it, sweep or not.
+Until both of these are true, only prompts keep an agent off the other repo and off `main` and
+`dev`, and `company:sync` and `company:status` say so:
+
+1. **Each token reaches one repo.** Re-mint both fine-grained tokens with "Only select
+   repositories": `BR_GITHUB_TOKEN_ENG` gets `boiler-room` only, `BR_GITHUB_TOKEN_DESIGN` gets
+   `boiler-room-design` only, each with Contents and Pull requests read and write. Put them in
+   `~/.boiler-room.env`, run `pnpm company:sync` (it rewrites `~/.netrc` on all four computers),
+   then `pnpm company:verify`, which must pass for all four.
+2. **`main` and `dev` have rules, on both repos.** Add the rulesets from
+   `docs/company/README.md` section 5 C: `protect-main` and `protect-dev`, each with Restrict
+   deletions, Block force pushes, and Require a pull request with 0 approvals, and an empty bypass
+   list. The tokens have no Administration permission, so no agent and no script here can add them.
+   Then check that a push straight to `dev` is refused.
+
+### Where the build differs from the spec
+
+Each item gives the spec in `docs/company/` on `dev`, then the build, then why.
+
+- **Releases.** Spec section 7: the CEO creates `RELEASE: <slug>` and `br-eng-lead` promotes `dev`
+  to `main` and deploys production, with no person involved. Build: `FOUNDER: release <slug>`, and
+  the founder promotes. A promotion to `main` or a production deploy is the founder's in every
+  case, until he confirms otherwise in writing.
+- **The work-in-progress limit.** `roles/ceo.md` step 4: at most two open `DIR` cards, where open
+  means not `done`. Build: at most two open slugs. A slug is open until the CEO comments
+  `Delivered` or `Not delivered` on its `DIR` card, or its last `SHIP` card is done. Product moves
+  `DIR` to `done` when the spec PR opens, so counting cards limited nothing.
+- **Duplicate cards.** Section 2: a retried write with the same title is a no-op. Build: only within
+  one session, because card ids derive from the board, the writing session and the title. The CEO
+  checks the board before it creates `FOUNDER: release`, `FOUNDER: stalled cards` or a retried
+  `DIR`, which is titled `DIR: <slug> r2`.
+- **Token reach.** Sections 5 and 6: each token reaches one repo. Live: both tokens can push to both
+  repos (checked 2026-11-07). Re-minting them is the founder's (above).
+- **Branch rules.** Section 5 C: rules on `main` and `dev`. Live: none on either repo (checked
+  2026-11-07). Adding them is the founder's (above).
 
 ## The Researcher
 

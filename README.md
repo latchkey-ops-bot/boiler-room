@@ -35,8 +35,8 @@ Agents run on Naive. The API key is read from `~/.boiler-room.env` (`NAIVE_API_K
 pnpm agents:sync                      # create or version the agents on Naive from agents/
 pnpm research https://example.com     # research a site; the result lands in out/research/<host>/
 pnpm company:sync                     # provision the company: agents, roster, board, paused sweep, tokens
-pnpm company:status                   # the company's agents, roster, board, sweep and spend
-pnpm company:verify                   # prove each token still works from a later session
+pnpm company:status                   # the company's agents, roster, board, sweep, spend and GitHub gaps
+pnpm company:verify                   # prove each token works on its own repo and is refused by the other
 ```
 
 See [`agents/README.md`](agents/README.md).
