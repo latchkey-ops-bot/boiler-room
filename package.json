@@ -34,7 +34,10 @@
     "web:rollback:production": "pnpm --filter @boiler-room/web rollback:production",
     "web:logs:staging": "pnpm --filter @boiler-room/web logs:staging",
     "web:logs:production": "pnpm --filter @boiler-room/web logs:production",
-    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts"
+    "render": "cd services/render && exec ./node_modules/.bin/tsx src/cli.ts",
+    "runner:snapshot": "cd services/film-runner && exec node scripts/build-snapshot.ts",
+    "runner:e2e": "cd services/film-runner && exec node scripts/e2e-computer.ts",
+    "runner:test": "pnpm --filter @boiler-room/film-runner test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.6.6"
