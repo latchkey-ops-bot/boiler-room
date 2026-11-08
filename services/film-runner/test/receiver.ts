@@ -136,6 +136,8 @@ export async function startReceiver(options: ReceiverOptions): Promise<Receiver>
   const handle = async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://receiver.local');
     const path = url.pathname;
+    // An unsigned liveness probe for the script that starts the receiver. It touches no state.
+    if (path === '/_alive' && request.method === 'GET') return send(response, 200, { ok: true });
     if (options.failNext && options.failNext.count > 0) {
       options.failNext.count -= 1;
       return reject(response, options.failNext.status, options.failNext.code ?? 'injected', path);

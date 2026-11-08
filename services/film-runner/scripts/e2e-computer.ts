@@ -141,7 +141,7 @@ function instructions(phase: 'script' | 'render'): Instructions {
 }
 
 async function startReceiver(computerId: string) {
-  const command = `cd "$HOME/film-runner" && (curl -s -o /dev/null http://127.0.0.1:${PORT}/ && echo already) || (setsid -f node test/receiver.ts --dir "$HOME/br-e2e" --port ${PORT} </dev/null >>"$HOME/br-e2e/receiver.log" 2>&1; sleep 1; echo started)`;
+  const command = `cd "$HOME/film-runner" && ((exec 3<>/dev/tcp/127.0.0.1/${PORT}) 2>/dev/null && echo already) || (setsid -f node test/receiver.ts --dir "$HOME/br-e2e" --port ${PORT} </dev/null >>"$HOME/br-e2e/receiver.log" 2>&1; sleep 1; echo started)`;
   const result = await exec(api, computerId, command, 30_000);
   stamp(`receiver: ${result.stdout.trim()}`);
 }
@@ -154,10 +154,11 @@ async function waitForExit(
   computerId: string,
   home: string,
   phase: string,
+  shownBefore = 0,
   timeoutMs = 10 * 60_000,
 ) {
   const deadline = Date.now() + timeoutMs;
-  let shown = 0;
+  let shown = shownBefore;
   for (;;) {
     let current: ReceiverState | null = null;
     try {
@@ -256,7 +257,7 @@ async function main() {
   const alive = await exec(
     api,
     id,
-    `pgrep -f "test/receiver.ts" >/dev/null && echo alive || echo gone`,
+    `pgrep -f "test/[r]eceiver.ts" >/dev/null && echo alive || echo gone`,
     30_000,
   );
   stamp(`after the pause, the receiver process is ${alive.stdout.trim()}`);
@@ -269,7 +270,9 @@ async function main() {
   await startReceiver(id);
   await writeBootstrap(api, id, home, await bootstrapFor());
   await timed('launch exec (render)', () => launchRunner(api, id));
-  const render = await timed('render phase', () => waitForExit(id, home, 'render'));
+  const render = await timed('render phase', () =>
+    waitForExit(id, home, 'render', script.state.events.length),
+  );
   if (render.exit.exitCode !== 0)
     throw new Error(`The render phase exited ${render.exit.exitCode}.`);
 
