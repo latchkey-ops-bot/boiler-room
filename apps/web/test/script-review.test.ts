@@ -35,6 +35,8 @@ const FILM: FilmView = {
   chosenCta: null,
   formats: [],
   showcaseOptIn: false,
+  launchDate: null,
+  launchChannels: [],
   createdAt: '2026-11-07T12:00:00.000Z',
   updatedAt: '2026-11-07T12:00:31.000Z',
 };
