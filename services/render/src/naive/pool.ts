@@ -1,8 +1,9 @@
 /**
  * Every computer a render creates, from the moment Naive answers the create. The pool destroys them
  * all at the end, on failure and on Ctrl-C, and keeps the bill: each one's charge so far, and what
- * the next 10-minute block would add. Before a create would take the run past its cost limit, or
- * before the clock reaches a block the limit cannot pay for, it refuses and stops the run.
+ * the next 10-minute block would add. Before a create would take the run past its cost limit,
+ * counting the creates still in flight, or before the clock reaches a block the limit cannot pay
+ * for, it refuses and stops the run.
  */
 import {
   blockEnd,
@@ -48,6 +49,8 @@ export class ComputerPool {
   private readonly live = new Set<string>();
   private readonly pendingCreates = new Set<Promise<unknown>>();
   private readonly destroying = new Map<string, Promise<void>>();
+  /** The first block of every create still in flight, which is charged the moment it answers. */
+  private reservedUsd = 0;
   private closed = false;
   private watchdog: NodeJS.Timeout | undefined;
   private readonly now: () => number;
@@ -79,7 +82,7 @@ export class ComputerPool {
     const next = blockEnd(at);
     return this.records.reduce(
       (sum, record) => sum + chargedUsd(record.size, record.createdMs, record.destroyedMs ?? next),
-      0,
+      this.reservedUsd,
     );
   }
 
@@ -105,10 +108,12 @@ export class ComputerPool {
     if (this.closed || signal?.aborted) throw new Aborted();
     const at = this.now();
     const firstBlock = (ratePerSecond(size) * (blockEnd(at) - at)) / 1000;
-    const needed = this.chargedUsd(at) + firstBlock;
+    // Creates in flight count too: two that start together would each see the other missing.
+    const needed = this.chargedUsd(at) + this.reservedUsd + firstBlock;
     if (needed > this.options.limitUsd) {
       throw new CostLimitExceeded(this.options.limitUsd, needed, `Creating ${role}`);
     }
+    this.reservedUsd += firstBlock;
     const name = `${this.prefix}-${role}`;
     const request = this.client.computers.create({
       name,
@@ -122,7 +127,9 @@ export class ComputerPool {
     try {
       computer = await request;
     } finally {
+      // Released as the record that replaces it is added, with no await between the two.
       this.pendingCreates.delete(request);
+      this.reservedUsd -= firstBlock;
     }
     const createdMs = Date.parse(computer.created_at) || at;
     const record: ComputerRecord = {

@@ -191,7 +191,10 @@ computer halfway through a block. The maximum adds 50 % to every time, a whole b
 computer, and one spare computer for a retry; that maximum is what `maxCostUsd` is checked against.
 
 While a run goes, the limit holds: a computer is created only when its first block fits under the
-limit with what has been charged, and the run stops 30 s before a new block would take it past.
+limit with what has been charged and the first blocks of the creates still in flight, so retries
+that start together cannot pass it, and the run stops 30 s before a new block would take it past.
+The estimate budgets one spare computer, so when several chunks fail at once, a retry past that
+spare is refused at the limit and the run stops.
 
 ## Limits
 
