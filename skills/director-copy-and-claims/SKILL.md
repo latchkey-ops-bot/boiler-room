@@ -1,6 +1,6 @@
 ---
 name: director-copy-and-claims
-description: How Boiler Room's validator checks numbers and superlatives in campaign.json copy against cited verbatim quotes, with real validator output and the fixes. Read when writing copy, citing claims or repairing CLAIM_UNBACKED, CLAIM_SUPERLATIVE, CLAIM_GOAL or TEXT_TOO_LONG.
+description: How Boiler Room's validator checks numbers and superlatives in campaign.json copy against cited verbatim quotes, with real validator output and the fixes. Read when writing copy, citing claims or repairing CLAIM_UNBACKED, CLAIM_SUPERLATIVE, CLAIM_NAME, CLAIM_GOAL or TEXT_TOO_LONG.
 ---
 
 # Copy and claims
@@ -77,6 +77,13 @@ Director policy is stricter:
   compound is a different word: a quote saying "the fastest-growing companies" does not back
   "Fastest scheduling", and "our best-seller" does not back "the best". Copy may repeat the
   quote's own compound with what it describes.
+- A name on screen, other than the brand's own, must be in the quote of a claim the text item
+  cites: a customer, a company, a product or an integration. Copy is in sentence case, so every
+  capitalised word that does not start a sentence reads as a name, as does a sentence-initial
+  word that a claim quote uses as a name. Common acronyms such as AI, API and PRs are exempt.
+  "Used at Stripe, Notion and Figma" citing nothing, or "Deel, Vercel and Ramp book here" citing
+  a quote that names only Deel, is `CLAIM_NAME`. "Feedback lost in Slack?" passes when it cites a
+  claim whose quote names Slack.
 - A number the quote states as a goal ("Our mission is to connect a billion people by 2031")
   may only appear as that goal, with the quote's goal word or year in the scene's text: "A
   billion people by 2031". Stated as a fact, it is `CLAIM_GOAL`.

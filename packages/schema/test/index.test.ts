@@ -27,6 +27,8 @@ describe('@boiler-room/schema', () => {
         'isBacked',
         'fromOklch',
         'mixOklch',
+        'namesIn',
+        'namesNotQuoted',
         'oklchLightness',
         'readableOn',
         'researchPartsSchema',

@@ -383,6 +383,66 @@ describe('checkSubmission', () => {
     });
   });
 
+  describe('names in copy', () => {
+    const deel = {
+      id: 'deel',
+      text: 'Deel reviews with Fernhook',
+      sourceUrl: 'https://fernhook.example.com/customers',
+      quote: 'Deel reviews every pull request with Fernhook.',
+      status: 'approved' as const,
+    };
+    async function nameIssues(edit: (s: ReturnType<typeof exampleSubmission>) => void) {
+      const submission = exampleSubmission();
+      const research = exampleResearch();
+      research.claims.push(structuredClone(deel));
+      submission.campaign.claims.push(structuredClone(deel));
+      edit(submission);
+      const verdict = await checkSubmission(submission, research, exampleBrief());
+      return verdict.blocking
+        .filter((issue) => issue.code === 'CLAIM_NAME')
+        .map((issue) => `${issue.path}: ${issue.message}`);
+    }
+
+    it('refuses customers no claim names', async () => {
+      const issues = await nameIssues((s) => {
+        const line = text(s.campaign, 'callback-line');
+        line.value = 'Used at Stripe, Notion and Figma.';
+        line.claimIds = [];
+      });
+      expect(issues).toEqual([
+        expect.stringMatching(
+          /^campaign\.scenes\[8\]\.text\[0\]\.value: .*"Stripe", "Notion" and "Figma"/,
+        ),
+      ]);
+    });
+
+    it('refuses names the cited quote does not name, and passes the one it does', async () => {
+      const issues = await nameIssues((s) => {
+        const line = text(s.campaign, 'callback-line');
+        line.value = 'Deel, Vercel and Ramp review here.';
+        line.claimIds = ['deel'];
+      });
+      expect(issues).toHaveLength(1);
+      expect(issues[0]).toContain('"Vercel" and "Ramp"');
+      expect(issues[0]).not.toContain('"Deel"');
+    });
+
+    it('reads hooks too', async () => {
+      const issues = await nameIssues((s) => {
+        const hook = s.campaign.variants.hooks[0];
+        const headline = hook?.text[0];
+        if (headline) headline.value = 'Previews like Vercel.';
+      });
+      expect(issues).toEqual([
+        expect.stringMatching(/^campaign\.variants\.hooks\[0\]\.text\[0\]\.value/),
+      ]);
+    });
+
+    it('passes the brand and the worked example', async () => {
+      expect(await nameIssues(() => {})).toEqual([]);
+    });
+  });
+
   it('refuses a CTA on a lookalike host that only ends with the site host', async () => {
     const edited = await codesAfter((s) => {
       for (const cta of s.campaign.variants.ctas)

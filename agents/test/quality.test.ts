@@ -287,6 +287,26 @@ describe('gate and claims', () => {
     );
   });
 
+  it('fails a customer name no cited quote names', async () => {
+    const campaign = example();
+    const headline = campaign.scenes[3]?.text[0];
+    if (headline) headline.value = 'Ship like Stripe and Figma.';
+    const plain = await validateCampaign(campaign);
+    const withRegistry = await validateCampaign(campaign, { sceneRegistry });
+    expect(plain.ok).toBe(true);
+    const { checks, issues } = checkGate(plain, withRegistry, campaign, 30);
+    expect(checks.find((check) => check.id === 'claims-cited')?.result).toBe('fail');
+    expect(issues).toContainEqual(
+      expect.objectContaining({
+        severity: 'blocker',
+        check: 'claims-cited',
+        owner: 'director',
+        sceneId: 'close',
+        what: expect.stringContaining('"Stripe", "Figma"'),
+      }),
+    );
+  });
+
   it('reports scene types outside the registry once, as a minor issue for motion', async () => {
     const campaign = example();
     const plain = await validateCampaign(campaign);

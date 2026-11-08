@@ -4,6 +4,8 @@ import {
   extractNumericTokens,
   type Issue,
   isBacked,
+  namesIn,
+  namesNotQuoted,
   type Scene,
   sceneRegistry,
   superlativeForms,
@@ -668,6 +670,8 @@ function checkSources(
   }
 
   const claims = new Map(campaign.claims.map((claim) => [claim.id, claim]));
+  // Names a claim quote uses mid-sentence also count when copy starts a sentence with them.
+  const knownNames = campaign.claims.flatMap((claim) => namesIn(claim.quote));
   const scenes = [
     ...campaign.scenes.map((scene, index) => ({ scene, path: `scenes[${index}]` })),
     ...campaign.variants.hooks.map((scene, index) => ({ scene, path: `variants.hooks[${index}]` })),
@@ -685,6 +689,22 @@ function checkSources(
     ];
     const sceneWords = cited.map((each) => each.value).join(' ');
     for (const { at, value, ids } of cited) {
+      const names = namesNotQuoted(
+        value,
+        ids.flatMap((id) => claims.get(id)?.quote ?? []),
+        { brandName: campaign.brand.name, known: knownNames },
+      );
+      if (names.length) {
+        const listed = names.map((name) => `"${name}"`);
+        const list =
+          listed.length > 1 ? `${listed.slice(0, -1).join(', ')} and ${listed.at(-1)}` : listed[0];
+        push(
+          'CLAIM_NAME',
+          `${at}.value`,
+          `"${value}" names ${list}, which ${ids.length ? 'its cited quotes do not name' : 'no cited claim names'}.`,
+          `Cite a claim whose quote names ${list}, or remove ${names.length > 1 ? 'them' : 'it'}. Never put a customer, company or product on screen that no cited quote names.`,
+        );
+      }
       const goals = ids.flatMap((id) => {
         const quote = claims.get(id)?.quote;
         return quote

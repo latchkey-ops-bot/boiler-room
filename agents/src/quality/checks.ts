@@ -8,6 +8,8 @@ import {
   type Campaign,
   type CampaignFrames,
   type Issue,
+  namesIn,
+  namesNotQuoted,
   sceneFrames,
   superlativeForms,
   type ValidationResult,
@@ -574,15 +576,24 @@ function routeIssue(issue: Issue, campaign: Campaign | undefined, fps: number): 
   );
 }
 
+interface CopyFinding {
+  sceneId: string;
+  path: string;
+  value: string;
+  /** The superlative form, or the names, the cited quotes do not state. */
+  what: string;
+  why: string;
+}
+
 /**
- * Copy that cites a claim and states a superlative the cited quotes do not state as a word of their
- * own. `validateCampaign` stays silent once copy cites anything, so "Fastest scheduling" citing
- * "The fastest-growing companies use it" would otherwise pass.
+ * Copy the cited quotes do not support, beyond the numbers `validateCampaign` checks: a
+ * superlative the cited quotes do not state as a word of their own ("Fastest scheduling" citing
+ * "The fastest-growing companies use it"; the validator stays silent once copy cites anything),
+ * and a customer, company or product name no cited quote names.
  */
-function launderedSuperlatives(
-  campaign: Campaign,
-): { sceneId: string; path: string; value: string; form: string; quoted: string[] }[] {
+function unsupportedCopy(campaign: Campaign): CopyFinding[] {
   const quotes = new Map(campaign.claims.map((claim) => [claim.id, claim.quote]));
+  const knownNames = campaign.claims.flatMap((claim) => namesIn(claim.quote));
   const scenes = [
     ...campaign.scenes.map((scene, index) => ({ scene, path: `scenes[${index}]` })),
     ...campaign.variants.hooks.map((scene, index) => ({ scene, path: `variants.hooks[${index}]` })),
@@ -603,13 +614,42 @@ function launderedSuperlatives(
             },
           ]
         : []),
-    ].flatMap(({ path: at, value, ids }) => {
-      const known = ids.filter((id) => quotes.has(id));
-      if (known.length === 0) return [];
-      const quoted = known.flatMap((id) => superlativeForms(quotes.get(id) ?? ''));
-      return [...new Set(superlativeForms(value))]
-        .filter((form) => !quoted.includes(form))
-        .map((form) => ({ sceneId: scene.id, path: at, value, form, quoted }));
+    ].flatMap(({ path: at, value, ids }): CopyFinding[] => {
+      const cited = ids.flatMap((id) => quotes.get(id) ?? []);
+      const finding = (what: string, why: string): CopyFinding => ({
+        sceneId: scene.id,
+        path: at,
+        value,
+        what,
+        why,
+      });
+      const names = namesNotQuoted(value, cited, {
+        brandName: campaign.brand.name,
+        known: knownNames,
+      });
+      const named = names.length
+        ? [
+            finding(
+              names.map((name) => `"${name}"`).join(', '),
+              cited.length
+                ? 'which its cited quotes do not name'
+                : 'and cites no claim that names them',
+            ),
+          ]
+        : [];
+      if (cited.length === 0) return named;
+      const quoted = cited.flatMap((quote) => superlativeForms(quote));
+      return [
+        ...[...new Set(superlativeForms(value))]
+          .filter((form) => !quoted.includes(form))
+          .map((form) =>
+            finding(
+              `"${form}"`,
+              `which its cited quotes do not state as a word of its own${quoted.length ? ` (they say ${quoted.map((each) => `"${each}"`).join(', ')})` : ''}`,
+            ),
+          ),
+        ...named,
+      ];
     }),
   );
 }
@@ -641,7 +681,7 @@ export function checkGate(
   const unknownTypes = registryOnly.filter((issue) => issue.code === 'SCENE_TYPE_UNKNOWN');
   const registryLimits = registryOnly.filter((issue) => issue.code === 'TEXT_TOO_LONG');
 
-  const laundered = campaign ? launderedSuperlatives(campaign) : [];
+  const unsupported = campaign ? unsupportedCopy(campaign) : [];
   const uncited = (campaign?.scenes ?? []).flatMap((scene) =>
     scene.text.filter((item) => item.claimIds.length === 0).map((item) => `${scene.id}/${item.id}`),
   );
@@ -659,16 +699,14 @@ export function checkGate(
       ),
       check(
         'claims-cited',
-        claimIssues.length || laundered.length ? 'fail' : 'pass',
-        claimIssues.length || laundered.length
+        claimIssues.length || unsupported.length ? 'fail' : 'pass',
+        claimIssues.length || unsupported.length
           ? [
               ...claimIssues.map((issue) => `${issue.code} ${issue.path}`),
-              ...laundered.map(
-                (each) => `superlative "${each.form}" not in its cited quotes at ${each.path}`,
-              ),
+              ...unsupported.map((each) => `${each.what} not in its cited quotes at ${each.path}`),
             ].join('; ')
-          : `every number in copy and voiceover is in a cited quote; ${uncited.length} text item(s) cite no claim and state no number or superlative${uncited.length ? ` (${uncited.join(', ')})` : ''}`,
-        'no CLAIM_UNBACKED, CLAIM_UNKNOWN or CLAIM_SUPERLATIVE, and every cited superlative is a word of its own in a cited quote',
+          : `every number in copy and voiceover is in a cited quote; ${uncited.length} text item(s) cite no claim and state no number, superlative or name${uncited.length ? ` (${uncited.join(', ')})` : ''}`,
+        'no CLAIM_UNBACKED, CLAIM_UNKNOWN or CLAIM_SUPERLATIVE; every cited superlative is a word of its own in a cited quote, and every name on screen is in one',
       ),
       check(
         'scene-registry',
@@ -684,15 +722,15 @@ export function checkGate(
     ],
     issues: [
       ...[...blocking, ...registryLimits].map((issue) => routeIssue(issue, campaign, fps)),
-      ...laundered.map((each) =>
+      ...unsupported.map((each) =>
         codeIssue(
           {
             severity: 'blocker',
             check: 'claims-cited',
             owner: 'director',
             sceneId: each.sceneId,
-            what: `${each.path} "${each.value}" says "${each.form}", which its cited quotes do not state as a word of its own${each.quoted.length ? ` (they say ${each.quoted.map((form) => `"${form}"`).join(', ')})` : ''}.`,
-            fix: `Remove "${each.form}" from ${each.path}, or cite a claim whose quote says it about the same thing.`,
+            what: `${each.path} "${each.value}" says ${each.what}, ${each.why}.`,
+            fix: `Remove ${each.what} from ${each.path}, or cite a claim whose quote states it about the same thing.`,
           },
           fps,
         ),
