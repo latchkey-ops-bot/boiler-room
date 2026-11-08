@@ -84,7 +84,7 @@ the change that fixes it.
 | `src/brand/`       | Theme from `campaign.brand`, skin, logo checks, font loading       |
 | `src/layout/`      | Stage size and safe areas, text fitting                            |
 | `src/components/`  | Type, the brand mark, browser frame, `MorphBox`, `RisingWords`     |
-| `src/scenes/`      | The four templates, registered under the schema's scene type names |
+| `src/scenes/`      | The five templates, registered under the schema's scene type names |
 | `src/transitions/` | The catalog, the seam resolver, the seam wrapper, the timeline     |
 | `src/film/`        | `<CampaignFilm>`, the `Stage`, the render gate, planning           |
 | `src/root.tsx`     | Remotion entry point                                               |
@@ -93,16 +93,24 @@ the change that fixes it.
 ## Scenes
 
 The schema's `sceneRegistry` is the one list of scene types and their text limits. This package
-registers a template against four of its names in `src/scenes/registry.ts`, exports them as
+registers a template against five of its names in `src/scenes/registry.ts`, exports them as
 `IMPLEMENTED_SCENE_TYPES`, and renders only those. Each template sets the roles its scene file
 lists, and `validateFilm` checks the counts.
 
-| Type           | Copy                                                | Props                       | Image                           |
-| -------------- | --------------------------------------------------- | --------------------------- | ------------------------------- |
-| `word-slam`    | `headline`, the hook sentence; its first word slams | `accent`                    | none                            |
-| `site-hero`    | optional `label`, the URL in the address bar        | `frame: 'browser'`, `focus` | 1 captured page, device scale 2 |
-| `feature-card` | `headline`, up to 2 `label`s, the cause and effect  | `demo`, `accent`            | 0 to 2 crops, else chips        |
-| `end-card`     | `cta`, optional `label`, the URL                    | `urlReveal`                 | none, shows the logo            |
+| Type           | Copy                                                  | Props                       | Image                           |
+| -------------- | ----------------------------------------------------- | --------------------------- | ------------------------------- |
+| `word-slam`    | `headline`, the hook sentence; its first word slams   | `accent`                    | none                            |
+| `site-hero`    | optional `label`, the URL in the address bar          | `frame: 'browser'`, `focus` | 1 captured page, device scale 2 |
+| `feature-card` | `headline`, up to 2 `label`s, the cause and effect    | `demo`, `accent`            | 0 to 2 crops, else chips        |
+| `stat-counter` | `headline`, the cited number; `label`, what it counts | `countUp: false`, `accent`  | none                            |
+| `end-card`     | `cta`, optional `label`, the URL                      | `urlReveal`                 | none, shows the logo            |
+
+`stat-counter` refuses `countUp: true`: count-ups wait for the founder, since a count-up shows numbers
+no quote states. The count-up is built to its scene file and tested, so approving it means removing
+that refusal. Its number is fitted to its box down to 0.13 W and its label is set at the sentence
+cap height on at most two lines; copy that cannot be set that way stops the render with
+`LAYOUT_UNFIT`, naming the scene and text id, rather than being set smaller. That check runs when
+the scene renders, because nothing before the first frame measures copy yet.
 
 `site-hero` refuses `frame: 'plane'`, `layers` and `activeLayer` as not built: plane mode tilts the
 page in 3D, which the determinism check has shown makes a frame depend on render order. Its focus
