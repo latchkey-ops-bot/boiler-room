@@ -146,6 +146,10 @@ shots. Works on x, y and scale.
 | Word-gap variant | On axis `x`, each incoming word `i` of a line takes `seamIn(f) * gain(i)`, with `gain(i) = clamp(1 + 0.2 * d(i), 0.6, 1.4)` and `d(i)` the word's distance in words from the line's middle word, positive towards the trailing side. Glyph size does not change | [N], fitted by eye to ref A's [M] word speeds 49 to 68, 46 and 33 px/f |
 | Whip variant     | Outgoing `r` 1.2, `n` 9 (`depart.whip`), one near-empty frame at `f = -1`, incoming at about half speed                                                                                                                                                         | [M] ref G                                                              |
 
+In the word-gap variant the trailing side is the side the seam moves away from, the left on a seam
+moving right. Those words travel furthest, so the gaps start stretched and close up, as ref A's do
+[M]. Counted from the other side, the gaps start closed and the words collide.
+
 **Pairs with.** Every scene that declares a velocity anchor. The default x anchor is
 `{axis: 'x', sign: 1, v: 46}` and the default y anchor `{axis: 'y', sign: -1, v: 36}` [N, inside
 the [M] range].
