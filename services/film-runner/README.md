@@ -250,17 +250,18 @@ Pass `--adapter standin` until the film command has the contract: `feat/crew-age
 
 ### The current snapshot
 
-|                      |                                                                                                        |
-| -------------------- | ------------------------------------------------------------------------------------------------------ |
-| `RUNNER_SNAPSHOT_ID` | `snp_f623af1411dc4d0181fb8e17c39ab04e`                                                                 |
-| `RUNNER_COMMIT`      | `cdb27eb44c5fa74f9b4c20fd3ee2ce191631344a` (this package)                                              |
-| `RUNNER_FILM_COMMIT` | `a54662f2793c5dff813fdb2a83b252d5025dca9c` (`feat/crew-agents`, which has no `film` script yet)        |
-| Adapter              | `standin`                                                                                              |
-| Runner key           | None. The env file had no `NAIVE_RUNNER_KEY`, so this snapshot can run only the stand-in               |
-| Built                | 2026-11-08: setup 49 s, snapshot 8.7 s, a fork ready in 5.3 s, $0.11 for the builder and the fork test |
+|                      |                                                                                                    |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| `RUNNER_SNAPSHOT_ID` | `snp_30c4becf716146e58d5dfe37ad82d93f`                                                             |
+| `RUNNER_COMMIT`      | `f68923c6021d849798701c228dba986ae327dd7e` (this package, on `feat/web-runner`)                    |
+| `RUNNER_FILM_COMMIT` | `7df0046c1b099ecec9459c50cbe1f4ce438b2374` (`feat/crew-agents`, whose `film` has no `--phase` yet) |
+| Adapter              | `standin`, chosen with `--adapter standin`                                                         |
+| Naive key            | None, by design: the website sends one with each launch                                            |
+| sudo                 | `swapon /swapfile` only; a fork's ready check proved `sudo -n true` is refused                     |
+| Built                | 2026-11-08: setup 32 s, snapshot 8.6 s, a fork ready in 3.4 s, $0.06 for the builder and the fork  |
 
-Rebuild it once the film command has the contract and a runner key is minted: `--adapter film`
-and `NAIVE_RUNNER_KEY` in the env file.
+Rebuild it with `--adapter film` once the film command has the contract, then set
+`RUNNER_ALLOW_STANDIN` to `false` on staging.
 
 ## Measured on Naive
 
