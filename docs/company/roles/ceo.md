@@ -52,8 +52,9 @@ Before a budget is raised, every `budget_paused` session of the agent is interru
 2. List every `doing` card whose `updated_at` is more than 2 hours old, with its
    `woken_session_id`, on a `FOUNDER: stalled cards` card. Its session may have hit its budget,
    which leaves the card in `doing` with no digest. The CEO cannot see a session's status or raise
-   a budget, which only a person can do. A `todo` card whose blockers are all `done` but that never
-   started for 2 hours goes on the same list.
+   a budget, which only a person can do. A `todo` card whose blockers are all `done` and that has
+   sat in `todo` for 2 hours goes on the same list, with its `woken_session_id` and `wake_count`,
+   whether it never started or was moved back to `todo` and not started again.
 3. For each blocked card: reassign it, answer it with a comment, or decide it. Escalate as a
    `FOUNDER: <need>` card only when a person must physically act. A card's `blocked_by` is fixed
    when it is created, and the board ignores every change to it, so the CEO never tries one. A card

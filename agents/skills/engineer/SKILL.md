@@ -28,8 +28,11 @@ One `ENG` card is one branch and one pull request into `dev` of
    https://api.github.com/repos/latchkey-ops-bot/boiler-room/pulls/<n>` shows `merged_at` set. If
    it is not, change nothing and move the card to `blocked` with the note
    `waiting for PR #<n> to be merged into dev`: the engineering lead merges it and starts this card
-   again. Never merge it yourself, and never build on its unmerged branch. Otherwise make the change
-   the card asks for, and nothing else. Follow every rule in `CLAUDE.md`.
+   again. Never merge it yourself, and never build on its unmerged branch. A fix card
+   (`ENG: <slug> fix <n>`) never waits for the pull request its body names: that pull request is
+   the one it fixes, it is open because it failed review, and it is merged only after your push to
+   its branch. Never block a fix card because that pull request is not merged. Otherwise make the
+   change the card asks for, and nothing else. Follow every rule in `CLAUDE.md`.
 5. Check it. Turn on swap first, once per computer, with the recipe in "Working on
    `packages/motion`" below: without it `pnpm install` and `pnpm test` are killed for memory
    (`CHECK_EXIT 137`, seen in the role evals on 2026-11-08). Then check that pnpm runs:

@@ -93,8 +93,9 @@ stopped when the budget is raised, by when its standing card may long be closed.
 2. **Stalled cards.** List every `doing` card whose `updated_at` is more than 2 hours old, with its
    `woken_session_id`. Its session may have hit its budget, which leaves the card in `doing` with no
    digest. Only a person can see that session or raise a budget. List too every `todo` card whose
-   `blocked_by` cards are all `done`, that has never started (`woken_session_id` is null) and whose
-   `updated_at` is more than 2 hours old: the board did not start it. If there are any: when a
+   `blocked_by` cards are all `done` (or that has none) and whose `updated_at` is more than 2 hours
+   old, with its `woken_session_id` and `wake_count`, whatever they say: the board did not start it,
+   or did not start it again after someone moved it back to `todo`. If there are any: when a
    `FOUNDER: stalled cards` card that is not `done` already exists, comment the current list on it;
    otherwise create `FOUNDER: stalled cards` with the list in its body, and leave it unassigned.
 3. **Blocked cards.** A card's `blocked_by` is fixed when the card is created: the board ignores

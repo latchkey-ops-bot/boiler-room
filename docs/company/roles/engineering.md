@@ -94,7 +94,9 @@ edited once applied. A rollback never touches D1.
    `git checkout -b feat/<slug>-<n> origin/dev`.
 4. If the card builds on another card's pull request and it is not merged into `dev`, change
    nothing and move the card to `blocked` with the note `waiting for PR #<n> to be merged into dev`.
-   Otherwise make the change the card asks for, following `CLAUDE.md`.
+   A fix card (`ENG: <slug> fix <n>`) never waits for the pull request its body names: it pushes to
+   that pull request's branch, which is merged only after the fix. Otherwise make the change the
+   card asks for, following `CLAUDE.md`.
 5. Run `pnpm install --frozen-lockfile`, `pnpm lint`, `pnpm typecheck` and `pnpm test`. The `bash`
    tool times out at 30 s, so run anything long as `nohup bash step.sh > step.log 2>&1 &` and poll
    the log. Always put the long step in a script file. In the probe, a loop backgrounded inline

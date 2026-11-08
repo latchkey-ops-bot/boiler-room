@@ -770,6 +770,26 @@ describe("the lead's checks run apart from the keys", () => {
   });
 });
 
+describe('a fix card and a todo card the board did not start again', () => {
+  const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
+
+  it('never waits for the pull request it fixes', () => {
+    const engineer = flat('engineer');
+    expect(engineer).toContain(
+      'A fix card (`ENG: <slug> fix <n>`) never waits for the pull request its body names',
+    );
+    expect(engineer).toContain('Never block a fix card because that pull request is not merged');
+  });
+
+  it('is listed as stalled whatever its woken_session_id says', () => {
+    const skill = flat('ceo');
+    expect(skill).toContain(
+      'List too every `todo` card whose `blocked_by` cards are all `done` (or that has none) and whose `updated_at` is more than 2 hours old, with its `woken_session_id` and `wake_count`, whatever they say',
+    );
+    expect(skill).not.toContain('that has never started (`woken_session_id` is null)');
+  });
+});
+
 describe('pnpm on agent computers', () => {
   const flat = (slug: string) => skillContent({ slug, description: '' }).replace(/\s+/g, ' ');
 
