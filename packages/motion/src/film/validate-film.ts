@@ -7,9 +7,10 @@ import {
 } from '@boiler-room/schema';
 import type { Format } from '../layout/stage.ts';
 import { definitionOf } from '../scenes/registry.ts';
-import { isTransition, TRANSITIONS } from '../transitions/timeline.ts';
+import { buildTimeline, isTransition, TRANSITIONS } from '../transitions/timeline.ts';
 import type { CutSelection } from './cut.ts';
 import { screenImageId } from './media.ts';
+import { bothDrawMark, timingOf } from './plan.ts';
 
 export const FILM_ISSUE_CODES = [
   'SCENE_TYPE_UNBUILT',
@@ -24,6 +25,8 @@ export const FILM_ISSUE_CODES = [
   'FONT_UNAVAILABLE',
   'TRANSITION_UNKNOWN',
   'TRANSITION_UNUSED',
+  'TRANSITION_EMPTY',
+  'SCENE_TOO_SHORT',
   'FORMAT_UNLISTED',
   'VARIANT_UNKNOWN',
   'VARIANT_UNUSED',
@@ -176,6 +179,59 @@ function checkTransition(scene: Scene, path: string, isLast: boolean): FilmIssue
   ];
 }
 
+/**
+ * A carry moves the product image both scenes show first, or else the brand mark. Between scenes
+ * that share no image, where one of them draws no mark, it would have nothing to move.
+ */
+function checkCarry(scene: Scene, next: Scene | undefined, path: string, campaign: Campaign) {
+  if (scene.transitionOut !== 'carry' || !next) return [];
+  const shared = screenImageId(scene, campaign);
+  const sharesImage =
+    shared !== undefined &&
+    shared === screenImageId(next, campaign) &&
+    [scene, next].every((each) => definitionOf(each.type)?.imageAnchor !== undefined);
+  if (sharesImage || bothDrawMark(scene, next)) return [];
+  const markless = [...new Set([scene, next].map(({ type }) => type))].filter(
+    (type) => definitionOf(type)?.markAnchor === undefined,
+  );
+  return [
+    error(
+      'TRANSITION_EMPTY',
+      `${path}.transitionOut`,
+      `${path} carries into the scene after it, but the two show no product image in common, and ${markless.map((type) => `a ${type}`).join(' or ')} draws no brand mark, so the carry would have nothing to move.`,
+      `Change ${path}.transitionOut to "push", or remove it for a cut, or give both scenes the same captured image first in their assetIds.`,
+    ),
+  ];
+}
+
+/** A scene that holds still to its end, the end card, must be built before its hold starts. */
+function checkHolds(campaign: Campaign): FilmIssue[] {
+  // The timeline needs every transition name to be known, and TRANSITION_UNKNOWN reports any other.
+  const named = campaign.scenes.every(
+    ({ transitionOut }) => transitionOut === undefined || isTransition(transitionOut),
+  );
+  if (!named) return [];
+  const timeline = buildTimeline(campaign);
+  return timeline.spans.flatMap((span) => {
+    const scene = campaign.scenes[span.index] as Scene;
+    const definition = definitionOf(scene.type);
+    const parsed = definition?.props.safeParse(scene.props);
+    if (!definition?.unfinishedAtHold || !parsed?.success) return [];
+    const path = `scenes[${span.index}]`;
+    return definition
+      .unfinishedAtHold({
+        props: parsed.data,
+        text: scene.text,
+        durationInFrames: span.durationInFrames,
+        fps: timeline.fps,
+        timing: timingOf(span, timeline.fps),
+        carriedIn: span.in?.name === 'carry',
+        path,
+      })
+      .map(({ message, fix }) => error('SCENE_TOO_SHORT', path, message, fix));
+  });
+}
+
 function checkSelection(campaign: Campaign, format: Format, selection: CutSelection): FilmIssue[] {
   const { variants } = campaign;
   const issues: FilmIssue[] = [];
@@ -226,13 +282,15 @@ function checkSelection(campaign: Campaign, format: Format, selection: CutSelect
 
 /**
  * The rules that only the templates know: props each template accepts, copy each one sets, the
- * images it needs, and transitions that exist. Run it on a campaign `validateCampaign` passed.
+ * images it needs, transitions that exist and have something to move, and a hold that comes only
+ * once the scene is built. Run it on a campaign `validateCampaign` passed.
  */
 export function validateFilm(
   campaign: Campaign,
   format: Format,
   selection: CutSelection = {},
 ): FilmIssue[] {
+  const opening = campaign.scenes[0];
   return [
     ...scenesOf(campaign).flatMap(({ scene, path }) => [
       ...checkProps(scene, path),
@@ -244,6 +302,20 @@ export function validateFilm(
         path.startsWith('scenes[') && scene === campaign.scenes.at(-1),
       ),
     ]),
+    ...campaign.scenes.flatMap((scene, index) =>
+      checkCarry(scene, campaign.scenes[index + 1], `scenes[${index}]`, campaign),
+    ),
+    // A hook opens the film in place of the first scene, and keeps its way out if it has none.
+    ...campaign.variants.hooks.flatMap((hook, index) => {
+      const transitionOut = hook.transitionOut ?? opening?.transitionOut;
+      return checkCarry(
+        { ...hook, ...(transitionOut ? { transitionOut } : {}) },
+        campaign.scenes[1],
+        `variants.hooks[${index}]`,
+        campaign,
+      );
+    }),
+    ...checkHolds(campaign),
     ...checkSelection(campaign, format, selection),
   ];
 }

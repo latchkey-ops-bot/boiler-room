@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
 import { withAlpha } from '../brand/color.ts';
 import { BrowserFrame } from '../components/browser-frame.tsx';
-import { cornerMark, SceneBase, SceneMark } from '../components/scene-base.tsx';
+import { SceneBase } from '../components/scene-base.tsx';
 import { type SceneProps, useScene } from '../components/scene-runtime.tsx';
 import { baselineOffset, lineBox, type SpecFit, specPx, useSpecFit } from '../components/type.tsx';
 import { WHOLE_IMAGE } from '../core/camera.ts';
@@ -355,8 +355,9 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
   const light = (f - beats.causeLight) / beats.lightFrames;
 
   return (
+    // No corner mark: the scene file calls for none, and in 9:16 the headline slot sits just
+    // under the corner, where the mark would crowd it.
     <SceneBase seed={scene.id}>
-      <SceneMark placement={cornerMark(stage)} />
       <div style={{ inset: 0, opacity, position: 'absolute' }}>
         {f >= 0 ? (
           <Headline
@@ -481,5 +482,4 @@ export const featureCard = defineScene<FeatureCardProps>({
     // The effect pops past its size by up to 6.6% before it settles.
     return { width: cropRect(node, image).width, zoom: index === 0 ? 1 : 1.07 };
   },
-  markAnchor: (stage) => cornerMark(stage),
 });

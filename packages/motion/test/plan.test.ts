@@ -37,9 +37,38 @@ describe('planFilm', () => {
     });
     expect(quillhaven.carries.map(({ element }) => element)).toEqual([
       { kind: 'image', assetId: 'editor-shot' },
-      { kind: 'mark' },
     ]);
-    expect(at(quillhaven.scenes, 3).carriedIn).toEqual({ kind: 'mark' });
+    // A word slam and an end card share no image, and both draw the mark.
+    const marked = novaCopy();
+    delete at(marked.scenes, 1).transitionOut;
+    Object.assign(at(marked.scenes, 2), {
+      type: 'word-slam',
+      props: {},
+      assetIds: [],
+      text: [{ id: 'adoption-headline', role: 'headline', value: 'Ship it.', claimIds: [] }],
+      transitionOut: 'carry',
+    });
+    const plan = planFilm({
+      campaign: marked,
+      format: '9:16',
+      logo: { kind: 'wordmark', reason: 'too-small' },
+      imageSizes: { 'dashboard-shot': { width: 2880, height: 1800 } },
+    });
+    expect(plan.carries.map(({ element }) => element)).toEqual([{ kind: 'mark' }]);
+    expect(at(plan.scenes, 3).carriedIn).toEqual({ kind: 'mark' });
+  });
+
+  it('refuses to plan a carry with nothing to move, which validateFilm reports', () => {
+    const campaign = novaCopy();
+    at(campaign.scenes, 1).props = { demo: 'chips' };
+    expect(() =>
+      planFilm({
+        campaign,
+        format: '16:9',
+        logo: { kind: 'wordmark', reason: 'too-small' },
+        imageSizes: { 'dashboard-shot': { width: 2880, height: 1800 } },
+      }),
+    ).toThrow(/no image and no mark to move/);
   });
 
   it('hands a carried image over exactly where each scene holds it, so nothing jumps', () => {

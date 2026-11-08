@@ -133,11 +133,8 @@ const SceneHost = ({
 const Carry = ({ carry, film, stage }: { carry: CarryPlan; film: FilmPlan; stage: Stage }) => {
   const before = film.campaign.scenes[carry.outgoing] as Scene;
   const after = film.campaign.scenes[carry.incoming] as Scene;
-  const marks = {
-    from: definitionOf(before.type)?.markAnchor(stage),
-    to: definitionOf(after.type)?.markAnchor(stage),
-  };
-  if (!marks.from || !marks.to) return null;
+  const from = definitionOf(before.type)?.markAnchor?.(stage);
+  const to = definitionOf(after.type)?.markAnchor?.(stage);
   const src =
     carry.element.kind === 'image' ? film.campaign.assets[carry.element.assetId]?.src : undefined;
   return (
@@ -145,7 +142,7 @@ const Carry = ({ carry, film, stage }: { carry: CarryPlan; film: FilmPlan; stage
       carry={carry}
       filmFrom={carry.window.from}
       imageSrc={src}
-      marks={{ from: marks.from, to: marks.to }}
+      marks={from && to ? { from, to } : undefined}
       stage={stage}
     />
   );

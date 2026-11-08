@@ -66,6 +66,17 @@ function exitOf(span: SceneSpan): SceneExit {
   return span.out?.name === 'carry' ? 'text' : 'hold';
 }
 
+/** A scene's clocks on the timeline: when its own entry starts, and when its words come and go. */
+export const timingOf = (span: SceneSpan, fps: number): SceneTiming =>
+  sceneTiming({
+    durationInFrames: span.durationInFrames,
+    fps,
+    exit: exitOf(span),
+    enterAfter: span.in ? span.in.to - span.in.boundary : 0,
+    clearBefore: span.out ? span.out.boundary - span.out.from : 0,
+    arrivesWhole: span.in?.name === 'push',
+  });
+
 function imagesOf(scene: Scene, campaign: Campaign, sizes: Record<string, ImageSize>) {
   return screenImageIds(scene, campaign).map((assetId): PlannedImage => {
     const size = sizes[assetId];
@@ -96,6 +107,10 @@ function imageAnchor(
   });
 }
 
+/** True when both scenes draw the brand mark, so a carry between them can move it. */
+export const bothDrawMark = (before: Scene, after: Scene): boolean =>
+  [before, after].every((scene) => definitionOf(scene.type)?.markAnchor !== undefined);
+
 export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): FilmPlan {
   const timeline = buildTimeline(campaign);
   const { width, height } = FORMAT_SIZES[format];
@@ -106,14 +121,7 @@ export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): Fi
     return {
       index,
       span,
-      timing: sceneTiming({
-        durationInFrames: span.durationInFrames,
-        fps: timeline.fps,
-        exit: exitOf(span),
-        enterAfter: span.in ? span.in.to - span.in.boundary : 0,
-        clearBefore: span.out ? span.out.boundary - span.out.from : 0,
-        arrivesWhole: span.in?.name === 'push',
-      }),
+      timing: timingOf(span, timeline.fps),
       images: imagesOf(scene, campaign, imageSizes),
       carriedIn: undefined,
       carriedOut: undefined,
@@ -140,12 +148,20 @@ export function planFilm({ campaign, format, logo, imageSizes }: PlanInputs): Fi
       window.to - after.span.from,
     );
     // The product moves when both scenes hold the same image where a carry can meet it, and the
-    // brand mark moves otherwise.
+    // brand mark moves otherwise. `validateFilm` refuses a carry that has neither to move.
     const shared = before.images[0]?.assetId;
     const element: CarryElement =
       shared && shared === after.images[0]?.assetId && from && to
         ? { kind: 'image', assetId: shared }
         : { kind: 'mark' };
+    if (
+      element.kind === 'mark' &&
+      !bothDrawMark(campaign.scenes[index] as Scene, campaign.scenes[index + 1] as Scene)
+    ) {
+      throw new Error(
+        `The carry out of ${campaign.scenes[index]?.id} has no image and no mark to move. validateFilm checks this.`,
+      );
+    }
     before.carriedOut = element;
     after.carriedIn = element;
     carries.push({

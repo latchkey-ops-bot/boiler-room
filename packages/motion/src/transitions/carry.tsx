@@ -85,12 +85,13 @@ export const CarryOverlay = ({
   /** The film frame this overlay's sequence starts at. */
   filmFrom: number;
   imageSrc: string | undefined;
-  marks: { from: MarkPlacement; to: MarkPlacement };
+  /** Where each scene draws the mark. Only a mark carry needs it, and both scenes draw one. */
+  marks: { from: MarkPlacement; to: MarkPlacement } | undefined;
   stage: Stage;
 }) => {
   const t = carryProgress(useCurrentFrame() + filmFrom, carry);
   if (carry.element.kind === 'image' && imageSrc) {
     return <CarriedImage carry={carry} src={assetUrl(imageSrc)} t={t} />;
   }
-  return <CarriedMark from={marks.from} to={marks.to} stage={stage} t={t} />;
+  return marks ? <CarriedMark from={marks.from} to={marks.to} stage={stage} t={t} /> : null;
 };

@@ -64,6 +64,24 @@ export interface RoleCount {
   max: number;
 }
 
+export interface HoldRequest<Props> {
+  props: Props;
+  text: readonly { role: TextRole; value: string }[];
+  durationInFrames: number;
+  fps: number;
+  timing: SceneTiming;
+  /** True when a carry brings an element in, which then needs no entry of its own. */
+  carriedIn: boolean;
+  /** Where the scene is in the campaign, such as `scenes[3]`, for the issue to name. */
+  path: string;
+}
+
+/** Something a hold would freeze before it is finished, and the change that gives it time. */
+export interface HoldShortfall {
+  message: string;
+  fix: string;
+}
+
 /**
  * The template for one scene type of the schema's `sceneRegistry`. The text limits are not here:
  * the schema's registry holds them, and it is the contract the Director writes to. A template
@@ -85,7 +103,17 @@ export interface SceneDefinition<Props> {
   imageNeeded?: (props: Props) => boolean;
   imageAnchor?: (request: AnchorRequest<Props>) => ImageAnchor | undefined;
   imageView?: (request: ImageViewRequest<Props>) => ImageView;
-  markAnchor: (stage: Stage) => MarkPlacement;
+  /**
+   * Where the scene draws the brand mark, which is where a carry of the mark meets it. A scene
+   * whose file calls for no mark has none, and a carry with no image to move cannot leave or reach
+   * it.
+   */
+  markAnchor?: (stage: Stage) => MarkPlacement;
+  /**
+   * For a scene that holds still to its end: whatever its hold would freeze before it is finished
+   * at this length. `validateFilm` refuses each one, so a film never ends on a half-built frame.
+   */
+  unfinishedAtHold?: (request: HoldRequest<Props>) => HoldShortfall[];
 }
 
 export type AnySceneDefinition = SceneDefinition<unknown>;

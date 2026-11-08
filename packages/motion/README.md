@@ -13,7 +13,8 @@ those files and to the measured values of `docs/motion/reference-spec.md`.
    that has no template yet is refused as `SCENE_TYPE_UNBUILT`, naming it and the types that
    render;
 2. runs `validateFilm`, for the rules only the templates know: props each template accepts, copy
-   each one sets, the images it needs, transitions that exist, and the format, hook and CTA chosen;
+   each one sets, the images it needs, transitions that exist and have something to move, an end
+   card long enough to finish its build before its hold, and the format, hook and CTA chosen;
 3. resolves the hook and CTA into an ordinary campaign with `resolveCut`, and validates that again,
    since choosing a CTA changes copy;
 4. loads both brand fonts, and refuses one that is missing, corrupt or blocked, naming it;
@@ -99,13 +100,21 @@ lists, and `validateFilm` checks the counts.
 | `feature-card` | `headline`, up to 2 `label`s, the cause and effect  | `demo`, `accent`            | 0 to 2 crops, else chips        |
 | `end-card`     | `cta`, optional `label`, the URL                    | `urlReveal`                 | none, shows the logo            |
 
+An `end-card` holds still for its last 69 spec frames, and its logo and URL must be in place on the
+frame before. The schema allows a 38-character URL, the Standard limit, but how much of it fits
+depends on the card's length and reveal: a 95-frame Short card decodes 20 characters, and a
+113-frame card decodes 38 or types 16. `validateFilm` refuses a card too short for its URL or
+logo as `SCENE_TOO_SHORT`, naming the longest URL that fits and the length that fits this one.
+
 `site-hero` refuses `frame: 'plane'`, `layers` and `activeLayer` as not built: plane mode tilts the
 page in 3D, which the determinism check has shown makes a frame depend on render order. Its focus
 blur and light sweep are not built either. Every other type in the library is refused by the
 render gate until it has a template.
 
 Transitions: `push`, and `carry`, which moves the product image between two scenes that show it,
-or the brand mark otherwise. A cut keeps both scenes as they are to the boundary, as the spec's
+or else the brand mark. Only `word-slam` and `end-card` draw the mark, so a carry between scenes
+that share no image needs both to be one of those, and `validateFilm` refuses any other as
+`TRANSITION_EMPTY`. A cut keeps both scenes as they are to the boundary, as the spec's
 dead-stop cut does. The spec's transition catalog is not built yet.
 
 ## Commands
