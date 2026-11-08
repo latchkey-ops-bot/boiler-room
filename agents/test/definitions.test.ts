@@ -2,8 +2,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { planBatches } from '../src/art/apply.ts';
 import { classifyAssets, distinctAssets, proposeAssets } from '../src/art/assets.ts';
-import { artTask } from '../src/art/prompt.ts';
+import { reviewTask } from '../src/art/prompt.ts';
 import { decideStyle } from '../src/art/style.ts';
 import { ALWAYS_OFF } from '../src/define.ts';
 import { agents, artDirector, researcher } from '../src/definitions/index.ts';
@@ -136,20 +137,18 @@ describe('the art director definition', () => {
     );
   });
 
-  it('gives the agent every file id it must view, and no approval steps', () => {
+  it('gives each review its file ids, at most 4, and no approval steps', () => {
     const campaign = artCampaign();
     const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
-    const task = artTask({
-      campaign,
-      style: decideStyle(campaign.brand.colors),
-      proposals: proposeAssets(campaign, infos),
-      infos,
-      generated: [],
-      budgetUsd: 1,
-    });
-    expect(task).toContain('"file_id": "fil_featuresui1"');
+    const style = decideStyle(campaign.brand.colors);
+    const batches = planBatches(proposeAssets(campaign, infos), []);
+    const calendar = batches.find((batch) => batch.id === 'calendar');
+    if (!calendar) throw new Error('fixture changed');
+    const task = reviewTask(calendar, { campaign, style, infos });
+    expect(task).toMatch(/File ids, in order: \["fil_featuresui1",/);
+    expect(task).toContain('"scene_id": "calendar"');
+    expect(task).toContain('Call view_image once');
     expect(task).toContain('submit_output');
-    expect(task).toContain('No image was generated');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
   });
 });

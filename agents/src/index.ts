@@ -1,5 +1,5 @@
-export type { ArtDecision } from './art/decision.ts';
-export { artDecisionJsonSchema, artDecisionSchema } from './art/decision.ts';
+export type { Review } from './art/decision.ts';
+export { reviewJsonSchema, reviewSchema } from './art/decision.ts';
 export type { StyleDecision } from './art/style.ts';
 export { decideStyle } from './art/style.ts';
 export type { AgentDefinition, SkillDefinition, Toolset } from './define.ts';

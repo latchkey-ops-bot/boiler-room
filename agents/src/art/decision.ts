@@ -1,40 +1,46 @@
 import { z } from 'zod';
 
 /**
- * What the Art Director agent submits: its picks per scene and its verdict on each generated
- * image. Colours, fonts, generation and the merge into `campaign.json` stay in code, so the agent
- * never writes the campaign. Keep it free of `.transform()`, `.default()` and `.pipe()`.
+ * What the Art Director agent submits for one review batch: a scene's pick, a keep or drop for
+ * each tile of a wall, or a verdict on each generated image. Colours, fonts, generation and the
+ * merge into `campaign.json` stay in code, so the agent never writes the campaign. Keep it free of
+ * `.transform()`, `.default()` and `.pipe()`.
  */
 
 const slug = z
   .string()
   .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 'must be a lowercase slug such as "home-screen"');
 
-export const artDecisionSchema = z.strictObject({
-  scenes: z
+export const reviewSchema = z.strictObject({
+  seen: z
+    .boolean()
+    .describe('True only if every picture in this review arrived and you looked at all of it.'),
+  scene: z
+    .strictObject({
+      scene_id: slug,
+      asset_ids: z
+        .array(slug)
+        .describe("In order. Only ids from this scene's candidates, within its min and max."),
+      reason: z
+        .string()
+        .min(1)
+        .describe('One sentence: what the chosen pictures show, and why they fit the copy.'),
+    })
+    .nullable()
+    .describe('Your pick, for a scene review. Null for any other review.'),
+  tiles: z
     .array(
       z.strictObject({
-        scene_id: slug,
-        seen: z
-          .boolean()
-          .describe(
-            "True only if every one of this scene's candidate pictures arrived and you looked at it.",
-          ),
-        asset_ids: z
-          .array(slug)
-          .describe("In order. Only ids from this scene's candidates, within its min and max."),
-        reason: z
-          .string()
-          .min(1)
-          .describe('One sentence: what the chosen pictures show, and why they fit the copy.'),
+        asset_id: slug,
+        keep: z.boolean(),
+        reason: z.string().min(1).describe('What the tile shows.'),
       }),
     )
-    .describe('One entry for every scene in the review list.'),
+    .describe('One entry per tile, for a tile review. Empty for any other review.'),
   generated: z
     .array(
       z.strictObject({
         asset_id: slug,
-        seen: z.boolean().describe('True only if the picture arrived and you looked at all of it.'),
         accept: z
           .boolean()
           .describe(
@@ -43,15 +49,15 @@ export const artDecisionSchema = z.strictObject({
         reason: z.string().min(1).describe('What you saw.'),
       }),
     )
-    .describe('One entry for every generated image in the task.'),
+    .describe('One entry per generated image, for a generated review. Empty for any other review.'),
   flags: z
     .array(z.string().min(1))
     .describe('Anything a human must decide, such as a capture that is broken or blank.'),
 });
 
-export type ArtDecision = z.infer<typeof artDecisionSchema>;
+export type Review = z.infer<typeof reviewSchema>;
 
-export const artDecisionJsonSchema = z.toJSONSchema(artDecisionSchema, {
+export const reviewJsonSchema = z.toJSONSchema(reviewSchema, {
   target: 'draft-2020-12',
   io: 'input',
 }) as Record<string, unknown>;

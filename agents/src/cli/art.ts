@@ -4,18 +4,19 @@ import { parseArgs } from 'node:util';
 import { DEFAULT_CAP, DEFAULT_IMAGE_MODEL } from '../art/generate.ts';
 import { artDirect } from '../art/run.ts';
 
-const usage = `Usage: pnpm art <campaign.json> [--research <research.json>] [--out <file>] [--budget-usd 1] [--image-cap-usd 0.10] [--max-images 2] [--image-model <id>] [--max-repairs 1] [--no-agent]
+const usage = `Usage: pnpm art <campaign.json> [--research <research.json>] [--out <file>] [--budget-usd 1] [--image-cap-usd 0.10] [--max-images 2] [--image-model <id>] [--concurrency 2] [--max-reviews N] [--no-agent]
 
   --research       The Researcher's research.json, for the site's light or dark mode and its page kinds.
                    Default: out/research/<host>/research.json when it exists.
   --out            Where the updated campaign goes. Default: <name>.art.json beside the input, with
                    <name>.art.report.json and any generated images under assets/generated/.
-  --budget-usd     Spend cap for the agent's session. Default from the agent definition ($1, the
-                   minimum for Sonnet).
+  --budget-usd     Spend cap for all of the agent's review sessions for this film. Default 1. Once
+                   it is spent no further review starts, and the code's ranking stands.
   --image-cap-usd  Spend cap for generated images in this film. Default ${(DEFAULT_CAP.maxMicroUsd / 1e6).toFixed(2)}.
   --max-images     At most this many generated images in this film. Default ${DEFAULT_CAP.maxImages}.
   --image-model    Default ${DEFAULT_IMAGE_MODEL}.
-  --max-repairs    Rounds of refused picks sent back to the agent. Default 1.
+  --concurrency    Review sessions running at once. Default 2.
+  --max-reviews    Review only the first N batches (generated images come first). For a quick check.
   --no-agent       Code only: the default picks, no session and nothing generated.
 
 Exit codes: 0 written, 1 refused (invalid input or result), 3 written but a scene is sent back to the Director.`;
@@ -29,7 +30,8 @@ const { values, positionals } = parseArgs({
     'image-cap-usd': { type: 'string' },
     'max-images': { type: 'string' },
     'image-model': { type: 'string' },
-    'max-repairs': { type: 'string', default: '1' },
+    concurrency: { type: 'string' },
+    'max-reviews': { type: 'string' },
     'no-agent': { type: 'boolean', default: false },
     help: { type: 'boolean', default: false },
   },
@@ -51,7 +53,9 @@ const number = (name: string, raw: string | undefined, min: number, max: number)
   return value;
 };
 
-const budget = number('budget-usd', values['budget-usd'], 1, 1.5);
+const budget = number('budget-usd', values['budget-usd'], 0.05, 3);
+const concurrency = number('concurrency', values.concurrency, 1, 4);
+const maxReviews = number('max-reviews', values['max-reviews'], 0, 100);
 const imageCap = number('image-cap-usd', values['image-cap-usd'], 0, 1);
 const maxImages = number('max-images', values['max-images'], 0, 2);
 
@@ -63,7 +67,8 @@ const code = await artDirect({
   outPath: values.out ? resolve(cwd, values.out) : undefined,
   outRoot: fileURLToPath(new URL('../../../out/', import.meta.url)),
   budgetUsd: budget,
-  maxRepairs: Math.max(0, Number(values['max-repairs'])),
+  concurrency,
+  maxReviews,
   cap: {
     ...DEFAULT_CAP,
     ...(imageCap !== undefined ? { maxMicroUsd: Math.round(imageCap * 1e6) } : {}),

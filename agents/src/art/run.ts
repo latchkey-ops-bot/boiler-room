@@ -1,24 +1,14 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import { type Campaign, type Issue, sceneRegistry, validateCampaign } from '@boiler-room/schema';
 import type { AgentDefinition } from '../define.ts';
 import { artDirector } from '../definitions/art-director.ts';
 import { type Naive, naiveClient, scrub, usd } from '../naive/client.ts';
 import { fileIdOf } from '../researcher/output.ts';
-import { describe, EventTracker } from '../researcher/run.ts';
 import { siteHost } from '../researcher/text.ts';
-import { syncAgents } from '../sync.ts';
-import { type ArtPlan, applyArt, type Gate, gateDecision } from './apply.ts';
-import {
-  type AssetInfo,
-  classifyAssets,
-  distinctAssets,
-  type Proposal,
-  pageKey,
-  proposeAssets,
-} from './assets.ts';
+import { type ArtPlan, applyArt, gateReviews, planBatches } from './apply.ts';
+import { classifyAssets, distinctAssets, pageKey, proposeAssets } from './assets.ts';
 import { checkBrand } from './brand.ts';
-import { type ArtDecision, artDecisionSchema } from './decision.ts';
 import {
   DEFAULT_CAP,
   DEFAULT_IMAGE_MODEL,
@@ -27,7 +17,7 @@ import {
   generateImages,
   generationNeeds,
 } from './generate.ts';
-import { ART_CONTINUE_MESSAGE, artRepairMessage, artTask } from './prompt.ts';
+import { type ReviewRun, reviewBatches } from './review.ts';
 import { decideStyle, type Lean } from './style.ts';
 
 export interface ArtOptions {
@@ -37,8 +27,12 @@ export interface ArtOptions {
   /** Where the updated campaign goes. Defaults to `<name>.art.json` beside the input. */
   outPath?: string;
   outRoot: string;
+  /** Spend cap for all review sessions of this film. Default $1. */
   budgetUsd?: number;
-  maxRepairs: number;
+  /** Review sessions running at once. Default 2. */
+  concurrency?: number;
+  /** Review only the first N batches; the rest keep the code's ranking. */
+  maxReviews?: number;
   cap?: GenerationCap;
   imageModel?: string;
   /** False runs the code alone: default picks, no session, and nothing generated. */
@@ -46,11 +40,10 @@ export interface ArtOptions {
   definition?: AgentDefinition;
 }
 
-const RESUMABLE = new Set(['end_turn', 'max_iterations', 'awaiting_input']);
-const MAX_CONTINUES = 4;
 const MIN_TILES = 6;
+/** What all review sessions of one film may spend, unless `--budget-usd` says otherwise. */
+export const DEFAULT_REVIEW_BUDGET_USD = 1;
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const say = (message: string) =>
   console.log(scrub(`${new Date().toISOString().slice(11, 19)} ${message}`));
 
@@ -102,151 +95,6 @@ function assetExists(client: Naive, outDir: string) {
       );
     if (/^https?:\/\//i.test(src)) return true;
     return existsSync(resolve(outDir, src));
-  };
-}
-
-interface SessionOutcome {
-  decision: ArtDecision | undefined;
-  gate: Gate;
-  rounds: { round: number; problems: Gate['problems'] }[];
-  sessionId: string | undefined;
-  agentId: string | undefined;
-  agentVersion: number | undefined;
-  consumedMicroUsd: number;
-  stopReason: string | undefined;
-}
-
-/** One session of `br-art-director`: picks reviewed, generated images inspected, repairs sent. */
-async function reviewWithAgent(
-  client: Naive,
-  definition: AgentDefinition,
-  task: string,
-  budgetMicro: number,
-  maxRepairs: number,
-  proposals: readonly Proposal[],
-  infos: readonly AssetInfo[],
-  generation: GenerationResult,
-  eventsPath: string,
-  campaignId: string,
-): Promise<SessionOutcome> {
-  const [synced] = await syncAgents(client, [definition]);
-  if (!synced) throw new Error('Agent sync returned nothing.');
-  say(`agent ${synced.name} ${synced.id} v${synced.version} (${synced.action})`);
-  const session = await client.sessions.create({
-    agent_id: synced.id,
-    message: task,
-    budget_micro_usd: budgetMicro,
-    ...(definition.output_schema ? { output_schema: definition.output_schema } : {}),
-    structured_output_required: definition.structured_output_required,
-    metadata: { run: 'art', campaign: campaignId },
-  });
-  say(`session ${session.id} started, budget ${usd(budgetMicro)}`);
-  const tracker = new EventTracker();
-  const deadline = Date.now() + definition.session.max_minutes * 60_000;
-  let afterSeq = 0;
-
-  const settle = async () => {
-    for (;;) {
-      const timer = setTimeout(
-        () => {
-          say(`time limit of ${definition.session.max_minutes} minutes reached; interrupting`);
-          client.sessions.interrupt(session.id).catch(() => {});
-        },
-        Math.max(1000, deadline - Date.now()),
-      );
-      try {
-        for await (const event of client.stream(session.id, { afterSeq })) {
-          afterSeq = event.seq;
-          const record = event as unknown as { type: string; data: Record<string, unknown> };
-          tracker.handle(record);
-          if (event.type !== 'message.delta' && !event.type.startsWith('span.'))
-            appendFileSync(eventsPath, `${scrub(JSON.stringify(event))}\n`);
-          const line = describe(record);
-          if (line) say(line);
-        }
-      } finally {
-        clearTimeout(timer);
-      }
-      const state = await client.sessions.get(session.id);
-      if ((state.status !== 'running' && state.status !== 'queued') || Date.now() > deadline)
-        return state;
-      await sleep(1000);
-    }
-  };
-
-  let decision: ArtDecision | undefined;
-  let gate = gateDecision(undefined, proposals, infos, generation.generated);
-  const rounds: SessionOutcome['rounds'] = [];
-  let gated = 0;
-  let continues = 0;
-  let stopReason: string | undefined;
-  for (;;) {
-    const state = await settle();
-    const fresh = tracker.submissions > gated && Boolean(state.structured_output);
-    if (!fresh) {
-      const resumable = state.status === 'idle' && RESUMABLE.has(state.stop_reason ?? '');
-      if (resumable && continues < MAX_CONTINUES && Date.now() < deadline) {
-        continues += 1;
-        say(`no result yet; asking the agent to continue (${continues}/${MAX_CONTINUES})`);
-        afterSeq = (
-          await client.sessions.send(session.id, { message: ART_CONTINUE_MESSAGE, queue: true })
-        ).accepted_seq;
-        continue;
-      }
-      stopReason = state.stop_reason ?? state.status;
-      say(`the session stopped (${state.status}/${state.stop_reason}) without a new result`);
-      break;
-    }
-    gated = tracker.submissions;
-    const parsed = artDecisionSchema.safeParse(state.structured_output);
-    const round = rounds.length + 1;
-    if (!parsed.success) {
-      const problems = [
-        {
-          sceneId: '$',
-          message: `The result does not match the schema: ${parsed.error.message.slice(0, 400)}`,
-          fix: 'Submit scenes, generated and flags exactly as the output schema describes.',
-        },
-      ];
-      rounds.push({ round, problems });
-      if (round > maxRepairs) break;
-      afterSeq = (
-        await client.sessions.send(session.id, {
-          message: artRepairMessage(problems, round, maxRepairs),
-          queue: true,
-        })
-      ).accepted_seq;
-      continue;
-    }
-    decision = parsed.data;
-    gate = gateDecision(decision, proposals, infos, generation.generated);
-    rounds.push({ round, problems: gate.problems });
-    if (gate.problems.length === 0) {
-      say(`decision accepted on submission ${round}`);
-      break;
-    }
-    say(`decision has ${gate.problems.length} problem(s) on submission ${round}`);
-    if (round > maxRepairs || Date.now() > deadline) break;
-    afterSeq = (
-      await client.sessions.send(session.id, {
-        message: artRepairMessage(gate.problems, round, maxRepairs),
-        queue: true,
-      })
-    ).accepted_seq;
-  }
-
-  const final = await client.sessions.get(session.id).catch(() => null);
-  if (final && (final.status === 'running' || final.status === 'queued'))
-    await client.sessions.interrupt(session.id).catch(() => {});
-  return {
-    decision,
-    gate,
-    rounds,
-    sessionId: session.id,
-    agentId: synced.id,
-    agentVersion: synced.version,
-    consumedMicroUsd: final?.consumed_micro_usd ?? 0,
-    stopReason,
   };
 }
 
@@ -329,36 +177,26 @@ export async function artDirect(options: ArtOptions): Promise<number> {
     }));
   }
 
-  // The agent reviews picks and inspects generated images.
-  const budgetMicro = Math.round(
-    (options.budgetUsd ?? definition.session.budget_micro_usd / 1e6) * 1e6,
-  );
-  let outcome: SessionOutcome | undefined;
-  let gate = gateDecision(undefined, proposals, infos, generation.generated);
-  const review = proposals.length > 0 || generation.generated.length > 0;
-  if (options.agent && review) {
-    const task = artTask({
-      campaign: styled,
-      style,
-      proposals,
-      infos,
-      generated: generation.generated,
-      budgetUsd: budgetMicro / 1e6,
-    });
+  // The agent reviews in small batches, one session each, generated images first.
+  const batches = planBatches(proposals, generation.generated).slice(0, options.maxReviews);
+  let run: ReviewRun | undefined;
+  let gate = gateReviews([], proposals, infos, generation.generated);
+  if (options.agent && batches.length > 0) {
     try {
-      outcome = await reviewWithAgent(
+      run = await reviewBatches(
         client,
         definition,
-        task,
-        budgetMicro,
-        options.maxRepairs,
-        proposals,
-        infos,
-        generation,
-        eventsPath,
-        campaign.id,
+        batches,
+        { campaign: styled, style, infos },
+        {
+          budgetMicroUsd: Math.round((options.budgetUsd ?? DEFAULT_REVIEW_BUDGET_USD) * 1e6),
+          concurrency: options.concurrency ?? 2,
+          maxMinutesPerBatch: definition.session.max_minutes,
+          eventsPath,
+          campaignId: campaign.id,
+        },
       );
-      gate = outcome.gate;
+      gate = gateReviews(run.results, proposals, infos, generation.generated);
     } catch (cause) {
       say(
         `agent review failed, keeping the code's picks: ${cause instanceof Error ? cause.message : cause}`,
@@ -379,14 +217,24 @@ export async function artDirect(options: ArtOptions): Promise<number> {
     assetExists: assetExists(client, outDir),
   });
 
+  const wallOf = (sceneId: string, fallback: string[]) =>
+    gate.picks.get(sceneId)?.assetIds ?? fallback;
   const sentBack = proposals
-    .filter((proposal) => proposal.type === 'tile-wall' && proposal.assetIds.length < MIN_TILES)
-    .map((proposal) => ({
-      scene_id: proposal.sceneId,
-      substitution:
-        'tile-wall -> feature-card with its own headline (director-beat-templates substitution)',
-      why: `Only ${proposal.candidates.length} distinct captured tile(s); tile-wall needs ${MIN_TILES}.`,
-    }));
+    .filter(
+      (proposal) =>
+        proposal.type === 'tile-wall' &&
+        wallOf(proposal.sceneId, proposal.assetIds).length < MIN_TILES,
+    )
+    .map((proposal) => {
+      const dropped = proposal.candidates.filter((candidate) => gate.dropped.has(candidate.id));
+      const why = dropped.map((candidate) => `${candidate.id} (${gate.dropped.get(candidate.id)})`);
+      return {
+        scene_id: proposal.sceneId,
+        substitution:
+          'tile-wall -> feature-card with its own headline (director-beat-templates substitution)',
+        why: `Only ${wallOf(proposal.sceneId, proposal.assetIds).length} usable distinct captured tile(s); tile-wall needs ${MIN_TILES}.${why.length ? ` Dropped: ${why.join('; ')}.` : ''}`,
+      };
+    });
   const blocking = proposals
     .filter(
       (proposal) => proposal.type !== 'tile-wall' && proposal.assetIds.length < proposal.slot.min,
@@ -417,10 +265,8 @@ export async function artDirect(options: ArtOptions): Promise<number> {
     : [];
 
   const balanceAfter = (await client.credits.show().catch(() => null))?.balance_micro_usd;
-  const sessionMicro = outcome?.consumedMicroUsd ?? 0;
-  const computer = outcome?.agentId
-    ? await client.agents.computer(outcome.agentId).catch(() => null)
-    : null;
+  const sessionMicro = run?.spentMicroUsd ?? 0;
+  const computer = run ? await client.agents.computer(run.agentId).catch(() => null) : null;
   const report = {
     campaign: campaign.id,
     input: campaignPath,
@@ -485,16 +331,16 @@ export async function artDirect(options: ArtOptions): Promise<number> {
       ...blocking,
       ...smallCaptures,
       ...duplicateFlag,
-      ...(outcome?.decision?.flags ?? []).map((flag) => `Agent: ${flag}`),
+      ...gate.flags,
     ],
-    agent: outcome
+    dropped_tiles: Object.fromEntries(gate.dropped),
+    refused_picks: gate.problems,
+    agent: run
       ? {
-          agent_id: outcome.agentId,
-          agent_version: outcome.agentVersion,
-          session_id: outcome.sessionId,
-          rounds: outcome.rounds,
-          stop_reason: outcome.stopReason ?? null,
+          agent_id: run.agentId,
+          agent_version: run.agentVersion,
           computer: computer ? `${computer.id} ${computer.status}` : null,
+          reviews: run.sessions,
         }
       : null,
     validation: { ok: validation.ok, issues: validation.issues },
@@ -522,7 +368,7 @@ export async function artDirect(options: ArtOptions): Promise<number> {
   for (const back of sentBack)
     say(`sent back: ${back.scene_id}: ${back.substitution}. ${back.why}`);
   say(
-    `cost: session ${usd(sessionMicro)}, images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `. Org balance moved ${usd(report.cost.balance_delta_micro_usd)} meanwhile, which includes any other agent running in the org` : ''}.`,
+    `cost: ${run?.sessions.filter((each) => each.session_id).length ?? 0} review session(s) ${usd(sessionMicro)}, images ${usd(generation.spentMicroUsd)} (${generation.generated.length} generated), total ${usd(sessionMicro + generation.spentMicroUsd)}${report.cost.balance_delta_micro_usd !== null ? `. Org balance moved ${usd(report.cost.balance_delta_micro_usd)} meanwhile, which includes any other agent running in the org` : ''}.`,
   );
   if (!validation.ok) return 1;
   return sentBack.length > 0 ? 3 : 0;

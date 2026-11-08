@@ -1,11 +1,11 @@
-import { artDecisionJsonSchema } from '../art/decision.ts';
+import { reviewJsonSchema } from '../art/decision.ts';
 import { ART_DIRECTOR_SYSTEM } from '../art/prompt.ts';
 import type { AgentDefinition } from '../define.ts';
 import { toolset } from '../define.ts';
 
 /**
- * Looks at the captured pictures and picks the best for each scene, and inspects every generated
- * image before it is declared. Colours, fonts, the style family, what may be generated and the
+ * Looks at the captured pictures and picks the best for each scene, keeps or drops tiles, and
+ * inspects every generated image before it is declared, one small batch per session. Colours, fonts, the style family, what may be generated and the
  * spend on images are decided in code (`src/art/`), so the model is used only where eyes are.
  *
  * Sonnet 5.5, because choosing the crop that shows a feature is judgement, and it reads pictures
@@ -46,9 +46,10 @@ export const artDirector: AgentDefinition = {
     },
   ],
   budget: { cap_micro_usd: 5_000_000, max_task_micro_usd: 1_500_000, period: 'day' },
-  output_schema: artDecisionJsonSchema,
+  output_schema: reviewJsonSchema,
   structured_output_required: true,
   handoffs: false,
-  // Sonnet sessions need a budget of at least $1.
-  session: { budget_micro_usd: 1_000_000, max_minutes: 15 },
+  // One session per review batch. Sonnet sessions need a budget of at least $1; the run's code
+  // interrupts a batch long before that, at a second view_image call or after 3 minutes.
+  session: { budget_micro_usd: 1_000_000, max_minutes: 3 },
 };
