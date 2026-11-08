@@ -2,11 +2,16 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
+import { planBatches } from '../src/art/apply.ts';
+import { classifyAssets, distinctAssets, proposeAssets } from '../src/art/assets.ts';
+import { reviewTask } from '../src/art/prompt.ts';
+import { decideStyle } from '../src/art/style.ts';
 import { ALWAYS_OFF } from '../src/define.ts';
-import { agents, researcher } from '../src/definitions/index.ts';
+import { agents, artDirector, researcher } from '../src/definitions/index.ts';
 import type { Naive } from '../src/naive/client.ts';
 import { researchTask } from '../src/researcher/prompt.ts';
 import { agentConfig, canonicalJson, HASH_KEY, skillContent, syncAgents } from '../src/sync.ts';
+import { artCampaign, DIGESTS } from './art-fixtures.ts';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -96,6 +101,70 @@ describe('the researcher definition', () => {
       budgetUsd: 1.5,
     });
     expect(task).toContain('["fil_tool","fil_manifest","fil_m1"]');
+    expect(task).toContain('submit_output');
+    expect(task).not.toMatch(/approv|confirm with|ask the user/i);
+  });
+});
+
+describe('the art director definition', () => {
+  const { configs, default_config } = artDirector.tools;
+
+  it('allows only looking at pictures and reading its skill: no shell, no files, no web, no generation', () => {
+    expect(default_config.permission).toBe('deny');
+    const allowed = Object.entries(configs)
+      .filter(([, config]) => config.permission === 'allow')
+      .map(([name]) => name)
+      .sort();
+    expect(allowed).toEqual(['read_skill', 'session_spend', 'view_image']);
+    for (const name of [
+      ...ALWAYS_OFF,
+      'bash',
+      'write',
+      'fetch_file',
+      'publish_file',
+      'web_fetch',
+      'web_search',
+      'browser',
+    ]) {
+      expect(configs[name], name).toEqual({ enabled: false, permission: 'deny' });
+    }
+  });
+
+  it('runs Sonnet alone, on a budget Sonnet accepts, with a typed result', () => {
+    expect(artDirector).toMatchObject({
+      name: 'br-art-director',
+      model: 'anthropic/claude-sonnet-5.5',
+      harness: 'pi',
+      handoffs: false,
+      structured_output_required: true,
+    });
+    expect(artDirector.session.budget_micro_usd).toBeGreaterThanOrEqual(1_000_000);
+    expect(artDirector.session.budget_micro_usd).toBeLessThanOrEqual(
+      artDirector.budget.max_task_micro_usd,
+    );
+    expect(artDirector.output_schema).toMatchObject({ type: 'object' });
+  });
+
+  it('uploads the art-director skill from the repo root', () => {
+    expect(artDirector.skills).toEqual([
+      expect.objectContaining({ slug: 'art-director', root: 'repo' }),
+    ]);
+    expect(skillContent(artDirector.skills[0] ?? { slug: '', description: '' })).toContain(
+      '# Art Director',
+    );
+  });
+
+  it('gives each review its file ids, at most 4, and no approval steps', () => {
+    const campaign = artCampaign();
+    const infos = distinctAssets(classifyAssets(campaign, { digests: DIGESTS }));
+    const style = decideStyle(campaign.brand.colors);
+    const batches = planBatches(proposeAssets(campaign, infos), []);
+    const calendar = batches.find((batch) => batch.id === 'calendar');
+    if (!calendar) throw new Error('fixture changed');
+    const task = reviewTask(calendar, { campaign, style, infos });
+    expect(task).toMatch(/File ids, in order: \["fil_featuresui1",/);
+    expect(task).toContain('"scene_id": "calendar"');
+    expect(task).toContain('Call view_image once');
     expect(task).toContain('submit_output');
     expect(task).not.toMatch(/approv|confirm with|ask the user/i);
   });

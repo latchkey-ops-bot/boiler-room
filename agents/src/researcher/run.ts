@@ -145,7 +145,10 @@ export function isNotFound(cause: unknown): boolean {
   );
 }
 
-function describe(event: { type: string; data: Record<string, unknown> }): string | undefined {
+export function describe(event: {
+  type: string;
+  data: Record<string, unknown>;
+}): string | undefined {
   const data = event.data ?? {};
   switch (event.type) {
     case 'tool.started': {

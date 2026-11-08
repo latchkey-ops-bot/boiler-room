@@ -31,11 +31,13 @@ export function toolset(allowed: readonly string[], denied: readonly string[] = 
 
 /**
  * A skill kept in this repo and pushed by `agents:sync`: `agents/skills/<slug>/SKILL.md`, or
- * `skills/<slug>/SKILL.md` at the repo root when `root` is `repo`.
+ * `skills/<slug>/SKILL.md` at the repo root when `root` is `repo`, for a production-crew skill that
+ * the docs share.
  */
 export interface SkillDefinition {
   slug: string;
   description: string;
+  /** Where the skill file lives. Defaults to `agents`. */
   root?: 'agents' | 'repo';
 }
 

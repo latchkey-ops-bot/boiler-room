@@ -11,6 +11,7 @@
     "research": "node src/cli/research.ts",
     "direct": "node src/cli/direct.ts",
     "injection": "node src/cli/injection.ts",
+    "art": "node src/cli/art.ts",
     "test": "vitest run",
     "typecheck": "tsc -p ."
   },
