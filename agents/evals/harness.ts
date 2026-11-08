@@ -149,7 +149,10 @@ interface Harness {
   log: (line: string) => void;
 }
 
-/** Writes the seeds in order, `blocked_by` resolved by key. A `done` or `blocked` seed is moved there after the create, with its note. */
+/**
+ * Writes the seeds in order, `blocked_by` resolved by key. A `done` or `blocked` seed is moved there
+ * after the create, with its note; a `late` seed only once every seed exists.
+ */
 async function writeSeeds(
   client: Naive,
   boardId: string,
@@ -158,6 +161,18 @@ async function writeSeeds(
   seeds: readonly CardSeed[],
   ids: Map<string, string>,
 ): Promise<void> {
+  const after = async (seed: CardSeed, id: string) => {
+    const status: Status = seed.status ?? 'todo';
+    for (const comment of seed.comments ?? []) {
+      await client.board.cards.comment(boardId, id, { body: fill(comment, names, vars) });
+    }
+    if (status === 'done' || status === 'blocked' || seed.note) {
+      await client.board.cards.update(boardId, id, {
+        ...(status === 'todo' || status === 'doing' ? {} : { status }),
+        ...(seed.note ? { note: fill(seed.note, names, vars) } : {}),
+      });
+    }
+  };
   for (const seed of seeds) {
     const status: Status = seed.status ?? 'todo';
     const created = await client.board.cards.create(boardId, {
@@ -173,15 +188,10 @@ async function writeSeeds(
     });
     ids.set(seed.key, created.id);
     vars[`card_${seed.key}`] = created.id;
-    for (const comment of seed.comments ?? []) {
-      await client.board.cards.comment(boardId, created.id, { body: fill(comment, names, vars) });
-    }
-    if (status === 'done' || status === 'blocked' || seed.note) {
-      await client.board.cards.update(boardId, created.id, {
-        ...(status === 'todo' || status === 'doing' ? {} : { status }),
-        ...(seed.note ? { note: fill(seed.note, names, vars) } : {}),
-      });
-    }
+    if (!seed.late) await after(seed, created.id);
+  }
+  for (const seed of seeds.filter((item) => item.late)) {
+    await after(seed, ids.get(seed.key) as string);
   }
 }
 
@@ -431,7 +441,7 @@ export async function runScenario(
       if (scenario.fixtures) vars = { ...vars, ...(await scenario.fixtures({ names, vars })) };
       await writeSeeds(client, team.board_id, names, vars, scenario.seeds, seeded);
       log(`seed      ${seeded.size} card(s)`);
-      if (scenario.role === 'ceo' && !scenario.digests) {
+      if ((scenario.role === 'ceo' && !scenario.digests) || scenario.settle) {
         await waitReported(client, team.board_id, log);
       }
       if (prepare) {

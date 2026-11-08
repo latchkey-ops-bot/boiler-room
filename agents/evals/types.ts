@@ -16,6 +16,11 @@ export interface CardSeed {
   /** Written after the create, as the holder's note. A `done` card needs one. */
   note?: string;
   comments?: string[];
+  /**
+   * Its status move, note and comments are written after every seed exists, so they can name a card
+   * created after it, as a lead's BUILD note names the cards of its plan.
+   */
+  late?: boolean;
 }
 
 /** What starts the agent under test. */
@@ -119,6 +124,13 @@ export interface Scenario {
   age_minutes?: number;
   /** Board digests of the practice CEO that may run. Any other session is cancelled. */
   digests?: number;
+  /**
+   * Wait, before the first step, until the board clock has reported every seeded `done` and
+   * `blocked` card, as it has on a live board. A card's `reported_status` stays null until then, and
+   * the lead reads it to tell a card its assignee blocked from one the board parked. CEO scenarios
+   * without digests always wait.
+   */
+  settle?: boolean;
   /** GitHub fixtures, made before the seeds. Returns the values the seeds fill in. */
   fixtures?: (input: {
     names: PracticeNames;

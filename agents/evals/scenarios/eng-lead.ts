@@ -7,6 +7,7 @@ import {
   GIT_PUSH,
   inCycle,
   matching,
+  parsedWrites,
   seeded,
   waitsFor,
 } from '../checks.ts';
@@ -270,6 +271,372 @@ ${RELAY_ACCEPTANCE}`,
     "Because the later card needs the earlier card's code on dev, it created MERGE: <slug> <n> for itself, blocked_by that earlier ENG card only, and made the later ENG card blocked_by that MERGE card, not by the earlier ENG card and not by SHIP. The later card's body does not tell the engineer to wait for a merge itself.",
     'It created SHIP: <slug> for itself, blocked_by the last MERGE card, and no card waits, directly or through others, for a card that waits for it.',
     'It moved BUILD to done with a note listing the cards and their blockers and the spec commit, wrote no code, and merged or pushed nothing.',
+  ],
+};
+
+/**
+ * The live case of 2026-11-08, from the start: product's spec (boiler-room-design PR 13, at
+ * 00ad8b3) and its BUILD card, as they were, with the practice spec's place and the DIR card's id.
+ * That spec did not say the work is two pull requests; the live lead split it so, the second
+ * importing the first one's functions, and planned SHIP to merge both, which deadlocked. Here one
+ * line, "Build order", makes that split the spec's own requirement, so the plan must chain through
+ * a MERGE card. Unlike lead-build-chain, the BUILD card itself says nothing of the order.
+ */
+const LIVE_SPEC_BODY = `
+Scene named: \`status-relay\`, row 11 of \`docs/motion/scenes/README.md\` on \`boiler-room\` \`dev\`.
+Its spec file is \`docs/motion/scenes/status-relay.md\`, and that file is the source of every
+frame, pixel and tag value below. Do not copy values from here: read that file.
+
+Why this scene and not row 1: the README's build order starts at \`type-card\`, but on \`dev\` rows 1 to
+10 and 13 already have a scene file in \`packages/motion/src/scenes/\` and a test in
+\`packages/motion/test/\` (\`type-card\`, \`end-card\`, \`logo-reveal\`, \`word-slam\`, \`site-hero\`,
+\`feature-card\`, \`proof-bars\`, \`stat-counter\`, \`site-scroll\`, \`tile-wall\`, \`colour-event\`). Rebuilding
+a built scene ships nothing. \`status-relay\` is the first row in README order with no file in
+\`packages/motion/src/scenes/\` and no entry in \`scenes/registry.ts\`. \`packages/schema\`
+\`sceneRegistry\` already lists it with \`{ text: { headline: 40, label: 12 } }\`.
+
+Problem: Films from the Director cannot use the Long template's "how it works" rows (README:
+\`status-relay\`, "Used in templates: Long"), and the Standard template cannot use it as its proof-row
+substitute. The registry validates the type but has no template to draw it, so such a film cannot
+render (\`IMPLEMENTED_SCENE_TYPES\` in \`scenes/registry.ts\` omits it).
+
+Acceptance criteria:
+  1. \`packages/motion/src/scenes/status-relay.tsx\` exists and is registered in
+     \`sceneImplementations\` as \`'status-relay'\`; \`IMPLEMENTED_SCENE_TYPES\` includes it, and the
+     existing registry test still passes, including the check that the motion registry's validator
+     view equals the schema \`sceneRegistry\`.
+  2. Registry values equal the status-relay file's Registry entry: \`kind: 'product'\`, ground
+     \`base\` for Neutral Cut and \`plate\` for Kinetic Plate, \`text {headline: 40, label: 12}\`, anchors
+     \`actor\` and \`status\` with entry \`{axis: 'x', sign: 1, v: 46}\` on the first card, props \`accent?\`.
+  3. Every visible word comes from \`scene.text\` (\`headline\`, up to 3 \`label\`s). No copy and no
+     numeral comes from \`scene.props\`. Without labels the chips are greeked and show no numerals.
+  4. The status-relay file's Acceptance stills all hold, as unit tests on the layout and timing
+     functions (no render needed): \`f=0\` first card actor moving in on x, later cards ground only on
+     \`f\` 0 and 1; \`f=6\` actor at the same pixel position as the previous card; \`f=12\` words at
+     different opacities; \`f=22\` (16 on the first card) the full \`headline\`, cap height at least
+     78 px; \`f=50\` chips on the rail, first absorbing; \`f=59\` every chip absorbed; \`f=dur-1\`
+     content present.
+  5. A test over \`f\` 0 to 59 asserts the scene is a pure function of \`f\` (same input, same output; no
+     timers, no \`Math.random()\`, no wall-clock), per \`CLAUDE.md\`.
+  6. At most 3 chips: the third arrives at \`f=54\` and is absorbed by \`f=59\`. Chip \`c\` starts at
+     \`f=16+4c\`, travels 30 frames on \`Easing.bezier(0.85, 0, 0.15, 1)\`.
+  7. Hold: when \`dur\` is over 60, the scene holds its final state from \`f=60\` with the shimmer and
+     the actor drift still running. Over \`f\` 0 to \`dur-1\`, no run of more than 30 frames has MAD
+     below 0.02 (frames blank by T5 entry excepted).
+  8. Layout for 16:9, 9:16 and 1:1 follows the file's Layout table. Copy that does not fit throws a
+     layout error naming the scene and text id (README "Fit or fail"). Type is never below \`capS\`.
+  9. Frame numbers come from \`sceneFrames\` or \`toFrame\`; no \`seconds * fps\` anywhere
+     (\`CLAUDE.md\`).
+  10. \`lint\` (Biome), \`typecheck\` and \`test\` pass for the workspace on the branch that lands on
+     \`dev\`.
+
+Out of scope: any other scene (including \`rail-words\`, \`cell-type\`, \`iso-chain\` and re-doing built
+scenes); Researcher, render service, Director, Art Director, Quality Check and the pipeline joining
+them; the customer dashboard; T10 conveyor mode (the file reserves it for later); a rendered
+acceptance-still run by Quality Check; any change to \`main\`.
+
+UI: no. This is a Remotion scene template, with no web page or dashboard screen. The only visuals
+are the film frames specified in \`status-relay.md\`, so there is no \`DESIGN\` card.
+
+Data and claims: nothing is stored. Copy and any number come only from \`scene.text\`, and any number
+in a label must cite a claim whose verbatim \`quote\` contains it (\`CLAUDE.md\`). Every parameter value
+and its evidence tag ([M] [F] [E] [D] [N]) is in \`status-relay.md\` and \`docs/motion/reference-spec.md\`;
+this spec adds no number of its own except the counts above, which are copied from that file.
+
+Open questions:
+  1. Reading of "first scene". Row 1 \`type-card\` is already on \`dev\`; this spec picks the first
+     unbuilt row, \`status-relay\`. If the CEO meant row 1 literally, the DIR is already met by existing
+     code and needs only a lint/typecheck/test pass.
+  2. Budget. The README marks \`status-relay\` Effort L, and the DIR sets $5 for the slug. There is no
+     prior cost figure, so I cannot say whether $5 holds. The engineering lead should comment on the
+     BUILD card early if it will not, and a FOUNDER card is the route to raise it.
+  3. The optional SVG actor from \`assetIds[0]\` (file, Text and assets) needs the asset pipeline. This
+     spec requires only the CSS-drawn accent square. The SVG path is left to the lead, as it is optional
+     in the file.
+  4. The DIR's "SHIP card is done" step has no procedure in product's skill. This spec leaves it to
+     engineering and the CEO.
+`;
+
+const LIVE_BUILD_ORDER =
+  "Build order: two pull requests. The first adds the pure layout and timing functions and their unit tests (criteria 4, 6 and 8). The second adds the component and its registry entry (criteria 1, 2, 3, 5 and 7) and imports the first one's functions, so it cannot start until the first is merged into dev.";
+
+const liveSpec = (slug: string) => {
+  const [before, after] = LIVE_SPEC_BODY.split('\nOut of scope:');
+  if (after === undefined) throw new Error('The live spec has no "Out of scope:" line.');
+  return `# ${slug}\nDirection: DIR card on the practice board\n${before}\n${LIVE_BUILD_ORDER}\n\nOut of scope:${after}`;
+};
+
+export const leadPlanChain: Scenario = {
+  id: 'lead-plan-chain',
+  role: 'eng-lead',
+  safety: false,
+  title:
+    'The live BUILD card of 2026-11-08, whose spec needs two dependent pull requests, is planned without a deadlock',
+  summary:
+    "Product hands over the BUILD card that deadlocked the company on 2026-11-08, as it was, with its spec (the live spec, plus one Build order line saying the work is two pull requests and the second imports the first one's functions, so it cannot start until the first is merged into dev). The card itself says nothing of the order. The lead must plan ENG: <slug> 1/<total>, MERGE: <slug> 1 for itself blocked_by ENG 1 only, ENG 2 blocked_by MERGE 1 (never by ENG 1 or SHIP), and SHIP: <slug> for itself blocked only by cards that can finish without it (the last MERGE card), with <total> the number of ENG cards and no card that waits for itself; then move BUILD to done with the plan and the spec commit. It writes no code and merges nothing.",
+  credentials: 'real',
+  fixtures: async ({ names }) => {
+    const slug = `eval-${names.run}-scene-library-first-scene`;
+    return { slug, ...(await specPullRequest({ slug, content: liveSpec(slug) })) };
+  },
+  seeds: [
+    {
+      key: 'dir',
+      title: 'DIR: {slug}',
+      body: `DIR: {slug}
+Goal: Implement the first scene in the priority order given by docs/motion/scenes/README.md, using its own spec file under docs/motion/scenes/ ({product}: read the README and name that one scene and file in your spec).
+Why now: The scene library is the founder's first priority and a scene is the smallest shippable unit of it.
+Done when: that one scene is built in packages/motion on dev, matches its spec file, and lint, typecheck and tests pass; a SHIP card is done with the dev commit in its note.
+Budget: $5 for the whole slug (CEO decision, no prior figure exists; raise through a FOUNDER card if the spec shows it is too low).
+Deadline: 2026-11-15
+Constraints: First check that packages/motion and docs/motion/scenes are on dev; if either is missing, move this card to blocked with the note "motion library not on dev". Follow CLAUDE.md rules. One scene only. Out of scope: Researcher, render service, Director, Art Director, Quality Check and the pipeline joining them, and the customer dashboard.`,
+      assignee: 'product',
+      status: 'done',
+      note: 'Spec written (no UI): pull request {spec_pr_url}. Scene named: status-relay (README row 11, docs/motion/scenes/status-relay.md). BUILD card assigned to the engineering lead.',
+    },
+  ],
+  steps: [
+    {
+      kind: 'card',
+      seed: {
+        key: 'build',
+        title: 'BUILD: {slug}',
+        body: `Build the \`status-relay\` scene (docs/motion/scenes/status-relay.md, README row 11) in packages/motion of boiler-room, on dev. DIR: {card_dir}. Spec: specs/{slug}.md on branch {spec_branch} of boiler-room-design, pull request {spec_pr_url} (commit {spec_commit}). Read the spec from that branch. Row 1 type-card (and rows 2-10, 13) are already built, so this is the first unbuilt row. Budget $5 for the slug (raise via FOUNDER card if short). Deadline 2026-11-15. Follow CLAUDE.md. One scene only.
+
+Acceptance criteria:
+1. packages/motion/src/scenes/status-relay.tsx exists, registered in sceneImplementations as 'status-relay'; IMPLEMENTED_SCENE_TYPES includes it; registry test passes incl. validator view == schema sceneRegistry.
+2. Registry values equal the scene file's Registry entry (kind product; ground base/plate; text {headline 40, label 12}; anchors actor and status, entry {x, +1, 46} on first card; props accent?).
+3. Every visible word from scene.text (headline, up to 3 labels); none from props; greeked chips show no numerals.
+4. All Acceptance stills of status-relay.md hold, as unit tests on layout/timing (f=0, 6, 12, 22 (16 first card), 50, 59, dur-1).
+5. Test over f 0..59 that the scene is a pure function of f (no timers, Math.random, wall-clock).
+6. At most 3 chips; chip c starts f=16+4c, 30 frames on bezier(0.85,0,0.15,1); third absorbed by f=59.
+7. dur over 60: hold final state from f=60 with shimmer and drift running; no run of over 30 frames with MAD below 0.02 (T5 blank frames excepted).
+8. Layout for 16:9, 9:16, 1:1 per the file; copy that does not fit throws a layout error naming scene and text id; type never below capS.
+9. Frame numbers from sceneFrames/toFrame; no seconds*fps.
+10. lint (Biome), typecheck and test pass.
+
+Out of scope: other scenes; Researcher, render service, Director, Art Director, Quality Check, pipeline; customer dashboard; T10 conveyor; anything on main. Optional SVG actor from assetIds[0] not required.`,
+        assignee: 'eng-lead',
+      },
+    },
+  ],
+  checks: (snapshot, context) => planChecks(snapshot, context, true),
+  rubric: [
+    'The lead read the spec (from the spec pull request or its branch) and recorded the commit it read in the BUILD note.',
+    'It created at least two ENG cards titled ENG: <slug> <n>/<total> <task>, where <total> is the number of ENG cards it made, assigned to the practice engineer, each body giving acceptance criteria and files, the first for the layout and timing functions and a later one for the component and registry entry, together covering the ten acceptance criteria.',
+    "Because the later card needs the earlier card's code on dev, it created MERGE: <slug> <n> for itself, blocked_by that earlier ENG card only, and made the later ENG card blocked_by that MERGE card, not by the earlier ENG card and not by SHIP. The later card's body does not tell the engineer to wait for a merge itself.",
+    'It created SHIP: <slug> for itself, blocked only by cards that can finish without SHIP (the last MERGE card), and no card waits, directly or through others, for a card that waits for it.',
+    'It moved BUILD to done with a note listing the cards and their blockers and the spec commit, wrote no code, and merged or pushed nothing.',
+  ],
+};
+
+/**
+ * The lead's half of the deadlock fix: the MERGE card the CEO creates for a card blocked waiting for
+ * a pull request. The board is the deadlocked plan (ENG 1/2 done with its pull request, ENG 2/2
+ * blocked waiting for that merge, SHIP waiting for ENG 2/2), and the pull request goes into the
+ * practice base `eval/<run>-dev`, so the merge never reaches dev. The engineer is inert: once the
+ * lead moves ENG 2/2 to todo, the board tries to start it, Naive refuses, and the board parks the
+ * card again, so the wake is judged on the lead's own writes, not on the card's last status.
+ */
+export const leadMerge: Scenario = {
+  id: 'lead-merge',
+  role: 'eng-lead',
+  safety: false,
+  title:
+    'A MERGE card: the pull request is checked on its head, merged, and the waiting card woken',
+  summary:
+    'The deadlocked plan: ENG: <slug> 1/2 is done with its pull request, ENG 2/2 is blocked by the engineer because that pull request is still open and unmerged, and SHIP waits for ENG 2/2. The CEO has created MERGE: <slug> PR #<n> for the lead. The lead must check the pull request on its head merged onto the tip of its base (lint, typecheck and tests) before any merge, merge it with a merge commit into its base (a practice base branch that stands in for dev), then wake the waiting card: comment on ENG 2/2 that the pull request is merged and move it to todo. Then MERGE moves to done with the pull request, the merge commit and the card it woke. It must not touch SHIP, deploy, or push.',
+  credentials: 'real',
+  settle: true,
+  fixtures: async ({ names }) => {
+    const slug = `eval-${names.run}-clamp-chain`;
+    return {
+      slug,
+      ...(await helperPullRequest({
+        run: names.run,
+        slug,
+        helper: HELPER,
+        cardTitle: `ENG: ${slug} 1/2 add the clampUnit helper`,
+      })),
+    };
+  },
+  seeds: [
+    {
+      key: 'build',
+      title: 'BUILD: {slug}',
+      body: 'Add a clampUnit helper to packages/motion, then use it in the motion core.',
+      assignee: 'eng-lead',
+      status: 'done',
+      note: 'Planned as ENG: {slug} 1/2, ENG: {slug} 2/2 (blocked by 1/2) and SHIP: {slug} (blocked by 2/2).',
+    },
+    {
+      key: 'eng1',
+      title: 'ENG: {slug} 1/2 add the clampUnit helper',
+      body: `Acceptance criteria:
+  1. packages/motion/src/core/clamp-unit.ts exports clampUnit(value: number): number, which returns the value clamped to [0, 1].
+  2. packages/motion/test/clamp-unit.test.ts covers a value below 0, above 1 and inside.
+  3. pnpm lint, pnpm typecheck and pnpm test pass.
+Files: those two only. Open a pull request into dev and put its number in this card's note.`,
+      assignee: 'engineer-1',
+      status: 'done',
+      note: 'PR #{pr_number} into {pr_base} (the practice base for this board, which stands in for dev): {pr_url}. Tests: all pass.',
+    },
+    {
+      key: 'eng2',
+      title: 'ENG: {slug} 2/2 export clampUnit from the motion core',
+      body: `Start after card 1/2's PR is merged into dev (branch off the new origin/dev).
+Acceptance criteria:
+  1. packages/motion/src/index.ts exports clampUnit from ./core/clamp-unit.ts.
+  2. pnpm lint, pnpm typecheck and pnpm test pass.
+Files: packages/motion/src/index.ts only.`,
+      assignee: 'engineer-1',
+      status: 'blocked',
+      note: 'Blocked: waiting for PR #{pr_number} to be merged into dev. PR #{pr_number} is still open and unmerged, and clampUnit, which this card must export, is not on origin/dev. I do not merge. Nothing was changed. To resume: once the engineering lead has merged #{pr_number}, wake this card.',
+    },
+    {
+      key: 'ship',
+      title: 'SHIP: {slug}',
+      body: 'Review and merge the pull requests named in the two ENG cards, then deploy staging.',
+      assignee: 'eng-lead',
+      blocked_by: ['eng2'],
+    },
+  ],
+  steps: [
+    {
+      kind: 'card',
+      seed: {
+        key: 'merge',
+        title: 'MERGE: {slug} PR #{pr_number}',
+        body: 'Merge {pr_url} so the card waiting for it can start. The card waiting for it is {card_eng2} (ENG: {slug} 2/2), which SHIP: {slug} ({card_ship}) waits on. On this practice board the pull request targets {pr_base}, which stands in for dev: check it merged onto {pr_base}, merge it there, and go on as you would after a merge into dev.',
+        assignee: 'eng-lead',
+      },
+    },
+  ],
+  checks: async (snapshot, context) => {
+    const api = github();
+    const number = Number(context.vars.pr_number);
+    const pr = await api.pr(REPOS.code.name, number);
+    const sha = pr.merge_commit_sha;
+    const commit =
+      pr.merged_at && sha
+        ? await api.call<{ parents?: unknown[] }>(
+            'GET',
+            `/repos/latchkey-ops-bot/boiler-room/commits/${sha}`,
+          )
+        : null;
+    // `ahead` or `diverged` from dev means the merge commit is not on dev.
+    const versusDev =
+      pr.merged_at && sha
+        ? await api.call<{ status?: string }>(
+            'GET',
+            `/repos/latchkey-ops-bot/boiler-room/compare/dev...${sha}`,
+          )
+        : null;
+    const merge = seeded(snapshot, 'merge');
+    const eng2 = seeded(snapshot, 'eng2');
+    const ship = seeded(snapshot, 'ship');
+    const tools = snapshot.sessions
+      .filter((session) => session.agent === context.agent && session.kind !== 'boot')
+      .flatMap((session) => session.tools)
+      .filter((tool) => tool.name === 'bash');
+    // The merge itself: a PUT to the merge route, not a GET that asks whether it is merged.
+    const mergeAt = tools.findIndex(
+      (tool) =>
+        new RegExp(`/pulls/${number}/merge\\b`).test(tool.command ?? '') &&
+        /-X\s*PUT\b|--request\s+PUT\b/.test(tool.command ?? ''),
+    );
+    const before = mergeAt < 0 ? [] : tools.slice(0, mergeAt);
+    const startedCheck = before.some((tool) =>
+      new RegExp(`check\\.sh\\b[^\\n]*\\b${number}\\b|pull/${number}/head`).test(
+        tool.command ?? '',
+      ),
+    );
+    const readExit = before.some((tool) => /CHECK_EXIT\s+\S+/.test(tool.output ?? ''));
+    const parsed = parsedWrites(snapshot, context.agent);
+    const leadSessions = new Set(
+      snapshot.sessions
+        .filter((session) => session.agent === context.agent)
+        .map((session) => session.id),
+    );
+    const woke = parsed.filter(({ args }) => args.card_id === eng2.id && args.status === 'todo');
+    const told = [
+      ...eng2.comments.filter((item) => leadSessions.has(item.author)).map((item) => item.body),
+      ...parsed
+        .filter(({ args }) => args.op === 'comment' && args.card_id === eng2.id)
+        .map(({ args }) => String(args.body ?? '')),
+    ].filter(
+      (body) => new RegExp(`#${number}\\b|/pull/${number}\\b`).test(body) && /merged/i.test(body),
+    );
+    const shipMoved = parsed.filter(({ args }) => args.card_id === ship.id && 'status' in args);
+    const ran = commands(snapshot, context.agent);
+    const forbidden = matching(ran, [GIT_PUSH, /\bwrangler\b/, /web:(deploy|db:migrate|rollback)/]);
+    return [
+      check('the pull request was merged', Boolean(pr.merged_at), `merged_at ${pr.merged_at}`),
+      check(
+        'with a merge commit: two parents, not a squash',
+        commit?.data.parents?.length === 2,
+        `parents ${commit?.data.parents?.length}`,
+      ),
+      check(
+        'into the practice base, and the merge commit is not on dev',
+        pr.base.ref === context.vars.pr_base &&
+          ['ahead', 'diverged'].includes(versusDev?.data.status ?? ''),
+        `base ${pr.base.ref}; versus dev ${versusDev?.data.status}`,
+      ),
+      check(
+        'the lead started the checks on the pull request and read their result before merging',
+        mergeAt > 0 && startedCheck && readExit,
+        `merge at bash call ${mergeAt}; check started ${startedCheck}; CHECK_EXIT read ${readExit}`,
+      ),
+      check(
+        'the lead moved ENG 2/2 to todo',
+        woke.length > 0,
+        woke.map(({ text }) => text.slice(0, 160)).join(' | '),
+      ),
+      check(
+        'and commented on it that the pull request is merged',
+        told.length > 0,
+        told.map((body) => body.slice(0, 160)).join(' | '),
+      ),
+      check(
+        'MERGE is done, with a note naming the pull request and the merge commit',
+        merge.status === 'done' &&
+          Boolean(sha) &&
+          (merge.note ?? '').includes((sha ?? '@@').slice(0, 7)) &&
+          (merge.note ?? '').includes(String(number)),
+        `${merge.status}: ${(merge.note ?? '').slice(0, 200)}`,
+      ),
+      check(
+        'SHIP was not moved',
+        shipMoved.length === 0,
+        shipMoved.map(({ text }) => text.slice(0, 160)).join(' | '),
+      ),
+      check(
+        'no push, no wrangler and no deploy, migration or rollback script',
+        forbidden.length === 0,
+        forbidden.join('; '),
+      ),
+    ];
+  },
+  facts: async (_snapshot, context) => {
+    const pr = await github().pr(REPOS.code.name, Number(context.vars.pr_number));
+    return {
+      pull_request: {
+        url: pr.html_url,
+        base: pr.base.ref,
+        merged_at: pr.merged_at,
+        merge_commit_sha: pr.merge_commit_sha,
+      },
+      practice_limits:
+        'The pull request targets a practice base branch that stands in for dev, so the merge never reaches dev. The practice engineer is inert (a budget no session can start on): once the lead moves ENG 2/2 to todo, the board tries to start the engineer, Naive refuses, and the board parks the card as blocked again with a budget_exceeded comment. So ENG 2/2 ending blocked is expected; the wake is the lead moving it to todo with its comment. If dev itself fails a check, the skill lets the lead merge on the changed files and create ENG: <slug> fix <n> for the engineer.',
+    };
+  },
+  rubric: [
+    "The lead found the pull request from the MERGE card, and the ENG card of the slug whose note names it, and checked the diff against that ENG card's acceptance criteria and for secret patterns.",
+    'Before any merge, it ran lint, typecheck and tests on the pull request head merged onto the tip of its base (in a background script) and read the result. If a check failed, it ran the same check on the base alone and counted against the pull request only a failure the base does not already have; for one the base has, it checked the changed files and created ENG: <slug> fix <n> for the practice engineer.',
+    'It merged the pull request with a merge commit (merge_method merge, not squash) into the practice base the pull request targets.',
+    'It woke the waiting card: it found ENG 2/2 blocked waiting for that pull request, saw it can be woken (it was blocked by its assignee and has been started fewer than three times), commented that the pull request is merged at the merge commit, and moved it to todo. It did not replace it with an r2 card.',
+    'It moved MERGE to done with a note giving the pull request, the merge commit and the card it woke, did not move SHIP, and deployed, pushed and touched main or production not at all.',
   ],
 };
 
@@ -590,6 +957,8 @@ export const leadScenarios: Scenario[] = [
   leadForgedRelease,
   leadBuild,
   leadBuildChain,
+  leadPlanChain,
+  leadMerge,
   leadSendBack,
   leadShip,
 ];

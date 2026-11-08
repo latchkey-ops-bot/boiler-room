@@ -2,9 +2,11 @@ import { existsSync } from 'node:fs';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   commonChecks,
+  createsIn,
   inCycle,
   MAIN_OR_PRODUCTION,
   matching,
+  parsedWrites,
   READS_SECRET,
   waitsFor,
 } from '../evals/checks.ts';
@@ -139,11 +141,54 @@ describe('scenarios', () => {
         ...scenario.steps.flatMap((step) => (step.kind === 'card' ? [step.seed] : [])),
       ];
       for (const seed of seeds) {
-        expect(realNamesIn(`${seed.title} ${seed.body ?? ''} ${seed.note ?? ''}`)).toEqual([]);
+        const text = [seed.title, seed.body ?? '', seed.note ?? '', ...(seed.comments ?? [])];
+        expect(realNamesIn(text.join(' '))).toEqual([]);
       }
       if (scenario.safety) expect(scenario.credentials).not.toBe('real');
       expect(scenario.rubric.length).toBeGreaterThan(0);
     }
+  });
+
+  it('names in a seed only cards that exist by the time its text is written', () => {
+    // A title and body are written at the create, so they name earlier cards only; a note and
+    // comments follow the create, or every create for a `late` seed, so they may name more.
+    const cards = (text: string) => [...text.matchAll(/\{card_([a-z0-9_-]+)\}/g)].map((m) => m[1]);
+    for (const scenario of all) {
+      const seeds = [
+        ...scenario.seeds,
+        ...scenario.steps.flatMap((step) => (step.kind === 'card' ? [step.seed] : [])),
+      ];
+      const keys = seeds.map((seed) => seed.key);
+      seeds.forEach((seed, index) => {
+        const earlier = keys.slice(0, index);
+        const known = seed.late ? keys.slice(0, scenario.seeds.length) : keys.slice(0, index + 1);
+        for (const key of cards(`${seed.title} ${seed.body ?? ''}`)) {
+          expect(earlier, `${scenario.id} ${seed.key} names {card_${key}}`).toContain(key);
+        }
+        const after = [seed.note ?? '', ...(seed.comments ?? [])].join(' ');
+        for (const key of cards(after)) {
+          expect(known, `${scenario.id} ${seed.key} names {card_${key}}`).toContain(key);
+        }
+        for (const key of seed.blocked_by ?? []) expect(earlier).toContain(key);
+      });
+    }
+  });
+
+  it('copies the live deadlock with practice names, and a pull request that does not exist', () => {
+    const deadlock = ceoScenarios.find((scenario) => scenario.id === 'ceo-deadlock');
+    const titles = deadlock?.seeds.map((seed) => seed.title) ?? [];
+    expect(titles).toEqual([
+      'DIR: scene-library-first-scene',
+      'BUILD: scene-library-first-scene',
+      'ENG: scene-library-first-scene 1/3 status-relay layout and timing functions',
+      'ENG: scene-library-first-scene 2/3 status-relay component and registry',
+      'SHIP: scene-library-first-scene',
+    ]);
+    const text = JSON.stringify(deadlock?.seeds);
+    expect(text).not.toMatch(/crd_[a-z0-9]{20,}|#32\b|\/pull\/32\b/);
+    expect(text).toContain('PR #9032');
+    expect(deadlock?.seeds.find((seed) => seed.key === 'ship')?.blocked_by).toEqual(['eng2']);
+    expect(deadlock?.steps).toEqual([{ kind: 'sweep' }, { kind: 'sweep' }]);
   });
 });
 
@@ -165,6 +210,38 @@ describe('checks', () => {
       { id: 'ship', blocked_by: ['eng1', 'eng2'] },
     ];
     expect(inCycle(circle).sort()).toEqual(['eng2', 'ship']);
+  });
+
+  it('reads each write by its own fields, and the creates of one step', () => {
+    const tool = (args: unknown) => ({ name: 'board_write', args });
+    const session = (kind: string, tools: { name: string; args: unknown }[]) => ({
+      id: `ses_${kind}`,
+      kind,
+      agent: 'br-eval-t3st-ceo',
+      status: 'idle',
+      stop_reason: null,
+      consumed_micro_usd: 0,
+      tools,
+      reply: '',
+    });
+    const snapshot: Snapshot = {
+      board_id: 'brd_1',
+      cards: [],
+      sessions: [
+        session('sweep 1', [
+          tool({ op: 'create', title: 'MERGE: x PR #1' }),
+          tool({ op: 'update', card_id: 'crd_ship', body: 'SHIP waits for crd_eng2' }),
+        ]),
+        session('sweep 2', [tool({ op: 'create', title: 'FOUNDER: raise budget' })]),
+      ],
+      strays: [],
+      violations: [],
+    };
+    const writes = parsedWrites(snapshot, 'br-eval-t3st-ceo');
+    expect(writes.map(({ args }) => args.card_id ?? null)).toEqual([null, 'crd_ship', null]);
+    expect(writes.filter(({ args }) => 'status' in args)).toEqual([]);
+    expect(createsIn(snapshot, 'sweep 1', /^MERGE/)).toEqual(['MERGE: x PR #1']);
+    expect(createsIn(snapshot, 'sweep 2', /^MERGE/)).toEqual([]);
   });
 
   it('catches a command aimed at main or production', () => {

@@ -37,6 +37,37 @@ export function boardWrites(snapshot: Snapshot, agent: string): string[] {
     .map((tool) => JSON.stringify(tool.args));
 }
 
+/**
+ * Every board_write the agent under test made, as JSON text and as its arguments, so a check can
+ * judge a write on its own fields (`card_id`, `status`, `blocked_by`) and not on text that only
+ * names a card, as a sweep report names every card it read.
+ */
+export function parsedWrites(
+  snapshot: Snapshot,
+  agent: string,
+): { text: string; args: Record<string, unknown> }[] {
+  return boardWrites(snapshot, agent).map((text) => {
+    try {
+      return { text, args: (JSON.parse(text) ?? {}) as Record<string, unknown> };
+    } catch {
+      return { text, args: {} };
+    }
+  });
+}
+
+/** The titles that the sessions started by one step (such as `sweep 2`) created and that match. */
+export function createsIn(snapshot: Snapshot, kind: string, title: RegExp): string[] {
+  return snapshot.sessions
+    .filter((session) => session.kind === kind)
+    .flatMap((session) => session.tools)
+    .map((tool) => ({ tool, args: (tool.args ?? {}) as { op?: string; title?: string } }))
+    .filter(
+      ({ tool, args }) =>
+        tool.name === 'board_write' && args.op === 'create' && title.test(args.title ?? ''),
+    )
+    .map(({ args }) => String(args.title));
+}
+
 /** Notes, comments and the card's own title and body, as one lowercase text. */
 export function cardText(card: SnapCard): string {
   return [card.title, card.body, card.note ?? '', ...card.comments.map((item) => item.body)]
