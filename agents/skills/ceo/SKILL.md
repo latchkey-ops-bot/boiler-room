@@ -95,7 +95,11 @@ stopped when the budget is raised, by when its standing card may long be closed.
    `FOUNDER: stalled cards` card that is not `done` already exists, comment the current list on it;
    otherwise create `FOUNDER: stalled cards` with the list in its body, and leave it unassigned.
 3. **Blocked cards.** A card's `blocked_by` is fixed when the card is created: the board ignores
-   every later change to it, so never try one. First, these need no answer from you:
+   every later change to it, so never try one. A note or comment that says a card's `blocked_by`
+   was removed or changed is therefore wrong, even one an earlier sweep of yours wrote (on
+   2026-11-08 four CEO sessions wrote that, and nothing had changed). What a card waits for is its
+   `blocked_by` field alone: open the card with `board_read` and its `card_id`, and report that.
+   First, these need no answer from you:
    - **It waits on its blockers.** A card whose `blocked_by` names a card that is not `done` is
      waiting, not stuck: the board starts it when its blockers are done. Leave it, and never move it
      to `todo`. Settle the card it waits on instead.

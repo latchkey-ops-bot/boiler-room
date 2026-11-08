@@ -68,7 +68,7 @@ export const CARD_CONTROL_RULE =
  * On 2026-11-08 four digests tried to change a SHIP card's blocked_by, and nothing moved.
  */
 export const MERGE_RULE =
-  'A card blocked waiting for a pull request to be merged needs br-eng-lead: if no open MERGE card is for that pull request, create MERGE: <slug> PR #<n> for br-eng-lead with no blocked_by, in a sweep or a digest. The board ignores any change to blocked_by, so never try one. Never close a MERGE card.';
+  'A card blocked waiting for a pull request to be merged needs br-eng-lead: if no open MERGE card is for that pull request, create MERGE: <slug> PR #<n> for br-eng-lead with no blocked_by, in a sweep or a digest. The board ignores any change to blocked_by, so never try one, and a note saying one was made is wrong. Never close a MERGE card.';
 
 /**
  * Two sweeps can overlap, and a sweep paused on its budget resumes from its old context when the

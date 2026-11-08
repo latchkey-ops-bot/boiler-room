@@ -594,7 +594,10 @@ describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
     expect(lead).toContain('**The base already fails it.**');
     expect(lead).toContain('If no `ENG` card of the slug names it, it is not yours to merge');
     expect(lead).toContain('its `wake_count` is below 3');
-    expect(lead).toContain('**It cannot be woken.** Create a fresh card for the same assignee');
+    expect(lead).toContain(
+      'the board starts a card at most three times, and that is the only limit',
+    );
+    expect(lead).toContain('**It cannot be woken** when its `wake_count` is 3 or more');
     expect(lead).toContain('Then move this card to `blocked`, not `done`');
   });
 
@@ -602,6 +605,7 @@ describe('MERGE cards, because blocked_by is fixed when a card is made', () => {
     expect(ceo.system).toContain(MERGE_RULE);
     expect(MERGE_RULE).toContain('create MERGE: <slug> PR #<n> for br-eng-lead with no blocked_by');
     expect(MERGE_RULE).toContain('The board ignores any change to blocked_by, so never try one');
+    expect(MERGE_RULE).toContain('a note saying one was made is wrong');
     const skill = flat('ceo');
     expect(skill).toContain('the board ignores every later change to it, so never try one');
     expect(skill).toContain(
@@ -772,11 +776,15 @@ describe('secrets', () => {
   it.runIf(existsSync(ENV_FILE))(
     'no definition or skill contains a value from the env file',
     () => {
+      // Public by design: the staging Worker's URL, which skills/engineering-deploy and
+      // docs/deploy.md name. It was added to the env file on 2026-11-08 for the GTM app.
+      const PUBLIC = new Set(['GTM_APP_URL']);
       const values = readFileSync(ENV_FILE, 'utf8')
         .split('\n')
         .map((line) => /^(?:export\s+)?([A-Z0-9_]+)=["']?([^"'\s]+)/.exec(line))
         .filter(
-          (match): match is RegExpExecArray => match !== null && (match[2]?.length ?? 0) >= 12,
+          (match): match is RegExpExecArray =>
+            match !== null && (match[2]?.length ?? 0) >= 12 && !PUBLIC.has(match[1] ?? ''),
         );
       // Only names are reported, so a failure never prints a secret.
       const leaked = values.filter((match) => everything.includes(match[2] ?? '')).map((m) => m[1]);
