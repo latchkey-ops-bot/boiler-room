@@ -2,6 +2,7 @@ import { asc, eq } from 'drizzle-orm';
 import type { Db } from '../../db/client.ts';
 import { approvals, films, revisions } from '../../db/schema.ts';
 import { FORMATS, type Format, PIPELINE_KINDS, type PipelineKind } from '../../lib/film.ts';
+import type { RunnerDeps } from '../runner/runs.ts';
 import { NaivePipeline } from './naive.ts';
 import { SimulatedPipeline, type SimulationLedger } from './simulated.ts';
 import type { PipelineClient } from './types.ts';
@@ -15,9 +16,18 @@ export function pipelineKindFrom(value: string | undefined): PipelineKind {
   return PIPELINE_KINDS.includes(value as PipelineKind) ? (value as PipelineKind) : 'naive';
 }
 
-export function createPipeline(kind: PipelineKind, db: Db, clock?: () => Date): PipelineClient {
+/**
+ * The pipeline client for `kind`. A real film needs the runner's deps: the Naive client, the R2
+ * bucket, the config and `waitUntil`. Without them, the Naive pipeline answers 503.
+ */
+export function createPipeline(
+  kind: PipelineKind,
+  db: Db,
+  clock?: () => Date,
+  runner?: RunnerDeps | null,
+): PipelineClient {
   if (kind === 'simulated') return new SimulatedPipeline(d1Ledger(db), { clock });
-  return new NaivePipeline();
+  return new NaivePipeline(runner ?? null);
 }
 
 /**

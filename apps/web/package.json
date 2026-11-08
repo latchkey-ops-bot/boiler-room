@@ -19,6 +19,7 @@
     "db:migrate:production": "node scripts/migrate.mjs production",
     "provision:staging": "node scripts/provision.mjs staging",
     "provision:production": "node scripts/provision.mjs production",
+    "runner:keys:staging": "node scripts/runner-keys.mjs staging",
     "secrets:sync:staging": "node scripts/secrets-sync.mjs staging",
     "secrets:sync:production": "node scripts/secrets-sync.mjs production",
     "deploy:staging": "node scripts/deploy.mjs staging",
@@ -29,6 +30,7 @@
     "logs:production": "node scripts/logs.mjs production"
   },
   "dependencies": {
+    "@boiler-room/film-runner": "workspace:*",
     "@boiler-room/schema": "workspace:*",
     "@clerk/nextjs": "7.9.25",
     "@opennextjs/cloudflare": "1.20.16",

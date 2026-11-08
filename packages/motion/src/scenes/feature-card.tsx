@@ -3,7 +3,6 @@ import { useBrand } from '../brand/brand-context.tsx';
 import { withAlpha } from '../brand/color.ts';
 import { BrowserFrame } from '../components/browser-frame.tsx';
 import { RisingWords } from '../components/rising-words.tsx';
-import { cornerMark, SceneMark } from '../components/scene-base.tsx';
 import { type SceneProps, useScene, useSceneClock } from '../components/scene-runtime.tsx';
 import {
   baselineOffset,
@@ -14,7 +13,7 @@ import {
   specPx,
   useSpecFit,
 } from '../components/type.tsx';
-import { WHOLE_IMAGE } from '../core/camera.ts';
+import { type Point, WHOLE_IMAGE } from '../core/camera.ts';
 import { arriveN, blink, springPop, typeDrift } from '../core/curves.ts';
 import { textDirection } from '../layout/bidi.ts';
 import { fitContain, type Rect } from '../layout/rect.ts';
@@ -161,6 +160,15 @@ const headlineStyle: SpecTypeStyle = {
   cap: specType.capS,
 };
 
+/**
+ * The widest the headline is set: the line box, or less where its drift would carry it past the
+ * safe area. It drifts larger about the frame centre on every frame, to `dur` at the latest, so at
+ * this width it is inside the safe area on the scene's last frame, however long the card runs. In
+ * 16:9 a card would have to run over 9 s for that to be narrower than the line box.
+ */
+export const headlineWidth = (stage: Stage, dur: number): number =>
+  Math.min(lineBox(stage), stage.safe.width / typeDrift(dur));
+
 /** The top of the headline's line box: its cap top sits on the slot, the same on every card. */
 const headlineLineTop = (fit: SpecFit, top: number) =>
   top + fit.metrics.cap * fit.fontSize - baselineOffset(fit);
@@ -197,9 +205,12 @@ const Headline = ({
   rack: { blur: number; y: number };
   accent: Accent | undefined;
 }) => {
-  const { stage } = useScene();
+  const { stage, dur } = useScene();
   const { colors, fonts } = useBrand();
-  const fit = useSpecFit(value, headlineStyle, stage, { width: lineBox(stage), maxLines: 1 });
+  const fit = useSpecFit(value, headlineStyle, stage, {
+    width: headlineWidth(stage, dur),
+    maxLines: 1,
+  });
   const lineTop = headlineLineTop(fit, top);
   const { blur, y } = rack;
   let index = -1;
@@ -241,25 +252,55 @@ const Headline = ({
   );
 };
 
-const NodeLabel = ({
-  value,
-  node,
-  f,
-  start,
-}: {
-  value: string;
-  node: CardNode;
-  f: number;
-  start: number;
-}) => {
+/** A node label, set under its node's visual on up to two lines. */
+const useLabelFit = (value: string, node: CardNode): SpecFit => {
   const { stage } = useScene();
-  const { colors, fonts } = useBrand();
-  const fit = useSpecFit(
+  return useSpecFit(
     value,
     { font: 'body', weight: typography.weight.strong, cap: specType.capS * card.labelCap },
     stage,
     { width: node.label.width, maxLines: 2 },
   );
+};
+
+/**
+ * Where the connector runs: from the facing edge of the cause to the facing edge of the effect.
+ * Side by side those are the visuals' edges. Stacked, the cause's label sits under its visual, so
+ * the line starts under the label, at `causeLabelBottom`, rather than through it.
+ */
+export function connectorEnds(
+  axis: CardLayout['axis'],
+  causeRect: Rect,
+  effectRect: Rect,
+  causeLabelBottom: number | undefined,
+): { from: Point; to: Point } {
+  if (axis === 'x') {
+    return {
+      from: { x: causeRect.x + causeRect.width, y: causeRect.y + causeRect.height / 2 },
+      to: { x: effectRect.x, y: effectRect.y + effectRect.height / 2 },
+    };
+  }
+  return {
+    from: {
+      x: causeRect.x + causeRect.width / 2,
+      y: causeLabelBottom ?? causeRect.y + causeRect.height,
+    },
+    to: { x: effectRect.x + effectRect.width / 2, y: effectRect.y },
+  };
+}
+
+const NodeLabel = ({
+  fit,
+  node,
+  f,
+  start,
+}: {
+  fit: SpecFit;
+  node: CardNode;
+  f: number;
+  start: number;
+}) => {
+  const { colors, fonts } = useBrand();
   if (f < start) return null;
   return (
     <div
@@ -304,15 +345,16 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
 
   const causeRect = causeImage ? cropRect(layout.cause, causeImage) : chipRect(layout.cause);
   const effectRect = effectImage ? cropRect(layout.effect, effectImage) : chipRect(layout.effect);
+  const causeLabel = useLabelFit(labels[0]?.value ?? '', layout.cause);
+  const effectLabel = useLabelFit(labels[1]?.value ?? '', layout.effect);
 
-  // The connector runs from the facing edge of one visual to the facing edge of the other.
   const along = layout.axis === 'x';
-  const from = along
-    ? { x: causeRect.x + causeRect.width, y: causeRect.y + causeRect.height / 2 }
-    : { x: causeRect.x + causeRect.width / 2, y: causeRect.y + causeRect.height };
-  const to = along
-    ? { x: effectRect.x, y: effectRect.y + effectRect.height / 2 }
-    : { x: effectRect.x + effectRect.width / 2, y: effectRect.y };
+  const { from, to } = connectorEnds(
+    layout.axis,
+    causeRect,
+    effectRect,
+    labels[0] ? layout.cause.label.y + causeLabel.height : undefined,
+  );
   const gap = specPx(stage, 18);
   const length = Math.max(0, (along ? to.x - from.x : to.y - from.y) - gap * 2);
   const drawn = length * arriveN(f - beats.connector, arrival.snap.k, arrival.snap.D);
@@ -320,9 +362,10 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
 
   const light = (f - beats.causeLight) / beats.lightFrames;
 
+  // No corner mark: the scene file has none, and in 9:16 the headline slot sits just under the
+  // corner, where the mark would crowd it.
   return (
     <>
-      <SceneMark placement={cornerMark(stage)} />
       <SeamLayer anchor="headline">
         <Headline
           id={headline.id}
@@ -403,20 +446,10 @@ const FeatureCard = ({ scene, props }: SceneProps<FeatureCardProps>) => {
                 </div>
               ) : null}
               {labels[0] ? (
-                <NodeLabel
-                  value={labels[0].value}
-                  node={layout.cause}
-                  f={f}
-                  start={beats.causeLabel}
-                />
+                <NodeLabel fit={causeLabel} node={layout.cause} f={f} start={beats.causeLabel} />
               ) : null}
               {labels[1] ? (
-                <NodeLabel
-                  value={labels[1].value}
-                  node={layout.effect}
-                  f={f}
-                  start={beats.effectLabel}
-                />
+                <NodeLabel fit={effectLabel} node={layout.effect} f={f} start={beats.effectLabel} />
               ) : null}
             </div>
           </div>
@@ -440,7 +473,6 @@ export const featureCard = defineScene<FeatureCardProps>({
     // The effect pops past its size by up to 6.6% before it settles.
     return { width: cropRect(node, image).width, zoom: index === 0 ? 1 : 1.07 };
   },
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'product',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   anchors: [
@@ -448,13 +480,13 @@ export const featureCard = defineScene<FeatureCardProps>({
       id: 'headline',
       entry: anchorVelocity.x,
       exit: anchorVelocity.x,
-      box: (f, { stage, text, theme }) => {
+      box: (f, { stage, text, theme, dur }) => {
         const value = text.find(({ role }) => role === 'headline')?.value ?? '';
         const fit = specFit(
           value,
           headlineStyle,
           stage,
-          { width: lineBox(stage), maxLines: 1 },
+          { width: headlineWidth(stage, dur), maxLines: 1 },
           theme.fonts,
         );
         return headlineBox(fit, stage, cardLayout(stage).headlineTop, f);

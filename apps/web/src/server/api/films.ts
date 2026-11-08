@@ -17,6 +17,8 @@ import { parseFilmUrl } from '../../lib/film-url.ts';
 import { type Channel, parseChannels } from '../../lib/launch.ts';
 import { newId } from '../ids.ts';
 import { parseFormats } from '../pipeline/index.ts';
+import { capRefusal, realFilmCaps } from '../runner/caps.ts';
+import { runnerReady } from '../runner/config.ts';
 import type { ApiContext } from './context.ts';
 import { ApiError, notFound } from './errors.ts';
 
@@ -73,7 +75,10 @@ export interface FilmView {
   status: Film['status'];
   stage: Film['stage'];
   pipeline: Film['pipeline'];
-  /** True for a film the SimulatedPipeline made. Every screen labels it. */
+  /**
+   * True for a film the SimulatedPipeline made, or a real film whose computer ran the stand-in film
+   * command instead of the crew. Every screen labels it, and it never goes on the showcase.
+   */
   simulated: boolean;
   scriptVersion: number;
   chosenHook: string | null;
@@ -153,7 +158,7 @@ export function filmView(film: Film): FilmView {
     status: film.status,
     stage: film.stage,
     pipeline: film.pipeline,
-    simulated: film.pipeline === 'simulated',
+    simulated: film.pipeline === 'simulated' || film.standIn,
     scriptVersion: film.scriptVersion,
     chosenHook: film.chosenHook,
     chosenCta: film.chosenCta,
@@ -235,12 +240,19 @@ export async function createFilm(ctx: ApiContext, input: CreateFilmInput): Promi
   const id = newId('flm');
   const kind = ctx.pipelineKind;
   const now = ctx.now();
+  // A real film costs money, so it also has to fit the real-film caps: films at work per founder,
+  // films holding the crew's Researcher, and dollars per founder and per environment per day.
+  const real = kind === 'naive' && runnerReady(ctx.runnerConfig);
+  const scope = { accountId: ctx.account.id, userId: ctx.principal.userId, now: now.getTime() };
   const reserved = await ctx.db.run(sql`
     insert into films (id, account_id, created_by, url, status, stage, pipeline, created_at, updated_at)
     select ${id}, ${ctx.account.id}, ${ctx.principal.userId}, ${parsed.url}, 'queued', 'research',
       ${kind}, ${now.getTime()}, ${now.getTime()}
-    where ${inProgressCount(ctx, now)} < ${MAX_FILMS_IN_PROGRESS}`);
+    where ${inProgressCount(ctx, now)} < ${MAX_FILMS_IN_PROGRESS}
+      ${real ? sql`and ${realFilmCaps(ctx.runnerConfig, scope)}` : sql``}`);
   if (reserved.meta.changes !== 1) {
+    const refusal = real ? await capRefusal(ctx.db, ctx.runnerConfig, scope) : null;
+    if (refusal) throw refusal;
     throw new ApiError(
       429,
       'too_many_films',

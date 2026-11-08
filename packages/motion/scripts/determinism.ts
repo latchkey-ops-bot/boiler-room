@@ -202,8 +202,8 @@ try {
     try {
       selected = await selectFilm(serveUrl, { campaign, format }, browser);
     } catch (error) {
-      // Remotion keeps only the first line of an error from the page in `message`; the issues
-      // FilmRejected lists follow it in `stack`.
+      // Remotion keeps only the first line of an error from the page in `message`, which is where
+      // FilmRejected puts every issue, and `stack` has it too.
       const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
       if (expect !== 'identical' && message.includes(expect.rejectedWith)) {
         console.log(`${name}: refused with ${expect.rejectedWith}, as it must be`);

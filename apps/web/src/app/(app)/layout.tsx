@@ -3,14 +3,14 @@ import { AccountTile } from '../../components/account-tile.tsx';
 import { AppNav } from '../../components/app-nav.tsx';
 import { Brand } from '../../components/brand.tsx';
 import { Icon } from '../../components/icon.tsx';
-import { requireSignedIn, simulatedEnvironment } from '../../server/next.ts';
+import { requireSignedIn, simulatedForCaller } from '../../server/next.ts';
 
 export const dynamic = 'force-dynamic';
 
 /** The app: the 2px pixel, a 248px sidebar and one content column. Signed-in founders only. */
 export default async function AppLayout({ children }: { children: ReactNode }) {
   await requireSignedIn();
-  const simulated = simulatedEnvironment();
+  const simulated = await simulatedForCaller();
   return (
     <div className="surface-app app-shell">
       <a className="skip-link" href="#main">

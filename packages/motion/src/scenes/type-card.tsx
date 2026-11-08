@@ -18,7 +18,6 @@
 import type { TextRole } from '@boiler-room/schema';
 import { z } from 'zod';
 import { useBrand } from '../brand/brand-context.tsx';
-import { cornerMark } from '../components/scene-base.tsx';
 import {
   type SceneProps,
   type SceneRuntime,
@@ -573,7 +572,6 @@ export const typeCard = defineScene<TypeCardProps>({
   roles: { headline: { min: 1, max: 1 }, subhead: { min: 0, max: 1 } },
   image: 'none',
   maxImages: 0,
-  markAnchor: (stage) => cornerMark(stage),
   kind: 'type',
   ground: { 'neutral-cut': 'base', 'kinetic-plate': 'plate' },
   // The text block. It enters on x, and leaves on x, or on y for the name, into the end card.

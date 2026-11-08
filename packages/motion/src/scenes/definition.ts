@@ -6,6 +6,7 @@ import type { MarkPlacement } from '../components/brand-mark.tsx';
 import type { SceneProps } from '../components/scene-runtime.tsx';
 import type { Rect } from '../layout/rect.ts';
 import type { Stage } from '../layout/stage.ts';
+import type { TransitionName } from '../transitions/catalog.ts';
 
 /** The size of an image a scene shows, as it was loaded. */
 export interface SceneImage {
@@ -114,6 +115,24 @@ export interface RoleCount {
   max: number;
 }
 
+/** A scene that holds still to its end, as `validateFilm` asks it whether its hold comes too soon. */
+export interface HoldRequest<Props> {
+  props: Props;
+  text: readonly { role: TextRole; value: string }[];
+  durationInFrames: number;
+  fps: number;
+  /** The transition into the scene, as the resolver chose it, or undefined for the first scene. */
+  inT: TransitionName | undefined;
+  /** Where the scene is in the campaign, such as `scenes[3]`, for the issue to name. */
+  path: string;
+}
+
+/** Something a hold would freeze before it is finished, and the change that gives it time. */
+export interface HoldShortfall {
+  message: string;
+  fix: string;
+}
+
 /**
  * The template for one scene type of the schema's `sceneRegistry`. The text limits are not here:
  * the schema's registry holds them, and it is the contract the Director writes to. A template
@@ -140,7 +159,11 @@ export interface SceneDefinition<Props> {
    * aspect limit, and never to one screen, which the gate's advice says.
    */
   scrollsImages?: boolean;
-  markAnchor: (stage: Stage) => MarkPlacement;
+  /**
+   * Where the scene draws the brand mark. A scene that draws none, as its scene file says, declares
+   * none.
+   */
+  markAnchor?: (stage: Stage) => MarkPlacement;
   kind: SceneKind;
   /** The ground the `Stage` draws under the scene, in each skin. */
   ground: Record<Skin, Ground> | ((props: Props) => Record<Skin, Ground>);
@@ -148,6 +171,11 @@ export interface SceneDefinition<Props> {
   anchors: readonly AnchorDeclaration<Props>[];
   /** The scene frame from which nothing moves, such as the end card's hold. The ground stops too. */
   holdFrom?: (durationInFrames: number, fps: number) => number;
+  /**
+   * For a scene with a `holdFrom`: whatever its hold would freeze before it is finished at this
+   * length. `validateFilm` refuses each one, so a film never ends on a half-built frame.
+   */
+  unfinishedAtHold?: (request: HoldRequest<Props>) => HoldShortfall[];
   /** `logo-reveal` only: the spec frame where the logo is legible. */
   markLegibleAt?: number;
 }
