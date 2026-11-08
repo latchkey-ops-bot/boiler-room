@@ -35,7 +35,13 @@ export const clerkAppearance = {
       ].join(', '),
     },
     card: { boxShadow: 'none', borderRadius: 0 },
-    formButtonPrimary: { backgroundImage: 'none', boxShadow: 'none', borderRadius: 0 },
+    formButtonPrimary: {
+      backgroundImage: 'none',
+      boxShadow: 'none',
+      borderRadius: 0,
+      '&::before': { display: 'none' },
+      '&::after': { display: 'none' },
+    },
     footer: { backgroundImage: 'none', background: '#FFFBEF' },
   },
 };
