@@ -207,7 +207,7 @@ requests cannot all pass, and a refused start never reaches Naive.
 | Real films holding the crew's one Researcher, across staging                                                                          | 1                                         | `MAX_REAL_GLOBAL`                          |
 | Per founder per rolling 24 hours, films at work at their full cap, a script waiting at what it spent (its approval reserves the rest) | $15.00                                    | `ACCOUNT_DAILY_CAP_USD`                    |
 | All of staging per rolling 24 hours                                                                                                   | $20.00                                    | `GLOBAL_DAILY_CAP_USD`                     |
-| The balance tripwire: the Naive balance down more than `GLOBAL_DAILY_CAP_USD` in a day, from any source                               | halts every real film                     | `runner_control` row in D1                 |
+| The balance tripwire: the Naive balance down more than $80.00 in a day, from any source                                               | halts every real film                     | `TRIPWIRE_DAILY_FALL_USD`                  |
 
 A real 16:9 film costs about $1.30 for the research and the script, and about $1.00 for each
 format's art direction, render and Quality Check; Opus Director rounds can cost more. So a film may
@@ -216,9 +216,11 @@ staging's $20.00 holds a third film beside them, such as a test. The compute res
 nine 10-minute blocks of the 4 vCPU film computer at $0.055 each.
 
 The tripwire counts every spend in the Naive organization, the company's own agents and any build
-or test included, not only films. On a busy day those alone can pass $20.00, and then it halts
-real films until a person sets `halted` back to 0 in `runner_control` (staging D1). It cannot tell
-the spends apart.
+or test included, not only films, so it has its own threshold, `TRIPWIRE_DAILY_FALL_USD` ($80.00),
+above the company's normal spend of about $20 to $27 a day. It cannot tell the spends apart. Once
+tripped it halts real films until a person resets it in `runner_control` (staging D1), setting
+`halted` to 0 and `balance_baseline_micro_usd` and `baseline_at` to NULL. Setting only `halted`
+trips it again on the next tick, because the old baseline is kept for 24 hours.
 
 **Settings.**
 

@@ -53,8 +53,9 @@
       // Opus Director rounds can cost more, so a film may take $6.00. A founder's $15.00 a day
       // holds two films at that cap, and staging's $20.00 a third, such as a test film, beside
       // them. A film counts at its whole cap while it works, then at what it spent.
-      // GLOBAL_DAILY_CAP_USD is also the balance tripwire: the Naive balance down more than it in
-      // a day, from any source, halts every real film.
+      // TRIPWIRE_DAILY_FALL_USD is the balance tripwire: the Naive balance down more than it in a
+      // day, from any source, halts every real film. It sits above the company's own daily spend
+      // (about $20 to $27 a day with no film), which shares the balance.
       "vars": {
         "APP_ENV": "staging",
         "PIPELINE": "simulated",
@@ -67,6 +68,7 @@
         "FILM_COMPUTE_RESERVE_USD": "0.50",
         "ACCOUNT_DAILY_CAP_USD": "15.00",
         "GLOBAL_DAILY_CAP_USD": "20.00",
+        "TRIPWIRE_DAILY_FALL_USD": "80.00",
         "MAX_REAL_PER_ACCOUNT": "1",
         "MAX_REAL_GLOBAL": "1",
         "RUNNER_REVISE_SUPPORTED": "false",
