@@ -138,6 +138,29 @@ describe('prepareFilm', () => {
     ).rejects.toThrow(/IMAGE_UNREADABLE at assets\.dashboard-shot\.src/);
   });
 
+  it('refuses a brand font that cannot be loaded, naming the font, its file and why', async () => {
+    const corrupt = { loaded: false, reason: 'Invalid font data in ArrayBuffer.' } as const;
+    const rejection = prepareFilm(
+      { campaign: novaCopy(), format: '16:9' },
+      exampleProbe({}, { 'sora.woff2': corrupt }),
+    );
+    await expect(rejection).rejects.toThrow(FilmRejected);
+    await expect(rejection).rejects.toThrow(
+      /FONT_UNAVAILABLE at assets\.font-display\.src: The display font "Sora" could not be loaded from "assets\/fonts\/sora\.woff2": Invalid font data in ArrayBuffer\./,
+    );
+  });
+
+  it('names the source of a font given as a URL', async () => {
+    const campaign = novaCopy();
+    campaign.brand.fonts.body.source = 'https://fonts.example.com/brand.woff2';
+    await expect(
+      prepareFilm(
+        { campaign, format: '16:9' },
+        exampleProbe({}, { 'brand.woff2': { loaded: false, reason: 'Failed to fetch' } }),
+      ),
+    ).rejects.toThrow(/FONT_UNAVAILABLE at brand\.fonts\.body\.source: The body font "Inter"/);
+  });
+
   it('sets the name as a wordmark when the logo animates', async () => {
     const logo = { loaded: true, width: 373, height: 112, coverage: 0.4, animated: true };
     const plan = await prepareFilm(

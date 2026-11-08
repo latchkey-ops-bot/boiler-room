@@ -3,6 +3,7 @@ import nova from '@boiler-room/schema/examples/nova.campaign.json' with { type: 
 import quillhaven from '@boiler-room/schema/examples/quillhaven.campaign.json' with {
   type: 'json',
 };
+import type { FontProbe } from '../src/brand/fonts.ts';
 import type { LogoProbe } from '../src/brand/logo.ts';
 import type { MediaProbe } from '../src/film/prepare.ts';
 
@@ -13,7 +14,14 @@ export const examples = { nova: novaCopy, quillhaven: quillhavenCopy };
 export const at = <T>(list: readonly T[], index: number): T => list[index] as T;
 
 /** Answers for the files the examples use, as a browser would report them. */
-export const exampleProbe = (overrides: Record<string, LogoProbe> = {}): MediaProbe => ({
+export const exampleProbe = (
+  overrides: Record<string, LogoProbe> = {},
+  fonts: Record<string, FontProbe> = {},
+): MediaProbe => ({
+  font: async (url: string) => {
+    const match = Object.keys(fonts).find((key) => url.endsWith(key));
+    return match ? (fonts[match] as FontProbe) : { loaded: true };
+  },
   image: async (url: string) => {
     const match = Object.keys(overrides).find((key) => url.endsWith(key));
     if (match) return overrides[match] as LogoProbe;

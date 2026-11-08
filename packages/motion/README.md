@@ -12,11 +12,12 @@ any brand.
    each one sets, the images it needs, transitions that exist, and the format, hook and CTA chosen;
 3. resolves the hook and CTA into an ordinary campaign with `resolveCut`, and validates that again,
    since choosing a CTA changes copy;
-4. loads the scene images and the logo to learn their size, whether the logo can be seen, and
+4. loads both brand fonts, and refuses one that is missing, corrupt or blocked, naming it;
+5. loads the scene images and the logo to learn their size, whether the logo can be seen, and
    whether either animates. An animated GIF, APNG, WebP, AVIF or SVG plays on the browser's clock,
    not the film's, so a scene image that animates, or whose bytes its host will not let be read, is
    refused, and such a logo is replaced by the wordmark;
-5. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, and the
+6. plans the film with `planFilm`: frame numbers from `sceneFrames`, the format's size, and the
    transitions overlaid on scene boundaries.
 
 A throw at any step stops `remotion render` and `remotion still`. The error lists every issue with

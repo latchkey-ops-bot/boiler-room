@@ -4,8 +4,9 @@
  * `FilmRejected` with every issue and its fix. Remotion's `schema` prop does not stop a render, so
  * nothing here relies on it.
  *
- * The fourth check `calculateMetadata` makes, that every scene image loads, needs a browser. It runs
- * when the film is selected from the bundle, which still happens before any computer exists.
+ * The checks `calculateMetadata` makes after these, that both brand fonts load and every scene
+ * image loads and is still, need a browser. They run when the film is selected from the bundle,
+ * which still happens before any computer exists.
  */
 import {
   type FilmIssue,

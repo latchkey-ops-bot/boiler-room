@@ -38,8 +38,10 @@ printed, logged, put in a command or sent to a computer.
    that folder is uploaded. A missing font stops the render; a missing file a silent film does not
    draw, such as audio, is a warning. The bundle and the chunk worker are packed into one `.tgz`.
 4. **Select.** `selectComposition` runs here against the bundle, which runs `calculateMetadata` in a
-   browser, including its check that every scene image loads. Its `composition` is what every chunk
-   renders, as Remotion's distributed rendering asks.
+   browser, including its checks that both brand fonts load (`FONT_UNAVAILABLE` names the font, its
+   file and why) and that every scene image loads and is still. `--dry-run` stops after this step,
+   so a corrupt or blocked font is caught before any computer exists. Its `composition` is what
+   every chunk renders, as Remotion's distributed rendering asks.
 5. **Render.** The frames are split with `splitFrames`: every chunk has `ceil(frames / workers)`
    frames except the last, because `combineChunks` takes one `framesPerChunk`. Each chunk renders
    on its own computer with `renderMedia({ codec: 'h264-ts', frameRange, compositionStart: 0,

@@ -1,5 +1,6 @@
-import { type Issue, validateCampaign } from '@boiler-room/schema';
+import { type Campaign, type Issue, validateCampaign } from '@boiler-room/schema';
 import { assetUrl } from '../brand/assets.ts';
+import { type FontProbe, type FontRole, fontUrl, probeFont } from '../brand/fonts.ts';
 import { resolveLogo } from '../brand/logo.ts';
 import { probeImage } from '../brand/probe.ts';
 import type { Format } from '../layout/stage.ts';
@@ -34,9 +35,35 @@ export interface FilmRequest extends CutSelection {
 /** What the browser reports about the files a film draws. Tests pass their own. */
 export interface MediaProbe {
   image: (url: string) => ReturnType<typeof probeImage>;
+  font: (url: string) => Promise<FontProbe>;
 }
 
-const browserProbe: MediaProbe = { image: probeImage };
+const browserProbe: MediaProbe = { image: probeImage, font: probeFont };
+
+/**
+ * Loads both brand fonts. Each render tab loads them again, but a font that fails there fails only
+ * once the chunks render, which on Naive is after the computers exist and are billing.
+ */
+async function checkFonts(campaign: Campaign, probe: MediaProbe): Promise<FilmIssue[]> {
+  const roles: FontRole[] = ['display', 'body'];
+  const issues: FilmIssue[] = [];
+  for (const role of roles) {
+    const { family, source } = campaign.brand.fonts[role];
+    const asset = Object.hasOwn(campaign.assets, source) ? campaign.assets[source] : undefined;
+    const src = asset?.src ?? source;
+    const seen = await probe.font(fontUrl(source, campaign));
+    if (seen.loaded) continue;
+    const path = asset ? `assets.${source}.src` : `brand.fonts.${role}.source`;
+    issues.push({
+      code: 'FONT_UNAVAILABLE',
+      severity: 'error',
+      path,
+      message: `The ${role} font "${family}" could not be loaded from "${src}": ${seen.reason}`,
+      fix: `Change ${path} to a WOFF2, WOFF, TTF or OTF file that loads, beside the campaign or at a URL served with CORS.`,
+    });
+  }
+  return issues;
+}
 
 /**
  * Gates and plans a film. The campaign is validated as written, then again as the one cut being
@@ -58,6 +85,9 @@ export async function prepareFilm(
   const cut = await validateCampaign(resolveCut(written.campaign, selection), { sceneRegistry });
   if (!cut.ok) throw new FilmRejected('validateCampaign on the selected cut', cut.issues);
   const campaign = cut.campaign;
+
+  const fontIssues = await checkFonts(campaign, probe);
+  if (fontIssues.length > 0) throw new FilmRejected('loading the brand fonts', fontIssues);
 
   const imageIds = [
     ...new Set(campaign.scenes.flatMap((scene) => screenImageId(scene, campaign) ?? [])),
