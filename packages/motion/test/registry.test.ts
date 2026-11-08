@@ -10,8 +10,14 @@ import {
 import { at, examples, novaCopy } from './fixtures.ts';
 
 describe('scene templates', () => {
-  it('draw four of the scene types in the schema registry, under its names', () => {
-    expect(IMPLEMENTED_SCENE_TYPES).toEqual(['word-slam', 'site-hero', 'feature-card', 'end-card']);
+  it('draw five of the scene types in the schema registry, under its names', () => {
+    expect(IMPLEMENTED_SCENE_TYPES).toEqual([
+      'word-slam',
+      'site-hero',
+      'feature-card',
+      'end-card',
+      'site-scroll',
+    ]);
     for (const type of IMPLEMENTED_SCENE_TYPES)
       expect(Object.hasOwn(sceneRegistry, type)).toBe(true);
   });
@@ -77,13 +83,20 @@ describe('scene templates', () => {
         ground: 'base plate',
         anchors: [{ id: 'logo', entry: { axis: 'y', sign: -1, v: 36 }, exit: undefined }],
       },
+      'site-scroll': {
+        kind: 'product',
+        ground: 'base plate',
+        anchors: [{ id: 'browser', entry: undefined, exit: { axis: 'x', sign: 1, v: 46 } }],
+      },
     });
   });
 
   it('give every template a component and a props schema that needs no props', () => {
-    for (const definition of Object.values(sceneImplementations)) {
+    // site-scroll's pages are capture data it cannot land page 2 without, so it needs them.
+    const needsProps = new Set(['site-scroll']);
+    for (const [type, definition] of Object.entries(sceneImplementations)) {
       expect(typeof definition.component).toBe('function');
-      expect(definition.props.safeParse({}).success).toBe(true);
+      expect(definition.props.safeParse({}).success).toBe(!needsProps.has(type));
     }
   });
 });
@@ -106,7 +119,7 @@ describe('validateForRender', () => {
         path: 'scenes[1].type',
         message:
           'Scene type "proof-bars" is in the scene library, but motion has no template for it yet, so it cannot be rendered.',
-        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card. Or keep it and render once the proof-bars template is built.',
+        fix: 'Change scenes[1].type to a type motion renders: word-slam, site-hero, feature-card, end-card, site-scroll. Or keep it and render once the proof-bars template is built.',
       },
     ]);
   });

@@ -3,6 +3,7 @@ import type { AnySceneDefinition } from './definition.ts';
 import { endCard } from './end-card.tsx';
 import { featureCard } from './feature-card.tsx';
 import { siteHero } from './site-hero.tsx';
+import { siteScroll } from './site-scroll.tsx';
 import { wordSlam } from './word-slam.tsx';
 
 /**
@@ -16,6 +17,7 @@ export const sceneImplementations: Readonly<Record<string, AnySceneDefinition>> 
   'site-hero': siteHero,
   'feature-card': featureCard,
   'end-card': endCard,
+  'site-scroll': siteScroll,
 };
 
 /** The scene types a film can use today, in the order of the scene library. */
