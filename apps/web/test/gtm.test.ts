@@ -1,7 +1,7 @@
 import sample from '@boiler-room/schema/examples/nova.campaign.json';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { accounts, filmRuns, films, gtmOrders } from '../src/db/schema.ts';
+import { accounts, deliverables, filmRuns, films, gtmOrders } from '../src/db/schema.ts';
 import { getFilmDetail, ownFilm, setShowcase } from '../src/server/api/films.ts';
 import { fileLinkValid, signFileLink, tokenMatches } from '../src/server/gtm/auth.ts';
 import { gtmFetch } from '../src/server/gtm/routes.ts';
@@ -44,14 +44,24 @@ async function house(harness: Harness): Promise<string> {
   return id;
 }
 
-function setup(options: { vars?: Record<string, string>; token?: string | null } = {}) {
+function setup(
+  options: {
+    vars?: Record<string, string>;
+    token?: string | null;
+    /** Swaps the films bucket the routes see, to make R2 fail. */
+    films?: (bucket: R2Bucket) => R2Bucket;
+  } = {},
+) {
   const harness = runnerHarness(proxy, { vars: { ...ROOMY, ...options.vars } });
   let houseId: string | null = null;
-  const deps = (): GtmDeps => ({
-    runner: harness.deps(),
-    houseAccountId: houseId,
-    token: options.token === undefined ? TOKEN : (options.token ?? ''),
-  });
+  const deps = (): GtmDeps => {
+    const runner = harness.deps();
+    return {
+      runner: options.films ? { ...runner, films: options.films(runner.films) } : runner,
+      houseAccountId: houseId,
+      token: options.token === undefined ? TOKEN : (options.token ?? ''),
+    };
+  };
   const call = async (
     method: string,
     path: string,
@@ -455,5 +465,61 @@ describe('a delivered sample', () => {
     expect(
       (await call('GET', '/f/00000000000000000000', undefined, { authorization: '' })).status,
     ).toBe(404);
+  });
+
+  it('keeps a removal request when the clean-up after the withdrawal fails', async () => {
+    let failures = 1;
+    const { harness, call, withHouse } = setup({
+      films: (bucket) =>
+        new Proxy(bucket, {
+          get(target, prop, receiver) {
+            if (prop === 'delete' && failures > 0) {
+              return async () => {
+                failures -= 1;
+                throw new Error('R2 is unavailable');
+              };
+            }
+            const member = Reflect.get(target, prop, receiver);
+            return typeof member === 'function' ? member.bind(target) : member;
+          },
+        }),
+    });
+    await withHouse();
+    const { id } = (await body(await call('POST', '/api/gtm/v1/films', order('k-remove-r2')))) as {
+      id: string;
+    };
+    await deliver(harness, id);
+    const { share_id } = (await body(await call('POST', `/api/gtm/v1/films/${id}/share`))) as {
+      share_id: string;
+    };
+    const before = (await body(await call('GET', '/api/gtm/v1/requests'))) as {
+      cursor: string | null;
+    };
+    expect(
+      (await call('POST', `/f/${share_id}/remove`, undefined, { authorization: '' })).status,
+    ).toBe(500);
+    expect(failures).toBe(0);
+    // The film is down and the request is in, though R2 failed after both.
+    expect((await call('GET', `/f/${share_id}`, undefined, { authorization: '' })).status).toBe(
+      410,
+    );
+    const queued = (await body(
+      await call('GET', `/api/gtm/v1/requests${before.cursor ? `?after=${before.cursor}` : ''}`),
+    )) as { data: Record<string, unknown>[] };
+    expect(queued.data).toEqual([
+      expect.objectContaining({ kind: 'removal', channel: 'film_page', share_id }),
+    ]);
+    // The visitor's second click answers 410, records nothing new and finishes the clean-up.
+    expect(
+      (await call('POST', `/f/${share_id}/remove`, undefined, { authorization: '' })).status,
+    ).toBe(410);
+    const again = (await body(
+      await call('GET', `/api/gtm/v1/requests${before.cursor ? `?after=${before.cursor}` : ''}`),
+    )) as { data: unknown[] };
+    expect(again.data).toHaveLength(1);
+    const cuts = await harness.db.query.deliverables.findMany({
+      where: eq(deliverables.filmId, id),
+    });
+    expect(cuts.every((cut) => cut.r2Key === null)).toBe(true);
   });
 });

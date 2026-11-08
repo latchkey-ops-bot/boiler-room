@@ -473,14 +473,21 @@ export async function withdrawSample(
 }
 
 async function takeDown(deps: GtmDeps, film: Film, order: GtmOrder, reason: string) {
-  const { runner } = deps;
-  const now = runner.now().getTime();
   if (!order.withdrawnAt) {
-    await runner.db
+    await deps.runner.db
       .update(gtmOrders)
-      .set({ withdrawnAt: now, withdrawReason: reason.slice(0, 32) })
+      .set({ withdrawnAt: deps.runner.now().getTime(), withdrawReason: reason.slice(0, 32) })
       .where(and(eq(gtmOrders.filmId, film.id), sql`${gtmOrders.withdrawnAt} is null`));
   }
+  await cleanUp(deps, film);
+}
+
+/**
+ * What follows a withdrawal: the run stops if it is still at work, and every file of the film is
+ * deleted from R2. Safe to run again, so a call that failed part way is finished by the next.
+ */
+async function cleanUp(deps: GtmDeps, film: Film) {
+  const { runner } = deps;
   const run = film.pipelineRunId ? await getRun(runner.db, film.pipelineRunId) : null;
   if (run && !isTerminal(run.state)) await stopRun(runner, run, 'withdrawn');
   const keys = new Set<string>();
@@ -548,7 +555,12 @@ function safeJson(text: string): unknown {
 /**
  * "Remove this film" on the film page. Anyone may ask, with no sign-in: the film comes down at
  * once, and the request is queued for the executor, which suppresses the domain on every channel
- * and deletes any post of ours. A second request for a film already down records nothing new.
+ * and deletes any post of ours.
+ *
+ * The withdrawal and the request are one D1 batch, which is one transaction, and they go in before
+ * anything that can fail part way (the run, R2). So a film page that is down always has its
+ * request: a failure after the batch answers an error, and the visitor's next click finds the film
+ * down, answers 410 and finishes the clean-up. One request per film page, however many clicks.
  */
 export async function removeByPage(
   deps: GtmDeps,
@@ -556,16 +568,23 @@ export async function removeByPage(
 ): Promise<'removed' | 'already' | 'missing'> {
   const shared = await sharedSample(deps.runner.db, shareId);
   if (!shared) return 'missing';
-  if (shared.withdrawn) return 'already';
-  await takeDown(deps, shared.film, shared.order, 'removal');
-  await deps.runner.db.insert(gtmRequests).values({
-    kind: 'removal',
-    channel: 'film_page',
-    shareId,
-    domain: shared.host,
-    at: deps.runner.now().getTime(),
-  });
-  return 'removed';
+  const { runner } = deps;
+  const at = runner.now().getTime();
+  const [withdrawn] = await runner.db.$client.batch([
+    d1(
+      runner.db,
+      sql`update gtm_orders set withdrawn_at = ${at}, withdraw_reason = 'removal'
+        where film_id = ${shared.film.id} and withdrawn_at is null`,
+    ),
+    d1(
+      runner.db,
+      sql`insert into gtm_requests (kind, channel, share_id, domain, at)
+        select 'removal', 'film_page', ${shareId}, ${shared.host}, ${at}
+        where not exists (select 1 from gtm_requests where share_id = ${shareId})`,
+    ),
+  ]);
+  await cleanUp(deps, shared.film);
+  return (withdrawn?.meta.changes ?? 0) === 1 ? 'removed' : 'already';
 }
 
 /** `GET /api/gtm/v1/requests?after=`: removals and opt-outs since the cursor, oldest first. */
