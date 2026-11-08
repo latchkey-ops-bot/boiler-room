@@ -32,8 +32,8 @@ const say = (message: Record<string, unknown>) => console.log(JSON.stringify(mes
 
 // A heartbeat from the first moment, through loading the renderer, the browser and the first
 // frames, before progress is reported. On a fresh fork of the base snapshot that took about 45 s
-// with nothing printed, and Naive then ended the stream with exit code -1 even when the chunk was
-// done, so the renderer is imported only once the heartbeat runs.
+// with nothing printed, and those streams ended with exit code -1 even when the chunk was done,
+// so the renderer is imported only once the heartbeat runs and no stream is quiet that long.
 const heartbeat = setInterval(() => say({ type: 'alive' }), 5000);
 say({ type: 'alive' });
 let started = performance.now();

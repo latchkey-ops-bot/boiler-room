@@ -43,8 +43,8 @@ export interface CommandResult {
    * False when the command's status is not known. Naive ends some streams without an exit frame,
    * and ends others with an exit frame whose `exit_code` is -1 or null. A process exits with 0 to
    * 255, so neither is how the command ended: on 8 November renders that had printed `done` and
-   * renders that had thrown both ended with -1, each after its stream had been quiet for about
-   * 45 s before the first frame.
+   * renders that had thrown both ended with -1. Each of them had also been quiet for about 45 s
+   * before its first frame; whether that is the cause is not known.
    */
   exited: boolean;
   timedOut: boolean;

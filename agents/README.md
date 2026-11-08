@@ -944,9 +944,11 @@ attaches to its error.
 whose `exit_code` is -1 or null, which no process exits with. `runCommand` reports that as an
 unknown status, as it does a stream with no exit frame, so a chunk whose worker printed `done` is
 fetched and checked against the size and SHA-256 measured on the computer, rather than rendered
-again. On 8 November four posthog.com chunks over two films were lost on both tries this way.
-Each had been silent for about 45 s before its first frame, on a fresh fork of the base snapshot,
-so the worker now prints its heartbeat before it loads the renderer and the browser.
+again. That fetch is the fix. On 8 November four posthog.com chunks over two films were lost on
+both tries this way. Each had printed nothing for about 45 s before its first frame, on a fresh
+fork of the base snapshot, while the chunks that ended 0 had started at once; whether the silence
+is the cause is not known. The worker now prints its heartbeat before it loads the renderer and
+the browser, so no stream is ever quiet that long.
 
 **Route-back.** A failed review's issues are sorted by `routable()` (no minor issue and no
 expected placeholder failure ever sends a film back). The Director's go back to the Director,
@@ -1037,6 +1039,22 @@ session the crew started, and marks the film.
 $1.52 in all of the $4.50 cap, 1 route-back, exit 3: a film, without a Quality Check pass. No
 session was left running or parked, and no computer was left. The Researcher's computer time
 books late, so its line shows the session alone.
+
+### Measured: posthog.com after the render fixes
+
+`pnpm film https://posthog.com --length standard --format 16:9`, two runs on 8 November:
+
+| Run         | Director                                                                    | Render                                                                                                                                                                                                                                                                                                                      | Quality Check                            | Spent |
+| ----------- | --------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- | ----- |
+| 085811-4554 | 1 submission, then a revision                                               | Round 1 refused at $0 in 6 s, before any computer: motion's copy gate measured "Product and company data" (24 characters, inside `CARD_FIT`) too wide in Inter, and it went back to the Director. Round 2: chunks 2 and 4 printed `done`, then an exit code of -1, and were failed on both tries (fixed in the next commit) | not run                                  | $1.48 |
+| 091528-02a8 | 2 submissions: `CARD_FIT`, `WORDS` and `CARD_TIME` repaired in its own loop | Passed the copy gate. Chunks 2 and 3 ended with an unknown exit status after `done` and were fetched, not rendered again: 4 computers, $0.18                                                                                                                                                                                | fail, 6 major issues, 3 of them motion's | $1.41 |
+
+Quality Check's issues on the film: a typeset wordmark in place of the hedgehog logo, and a
+`#F7F7F7` background the Researcher did not measure (it measured `#D3DAC6`), both from the brand
+inputs; the feature-card headline over 65% of the width and under its cap height, and its node
+card over the headline on a T1 seam (motion, which #20 works on); two ground patches at the
+tile-wall and the colour-event; and a decode frame of the end-card URL. The Art Director's day cap
+was spent, so its picks were the code's own.
 
 ## FilmOrder
 
