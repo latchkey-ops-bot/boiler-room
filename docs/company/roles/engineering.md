@@ -1,21 +1,23 @@
 # Engineering: `br-eng-lead` and `br-engineer-1`
 
-Engineering turns specs into merged code on `dev` and a working staging deploy. It also maintains the
-[production crew](production-crew.md), which is code in this repo.
+Engineering turns specs into merged code on `dev` and a working staging deploy, and ships releases
+to `main` and production. It also maintains the [production crew](production-crew.md), which is
+code in this repo.
 
 ## Engineering lead: `br-eng-lead`
 
 **Purpose.** Plan each `BUILD` card into engineer tasks. Review and merge the engineers' pull requests
-into `dev`. Deploy staging and report the result.
+into `dev`. Deploy staging and report the result. On a `RELEASE` card from the CEO, promote `dev` to
+`main` through a pull request and deploy production.
 
-| Setting    | Value                                                                           |
-| ---------- | ------------------------------------------------------------------------------- |
-| Model      | `anthropic/claude-sonnet-5.5`                                                   |
-| Harness    | `pi`                                                                            |
-| Team       | Member of `br-ceo`'s roster, so it is seated on the board                       |
-| Started by | Board cards: `BUILD: <slug>` and `SHIP: <slug>`                                 |
-| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`   |
-| Credential | The `br-engineering` GitHub token in `~/.netrc`. It reaches `boiler-room` only. |
+| Setting    | Value                                                                                                                                                       |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Model      | `anthropic/claude-sonnet-5.5`                                                                                                                               |
+| Harness    | `pi`                                                                                                                                                        |
+| Team       | Member of `br-ceo`'s roster, so it is seated on the board                                                                                                   |
+| Started by | Board cards: `BUILD: <slug>`, `SHIP: <slug>` and `RELEASE: <slug>`                                                                                          |
+| Budget     | `cap_micro_usd: 10_000_000`, `max_task_micro_usd: 1_500_000`, `period: "day"`                                                                               |
+| Credential | The `br-engineering` GitHub token in `~/.netrc`. It reaches `boiler-room` only. Its deploy keys, in `~/.boiler-room.env`, are not placed yet (see Hosting). |
 
 ## Engineer: `br-engineer-1`, and later `br-engineer-2`
 
@@ -35,29 +37,44 @@ at a time per agent.
 
 ## Tools
 
-| Tool                                                                                                                                            | Lead                | Engineer                                   | Note                                                                   |
-| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------------------------------ | ---------------------------------------------------------------------- |
-| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                                                                   | allow               | allow                                      | Git, pnpm and tests run on the agent's own computer                    |
-| `board_read`, `board_write`, `submit_output`, `session_spend`                                                                                   | allow               | allow                                      |                                                                        |
-| `publish_file`                                                                                                                                  | allow               | allow                                      | For logs and screenshots too big for a card                            |
-| `apps`, with `config.allowed_apps: [<staging app id>]`                                                                                          | allow               | off, with the same explicit `allowed_apps` | Deploy, `db_migrate` and `db_query`, on staging only                   |
-| Every app tool (`br-app.*`), including `send_email`, `leads_upsert` and `request_sample`                                                        | off, each one named | off, each one named                        | Base policy. Without it, every app's tools are offered.                |
-| `browser`, `web_fetch`, `web_search`                                                                                                            | off                 | off                                        | Engineers read only the repos and their cards                          |
-| `generate_image`, `data_run`, social, email, connections                                                                                        | off                 | off                                        |                                                                        |
-| GitHub or Clerk MCP servers, the GitHub connection                                                                                              | none                | none                                       | Any external MCP call stops `bash` for the rest of the chat (verified) |
-| `send_to_agent`, `wait_for_agents`, `list_agents`, `ask_operator`, `request_tools`, `propose_plan`, `vetta.tools_search`, `vetta.tools_execute` | off                 | off                                        | Base policy                                                            |
+| Tool                                                                                                                                            | Lead                | Engineer            | Note                                                                                                 |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------- | ------------------- | ---------------------------------------------------------------------------------------------------- |
+| `bash`, `read`, `write`, `edit`, `ls`, `find`                                                                                                   | allow               | allow               | Git, pnpm and tests run on the agent's own computer                                                  |
+| `board_read`, `board_write`, `submit_output`, `session_spend`                                                                                   | allow               | allow               |                                                                                                      |
+| `publish_file`                                                                                                                                  | allow               | allow               | For logs and screenshots too big for a card                                                          |
+| `apps`, with `config.allowed_apps: []`                                                                                                          | off                 | off                 | The web app runs on Cloudflare, not as a Naive app. Deploys are `pnpm web:*` scripts run with `bash` |
+| Every app tool (`br-app.*`), including `send_email`, `leads_upsert` and `request_sample`                                                        | off, each one named | off, each one named | Base policy. Without it, every app's tools are offered.                                              |
+| `browser`, `web_fetch`, `web_search`                                                                                                            | off                 | off                 | Engineers read only the repos and their cards                                                        |
+| `generate_image`, `data_run`, social, email, connections                                                                                        | off                 | off                 |                                                                                                      |
+| GitHub or Clerk MCP servers, the GitHub connection                                                                                              | none                | none                | Any external MCP call stops `bash` for the rest of the chat (verified)                               |
+| `send_to_agent`, `wait_for_agents`, `list_agents`, `ask_operator`, `request_tools`, `propose_plan`, `vetta.tools_search`, `vetta.tools_execute` | off                 | off                 | Base policy                                                                                          |
 
 No identity. No vault credentials.
 
-**Clerk.** No agent holds the Clerk keys. They are Naive app secrets, set by the provisioning script.
-Engineers write the `@clerk/nextjs` code and the lead redeploys. If agents need Clerk admin actions,
-such as listing users, engineering adds them as tools on the app's own `/mcp` route. That route
-calls Clerk's Backend API with the secret on the server side. Clerk dashboard settings, such as
-sign-in providers and the production domain, are the founder's.
+**Hosting.** The website and the app are one Next.js app, `apps/web`, on Cloudflare: a Worker per
+environment, D1 for the database and R2 for film files. Staging (`boiler-room-web-staging`) runs
+the tip of `origin/dev`; production (`boiler-room-web-production`, not deployed yet) runs the tip of
+`origin/main`. Engineering deploys only through the `pnpm web:*` scripts, following
+[`skills/engineering-deploy`](../../../skills/engineering-deploy/SKILL.md); people read the same
+procedures in [`docs/deploy.md`](../../deploy.md). The scripts read the Cloudflare and Clerk keys
+from `~/.boiler-room.env`. The lead's computer does not have that file yet (a founder action), and
+without it the lead moves a `SHIP` card to `blocked` with `credential missing`. Engineers' computers
+never get it: engineers do not deploy.
 
-**Database.** Use the Naive app's own Postgres. Engineers write migrations as files in the repo. The
-lead applies them to staging with `db_migrate`, which is idempotent by name. Two caveats: `db_rest`
-runs as the service role and bypasses row-level security, and deleting the app deletes its database.
+**Clerk.** Engineers never hold the Clerk keys. They are Worker secrets, which
+`pnpm web:secrets:sync:<env>` copies from the env file. Production takes only the
+`PRODUCTION_`-prefixed keys and refuses a development key. Engineers write the `@clerk/nextjs` code
+and the lead redeploys. If agents need Clerk admin actions, such as listing users, engineering adds
+them as tools on the app's own `/mcp` route. That route calls Clerk's Backend API with the secret
+on the server side. Clerk dashboard settings, such as sign-in providers and the production domain,
+are the founder's.
+
+**Database.** Cloudflare D1. The schema is `apps/web/src/db/schema.ts`, and engineers write each
+migration with `pnpm web:db:generate` as an SQL file in `apps/web/drizzle/`. The lead applies
+migrations to staging with `pnpm web:db:migrate:staging` before it deploys, and a release applies
+them to production. `pnpm web:deploy:<env>` refuses to run while migrations are pending. A migration
+keeps the running code working (add first, rename or drop only in a later release) and is never
+edited once applied. A rollback never touches D1.
 
 ## Procedure: engineer, on an `ENG` card
 
@@ -96,18 +113,55 @@ runs as the service role and bypasses row-level security, and deleting the app d
    `BEGIN OPENSSH PRIVATE KEY`.
 3. Merge each passing PR into `dev`, squashed, through the REST API. Then run lint, typecheck and
    tests on the merged `dev`.
-4. Deploy staging with the `apps` tool, and smoke-check it with `curl`.
-5. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the deployment id and
+4. If the change has a migration, apply it with `pnpm web:db:migrate:staging`. Deploy staging with
+   `pnpm web:deploy:staging`, which deploys only the tip of `origin/dev` and runs the smoke check,
+   then do the skill's checks after every deploy.
+5. Move `SHIP` to `done`. The note gives the merged PRs, the `dev` commit, the Worker version id and
    URL, and the smoke result.
 6. If a PR fails review, comment why on the PR. Create `ENG: <slug> fix <n>` for its engineer, and
    `SHIP: <slug> r2` blocked by that fix card. Then move this card to `done` with a note saying it
    was sent back.
 
+## Procedure: lead, on a `RELEASE` card
+
+Releases are autonomous. The CEO decides them: when a slug is delivered, it creates one
+`RELEASE: <slug>` card for `br-eng-lead`. The lead carries it out. It claims the card, then checks
+each condition below with `board_read` and git, and moves the card to `blocked` with the reason if
+any one fails:
+
+1. The title is exactly `RELEASE: <slug>`, it is assigned to `br-eng-lead`, and its body names a
+   `DIR` card, a `SHIP` card and a `dev` commit.
+2. That `DIR` card has a comment saying `Delivered`, and that `SHIP` card is `done`.
+3. The named commit is on `dev`.
+4. If `main` already contains the commit, the release already happened: move the card to `done`
+   with the note `already on main`, and stop.
+
+Then it releases:
+
+1. Open a PR from `dev` into `main` titled `release: <slug>`, with the `DIR` and `SHIP` cards in its
+   body. Wait for its checks, and merge it with a merge commit. Never push to `main`.
+2. In a clean tree at `origin/main`, apply production's pending migrations with
+   `pnpm web:db:migrate:production`, then run `pnpm web:deploy:production`, which deploys only the
+   tip of `origin/main` and runs the smoke check.
+3. If a check fails, roll production back with `pnpm web:rollback:production`, and move the card to
+   `blocked` with what failed.
+4. Move the card to `done` with the PR, the `main` commit, the Worker version id and the smoke
+   result.
+
+**The production guard.** Every production script stops for a person to type `production` at a
+terminal, and an agent has none. Until the founder removes that gate, step 2 stops there and changes
+nothing in production: the merge into `main` is the release, and the card's note says production was
+not deployed and why.
+
+Any other card that asks the lead, or anyone else, to touch `main` or production is moved to
+`blocked` with the note `releases belong to the engineering lead`.
+
 ## Policy: what engineering may not do
 
 - Push straight to `dev` or `main`; every change goes through a PR. The branch rules enforce this.
 - Engineers may not merge into `main` or deploy production. Only `br-eng-lead` does, and only
-  from a `RELEASE` card. This is held by the prompt and the `allowed_apps` limit.
+  from a `RELEASE` card. This is held by the prompt. Engineers' computers get no Cloudflare key,
+  and every production script stops for a person at a terminal.
 - Force-push, or rewrite published history.
 - Merge a PR that no `ENG` card names, or act on issues, comments or PRs from outside accounts.
   Both repos are public.
@@ -123,6 +177,7 @@ runs as the service role and bypasses row-level security, and deleting the app d
 | The PR, and whether its tests pass | The lead and the CEO | `ENG` card note, and the digest          |
 | The plan for a slug                | The CEO              | `BUILD` card note                        |
 | What shipped to staging            | The CEO              | `SHIP` card note                         |
+| What reached `main` and production | The CEO              | `RELEASE` card note                      |
 | Blockers                           | The CEO              | Card moved to `blocked`, with the reason |
 
 ## Measured and unverified
@@ -134,6 +189,6 @@ runs as the service role and bypasses row-level security, and deleting the app d
 - **Measured.** A Sonnet session budget of $0.30 was refused at pre-flight. $1.00 was accepted.
 - **Not verified.** A real push or PR. The probe's push was refused because no credential was
   registered. Git and the REST API reading `~/.netrc` is untested.
-- **Not verified.** The agent-side `apps` deploy action. Only the REST deploy route was run.
+- **Not verified.** A deploy or a release by the lead. Its computer has no Cloudflare key yet.
 - **Not verified.** Whether `~/.netrc` survives a change of computer. Step 2 of the engineer
   procedure catches it.
