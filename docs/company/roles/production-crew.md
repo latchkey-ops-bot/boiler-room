@@ -52,8 +52,13 @@ were not benchmarked on real briefs.
 - **Account Manager.** The app's `send_email` tool, under the same allowlist and quota rules as GTM.
   It sees only the inbox reader's fixed fields, never raw email.
 
-Every crew agent uses the [base policy](../README.md#3-roles) except the board tools, which it does
-not have. That includes an explicit `allowed_apps`, and every `br-app.*` tool named off, except
+Every crew agent uses the [base policy](../README.md#3-roles) except the board tools, which it names
+off. `br-ceo` is the organization's CEO, so its board is the company board, which seats every agent
+of the organization, and a seated agent is offered both board tools even under a deny default
+(verified). Named off, a crew agent can neither read nor write company cards. The live
+`br-director`, `br-art-director` and `br-quality-check`, synced from their own branches, did not
+name them yet on 2026-11-07. The base policy also means an explicit `allowed_apps`, and every
+`br-app.*` tool named off, except
 `br-app.send_email` for the Account Manager. Budgets are set per film by the pipeline, through each
 session's `budget_micro_usd`.
 

@@ -33,7 +33,8 @@ has a link.
 
 | Tool | GTM lead | Scout | Social | Inbox reader |
 | --- | --- | --- | --- | --- |
-| `board_read`, `board_write` | allow | allow | allow | not seated |
+| `board_read` | allow | allow | allow | off |
+| `board_write` | off while GTM is inactive | same | same | off |
 | `submit_output`, `session_spend` | allow | allow | allow | allow |
 | `br-app.send_email` (the app's own MCP tool) | allow | off | off | off |
 | `br-app.inbox_summaries`, `br-app.leads` (read) | allow | allow | off | off |
@@ -99,7 +100,9 @@ The founder decides when the product is nailed down. Then:
 2. Point the AgentMail webhook at the app's route. Ship the app's `send_email` allowlist and quota,
    and the reader's start-up code. Create the `br-gtm-inbox` deployment.
 3. Raise the four budgets to the "when active" column.
-4. Add the GTM agents to `br-ceo`'s system prompt as agents it may assign.
+4. Add the GTM agents to `br-ceo`'s system prompt as agents it may assign, and turn `board_write`
+   back on for the GTM lead, the scout and social. While GTM is inactive each names it off: the
+   company board seats every agent of the organization, so an unnamed board tool would be offered.
 5. Update the system map in `boiler-room-design`. It lists the Account Manager as the owner of
    outreach and replies. This spec gives outreach and replies to GTM, and gives delivering and
    revising customer films to the Account Manager.

@@ -46,7 +46,7 @@ flowchart TD
   lead -.->|task cards| e1
   lead -.->|task cards| e2
 
-  subgraph crew["Production crew: the product's own runtime, not on the board"]
+  subgraph crew["Production crew: the product's own runtime, with no board tools"]
     researcher["Researcher"] --> director["Director"]
     director --> artdir["Art Director"]
     artdir --> qc["Quality Check"]
@@ -97,6 +97,43 @@ still sees everything.
 The whole flat-roster probe was 9 sessions for $0.013, on `anthropic/claude-haiku-5.5`. No computer
 was provisioned, because the agents had no sandbox tools.
 
+**`br-ceo` is also the organization's CEO.** Naive gives every organization one CEO
+(`ceo_agent_id`), and its dashboard is built around it: the Board page shows the CEO's board, and
+the rail's CEO row and the `/orchestrator` chat talk to the CEO agent. Without one, the dashboard
+shows a placeholder CEO ("No board yet. The CEO keeps it."). `br-ceo` replaces it. Naive's default
+CEO is never created.
+
+- **The binding.** `company:sync` writes one `static_bearer` credential in the vault named exactly
+  `Orchestrator control plane`: key `ceo_<br-ceo's agt_ id>`, `mcp_server_url`
+  `https://api.vetta.sh/v1/mcp`, `agent_id` set to `br-ceo`. That sets `ceo_agent_id` at once
+  (verified). The platform never injects a credential for its own `/v1/mcp`; the CEO gets a
+  short-lived credential each turn (docs), so the stored value is random bytes that authenticate
+  nothing. Writing it needs an `admin` key, and once bound, so does every change to `br-ceo`.
+  Deleting the credential and the vault leaves `ceo_agent_id` set (verified on a probe); deleting
+  the agent clears it (docs). The dashboard picks its CEO agent by `metadata.role:
+  "orchestrator"` (read from the dashboard's code, not documented), so `br-ceo` carries that too.
+- **The lockdown.** The organization's CEO is offered the control plane: Naive's whole API as MCP
+  tools, 368 of them on 2026-11-07, such as `agents_create`, `vaults_create` and budget changes. An
+  MCP tool that a toolset does not name is offered at "ask" even under a deny default (verified).
+  So `br-ceo` names every one of them off, and `company:sync` stops before changing anything if the
+  catalogue lists a tool that `br-ceo` does not name. `br-ceo` needs none of them: its board tools
+  are built in. A bound `br-ceo` session was offered `board_read`, `board_write`, `read_skill`,
+  `session_spend` and `submit_output`, and nothing else (verified).
+- **The company board.** The CEO's board is the company board, which seats every agent of the
+  organization, on the roster or not (docs). A seated agent is offered `board_read` and
+  `board_write` even under a deny default, and naming a tool off removes it (both verified). So
+  the GTM agents name `board_write` off while GTM is inactive, the inbox reader names both off, and
+  every production-crew agent names both off. Only `br-ceo` and the builders write cards.
+
+**The founder's line is the CEO chat.** The founder talks to `br-ceo` in the dashboard's CEO chat
+(`/orchestrator`). Each chat is an ordinary `br-ceo` session: its system prompt, the `ceo` skill,
+the lockdown above, and a cap of the agent's `max_task_micro_usd`, $1.00 per chat, which is what a
+session gets when no budget is given (docs; a session with no budget showed $1.00). The $5 daily cap
+bounds every chat together. A channel is not the line: a session marked `metadata.room` with an
+agent's id is a channel's transcript, and a message there runs no turn (docs). The dashboard uses
+channels for groups, which hand each message to their members, and its CEO chat lists only sessions
+without `metadata.room`.
+
 **The shape we rejected: a coordinator per department, and a CEO over them through Naive's MCP
 server.** It also works: the CEO read and created cards on both department boards. But:
 
@@ -142,11 +179,12 @@ Every company agent starts from the same base policy, and each role adds only wh
 | --- | --- | --- |
 | Harness | `pi` | The only runnable harness that supports structured output. `claude_code` is not runnable. |
 | Default permission | `deny` | Nothing is offered unless named |
-| `board_read`, `board_write` | allow | All work moves by card |
+| `board_read`, `board_write` | allow, except: GTM agents name `board_write` off while inactive, the inbox reader and the production crew name both off | All work moves by card, and the company board seats every agent, so a tool that must not be offered is named off |
 | `submit_output`, `session_spend` | allow | |
 | `send_to_agent`, `wait_for_agents`, `list_agents` | off | Members cannot wait on teammates, and the CEO must not park on one |
 | `ask_operator`, `request_tools`, `propose_plan` | off | An unattended agent must not stop on a question. It moves its card to `blocked` instead. |
 | `vetta.tools_search`, `vetta.tools_execute` | off | They are offered even under `deny` unless named off (verified) |
+| Every control-plane tool, `vetta.<tool>` (368) | off on `br-ceo`, each one named | The organization's CEO is offered the control plane, and an unnamed MCP tool is offered at "ask" |
 | `apps`, and every app's own tools (`br-app.*`) | `apps` off unless the role turns it on. Every agent gets an explicit `allowed_apps`. Every app tool in the org is named on every agent: allow where the role lists it, off everywhere else. | Without `allowed_apps`, an agent is offered the tools of every app in the org (docs), even with `apps` off |
 | `handoffs` | `false` | Reports travel by card digest, not by handoff |
 | Identity, vault credentials, MCP servers | none | Added per role, only where stated |
@@ -351,6 +389,17 @@ the engineering lead promotes `dev` to `main` and deploys production. No person 
 
 **Verified by running, on 2026-11-07:**
 
+- Binding `br-ceo` as the organization's CEO sets `ceo_agent_id` (vault
+  `vlt_ngr73z1y572atmkh0q5fqx292n`, credential `vcr_7yf3bbqx521ccznvaex3b39pxc`). A bound `br-ceo`
+  session with every control-plane tool named off was offered only its board, skill and spend tools
+  and `submit_output` (`ses_x7y22spbvs01x7eqc33zt87j5j`).
+- A message in a plain `br-ceo` session, "What is on the board right now?", was answered from the
+  board after the CEO read its skill, created nothing, and ran under the $1.00 per-task cap
+  (`ses_99909082cnw6e6m5w776wy8sqf`, $0.022).
+- The company board seats an agent that is on no roster. With a deny default and neither board
+  tool named, it was offered both (`ses_d2v84q1we31pz7488jdx98vw5x`); with `board_write` named off,
+  only `board_read` (`ses_7vthpj0bhp09z7pdng43yf8ans`).
+
 - Teams are one level deep, and members cannot wait on teammates.
 - A member creates and assigns cards. Assignment starts the assignee within about 4 s.
   `blocked_by` holds work and releases it in under 1 s. Done cards reach the board owner as
@@ -371,6 +420,11 @@ the engineering lead promotes `dev` to `main` and deploys production. No person 
   priced per call.
 
 **Not verified:**
+
+- The dashboard's own CEO chat. The founder's-line check was a session started through the API,
+  not a message typed at `/orchestrator`.
+- Whether the platform attaches the control plane to a CEO that declares no `vetta` MCP server.
+  The bound session was offered none of it; the named-off list covers it either way.
 
 - A **coordinator** CEO on a cron, and its `Recurring:` standing card.
 - A digest of a card that a member moves to `blocked`, or that the board parks. Phase 1 probes the
