@@ -36,7 +36,7 @@ if (!only('--ceo') && !only('--lockdown')) {
       `cloudflare ${deploy.verdict.ok ? 'PASS' : 'FAIL'}: token active ${deploy.token_active}${deploy.computers
         .map(
           (item) =>
-            `\n  ${item.agent} (${item.wanted ? 'must have' : 'must not have'} ~/.boiler-room.env) ${item.computer ?? 'no computer'}: ${item.stat}${item.names ? `, keys ${item.names}` : ''}`,
+            `\n  ${item.agent} (${item.wanted ? 'must have' : 'must not have'} ~/.boiler-room.env) ${item.computer ?? 'no computer'}: ${item.stat}${item.stat !== 'absent' && item.names ? `, keys ${item.names}` : ''}`,
         )
         .join('')}${deploy.verdict.failures.map((failure) => `\n  - ${failure}`).join('')}`,
     ),
